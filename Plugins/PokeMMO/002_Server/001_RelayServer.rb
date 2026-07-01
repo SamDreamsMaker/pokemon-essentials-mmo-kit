@@ -74,16 +74,18 @@ module PokeMMO
     def pump
       register_pending
       @clients.to_a.each do |id, sock|
-        begin
-          loop { @buffers[id] << sock.read_nonblock(4096) }
-        rescue IO::WaitReadable
-          # nothing more from this client this tick
-        rescue EOFError, Errno::ECONNRESET, Errno::EPIPE, IOError, SystemCallError
-          drop(id); next
-        rescue => e
-          drop(id); next
+        dropped = false
+        loop do
+          # exception: false -> returns :wait_readable (no data) or nil (EOF)
+          # instead of raising, which kept spamming the console every frame.
+          data = (sock.read_nonblock(4096, exception: false) rescue nil)
+          break if data == :wait_readable
+          if data.nil?              # EOF or socket error
+            drop(id); dropped = true; break
+          end
+          @buffers[id] << data
         end
-        relay_frames(id)
+        relay_frames(id) unless dropped
       end
     end
 
@@ -113,7 +115,9 @@ module PokeMMO
     private
 
     def register_pending
-      loop do
+      # Guard with empty? so pop(true) never raises ThreadError on an empty queue
+      # (which was being logged every frame).
+      until @pending.empty?
         sock = (@pending.pop(true) rescue nil)
         break unless sock
         id = (@next_id += 1)

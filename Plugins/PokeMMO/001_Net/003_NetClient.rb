@@ -64,16 +64,17 @@ module PokeMMO
     def poll
       return [] unless @connected && @socket
       msgs = []
-      begin
-        loop { @buffer << @socket.read_nonblock(4096) }
-      rescue IO::WaitReadable
-        # no more data available this tick
-      rescue EOFError, Errno::ECONNRESET, Errno::EPIPE, IOError, SystemCallError => e
-        @connected = false
-        msgs << { :type => DISCONNECTED }
-      rescue => e
-        @connected = false
-        msgs << { :type => DISCONNECTED }
+      loop do
+        # exception: false -> :wait_readable (no data) or nil (EOF), no raise
+        # (raising WaitReadable every frame was spamming the console).
+        data = (@socket.read_nonblock(4096, exception: false) rescue nil)
+        break if data == :wait_readable
+        if data.nil?               # EOF or socket error
+          @connected = false
+          msgs << { :type => DISCONNECTED }
+          break
+        end
+        @buffer << data
       end
       extract_frames(msgs)
       msgs
