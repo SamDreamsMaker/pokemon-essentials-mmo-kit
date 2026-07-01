@@ -50,6 +50,28 @@ port = 9998
 Without this file, `ROLE = :auto` is used (host-or-join on `127.0.0.1`), which is
 perfect for the two-windows-on-one-PC test.
 
+### Sharing a build with a friend (LAN)
+
+1. Make sure the plugin is compiled: launch once via **`PlayMMO-debug.bat`**
+   (that rebuilds `Data/PluginScripts.rxdata` from source).
+2. Build a clean, shareable zip:
+   ```
+   powershell -ExecutionPolicy Bypass -File tools\package-mmo.ps1
+   ```
+   → produces `PokeMMO-Build-<timestamp>.zip` on your Desktop (no `.git`/docs/dev
+   cruft; a `mmo_config.txt` template is included). Send it to your friend.
+3. **You (host):** in your own game folder, set `mmo_config.txt` to `role=host`
+   + `bind=0.0.0.0`, run `ipconfig` to get your IPv4 LAN address, and allow the
+   Windows Firewall prompt on first launch.
+4. **Friend:** unzip, set `mmo_config.txt` to `role=client` + `host=<your LAN IP>`,
+   double-click `Game.exe`.
+5. Both start/continue a game onto the same map → you see each other move.
+
+> Internet (not just LAN) play additionally needs the host to port-forward the
+> TCP port (default 9998) and share their public IP — same `role=client` setup.
+> Note the game bundles Nintendo-derived assets, so keep builds to private tests,
+> not public distribution.
+
 ## Architecture
 
 ```
