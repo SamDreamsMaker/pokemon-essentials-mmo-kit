@@ -36,9 +36,30 @@ module PokeMMO
         return unless acct
         ok = ServerStore.save_state(acct, msg[:state])
         PokeMMO.log("server: save account=#{acct} -> #{ok}")
+      when :mutate
+        # Economy sync + hard cap. (True anti-cheat needs server-side game logic,
+        # a later phase; for now the server enforces the range and can reject.)
+        field = msg[:field]
+        val   = msg[:value]
+        max   = field_max(field)
+        return unless max && val.is_a?(Integer)
+        canon = val.clamp(0, max)
+        acct  = @conn_account[conn_id]
+        server.send_to(conn_id, { :type => :mutate_ack, :field => field, :value => canon })
+        PokeMMO.log("server: mutate account=#{acct} #{field}=#{val}->#{canon}")
       end
     rescue => e
       PokeMMO.log("ServerLogic error (#{msg && msg[:type]}): #{e.class}: #{e.message}")
+    end
+
+    # Hard cap per economy field (reads the game's own Settings on the host).
+    def self.field_max(field)
+      case field
+      when :money         then (Settings::MAX_MONEY         rescue 999_999)
+      when :coins         then (Settings::MAX_COINS         rescue 99_999)
+      when :battle_points then (Settings::MAX_BATTLE_POINTS rescue 9_999)
+      when :soot          then (Settings::MAX_SOOT          rescue 9_999)
+      end
     end
 
     def self.forget(conn_id)

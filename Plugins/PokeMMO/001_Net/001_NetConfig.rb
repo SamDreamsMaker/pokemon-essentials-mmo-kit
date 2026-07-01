@@ -43,8 +43,9 @@ module PokeMMO
     CONFIG_FILE = "mmo_config.txt"
 
     # Phase 2 — authoritative account messages the SERVER handles itself (login,
-    # save) instead of relaying. Everything else (presence) is broadcast as-is.
-    ACCOUNT_TYPES = [:login, :save].freeze
+    # save, economy mutations) instead of relaying. Everything else (presence)
+    # is broadcast as-is.
+    ACCOUNT_TYPES = [:login, :save, :mutate].freeze
 
     # Seconds to wait for the server's login response before proceeding offline.
     LOGIN_TIMEOUT = 15.0
