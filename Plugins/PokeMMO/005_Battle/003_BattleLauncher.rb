@@ -1,5 +1,5 @@
 #===============================================================================
-# PokeMMO :: BattleLauncher  (Phase 4b.2 — start the battle)
+# PokeMMO :: BattleLauncher  (Phase 4b.2 / 4c.3 — start the battle)
 #-------------------------------------------------------------------------------
 # Launches a battle from an accepted challenge, faithfully replicating the engine
 # path (TrainerBattle.start_core) but WITHOUT touching the core scripts and
@@ -10,9 +10,10 @@
 #     all the post-battle cleanup (BGM/BGS restore, in_battle reset, fade back)
 #     for free — so after_battle (which only heals the real party) is not needed.
 #
-# 4b.2 stand-in: the opponent's team is AI-controlled and each client runs its
-# own battle. Making it one shared, host-authoritative battle (real remote
-# choices, deterministic replay) is Phases 4c/4d.
+# 4c.3: role decides the battle CLASS — HostBattle (authoritative, will record)
+# vs ClientBattle (will replay the host's stream). Both are still plain Battle
+# subclasses here (opponent AI, each client runs its own battle); real remote
+# choices are 4c.4 and deterministic streaming is 4c.5.
 #===============================================================================
 module PokeMMO
   module BattleLauncher
@@ -22,8 +23,21 @@ module PokeMMO
       Marshal.load(Marshal.dump(obj))
     end
 
-    # remote = { :name => String, :party => [Pokemon, ...] }
+    # PvP entry: the relay owner is the HOST, the other the CLIENT.
+    def start_pvp(remote)
+      host  = PokeMMO::BattleNet.host?
+      klass = host ? PokeMMO::HostBattle : PokeMMO::ClientBattle
+      PokeMMO.log("battle: PvP start as #{host ? 'HOST' : 'CLIENT'}")
+      run_battle(remote, klass)
+    end
+
+    # Single-player fallback (4b.2): fight an AI stand-in of the opponent's team.
     def start_vs_ai(remote)
+      run_battle(remote, Battle)
+    end
+
+    # remote = { :name => String, :party => [Pokemon, ...] }
+    def run_battle(remote, klass = Battle)
       return false unless $player && remote.is_a?(Hash) && remote[:party].is_a?(Array)
       if $player.able_pokemon_count == 0
         pbMessage(_INTL("You have no Pokémon able to battle!"))
@@ -38,7 +52,7 @@ module PokeMMO
       my_party = $player.party.map { |pk| deep_copy(pk) }    # battle on copies, real party untouched
 
       scene  = BattleCreationHelperMethods.create_battle_scene
-      battle = Battle.new(scene, my_party, foe_party, [$player], [foe])
+      battle = klass.new(scene, my_party, foe_party, [$player], [foe])
       battle.party1starts   = [0]
       battle.party2starts   = [0]
       battle.ally_items     = []
@@ -56,7 +70,8 @@ module PokeMMO
       BattleCreationHelperMethods.prepare_battle(battle)
       $game_temp.clear_battle_rules
 
-      PokeMMO.log("battle: starting vs #{foe_name} (#{foe_party.length} Pokemon)")
+      cls = klass.name.to_s.split("::").last
+      PokeMMO.log("battle: starting vs #{foe_name} (#{foe_party.length} Pokemon, #{cls})")
       outcome = 0
       bgm = (pbGetTrainerBattleBGM([foe]) rescue nil)
       pbBattleAnimation(bgm, 1, [foe]) do
@@ -67,7 +82,7 @@ module PokeMMO
       PokeMMO.log("battle: ended (outcome=#{outcome})")
       outcome
     rescue => e
-      PokeMMO.log("battle: start_vs_ai error: #{e.class}: #{e.message}")
+      PokeMMO.log("battle: run_battle error: #{e.class}: #{e.message}")
       (e.backtrace || []).first(8).each { |l| PokeMMO.log("battle:   #{l}") }
       false
     end

@@ -60,7 +60,7 @@ module PokeMMO
       @pending_launch = nil
       @launching = true
       begin
-        BattleLauncher.start_vs_ai(remote)
+        BattleLauncher.start_pvp(remote)
       ensure
         @launching = false
       end
