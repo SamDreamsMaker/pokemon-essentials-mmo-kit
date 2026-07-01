@@ -24,6 +24,14 @@ module PokeMMO
       self.move_speed = 4
     end
 
+    # Core sprite code (Sprite_Character#initialize) calls #name on the character
+    # to detect "reflection" events; Game_Character has no #name, which raised a
+    # (rescued but debug-logged) NoMethodError. Expose our display name instead —
+    # a normal name never matches /reflection/i, so behaviour is unchanged.
+    def name
+      @player_name.to_s
+    end
+
     # Hard place / teleport: snaps to the tile with no interpolation.
     def spawn_at(x, y, dir, charset, hue = 0)
       self.character_name = charset.to_s if charset && !charset.to_s.empty?
