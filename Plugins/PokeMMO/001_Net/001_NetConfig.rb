@@ -32,6 +32,16 @@ module PokeMMO
     # who join later still see everyone. ~30 frames ≈ 0.5 s.
     HEARTBEAT_FRAMES = 30
 
+    # Drop a remote player we haven't heard from for this many seconds (covers
+    # disconnects/crashes without needing the dumb relay to send leave events).
+    # Must be comfortably larger than the heartbeat interval.
+    PRESENCE_TIMEOUT = 3.0
+
+    # Any of the above (ROLE/HOST/PORT/BIND_HOST) can be overridden at runtime by
+    # a plain-text "mmo_config.txt" in the game folder — see the plugin README.
+    # That lets friends set up LAN play without editing Ruby.
+    CONFIG_FILE = "mmo_config.txt"
+
     # Wire framing: a big-endian uint32 length prefix precedes each payload.
     # Must stay in sync with the server. (Validated in Phase 0: sockets + this
     # framing round-trip correctly under mkxp-z / MRI 3.1.3.)

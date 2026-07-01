@@ -54,9 +54,10 @@ module PokeMMO
   end
 
   module Remotes
-    @players  = {}     # pid => RemotePlayer
-    @sprites  = {}     # pid => Sprite_Character (current spriteset)
-    @viewport = nil    # @@viewport1 from the last :on_new_spriteset_map
+    @players   = {}    # pid => RemotePlayer
+    @sprites   = {}    # pid => Sprite_Character (current spriteset)
+    @last_seen = {}    # pid => System.uptime of the last message (for timeout)
+    @viewport  = nil   # @@viewport1 from the last :on_new_spriteset_map
 
     def self.players;        @players;                                end
     def self.current_map_id; $game_map ? $game_map.map_id : nil;      end
@@ -75,6 +76,7 @@ module PokeMMO
         return
       end
       rp = get_or_create(pid)
+      @last_seen[pid] = (System.uptime rescue 0.0)
       sp = msg[:speed]                 # glide at the sender's real speed (anti-burst)
       rp.move_speed = sp if sp.is_a?(Numeric) && sp > 0 && rp.move_speed != sp
       cs = msg[:char]
@@ -131,6 +133,19 @@ module PokeMMO
       (s.dispose if s && !s.disposed?) rescue nil
       @sprites.delete(pid)
       @players.delete(pid)
+      @last_seen.delete(pid)
+    end
+
+    # Drop remotes we haven't heard from for PRESENCE_TIMEOUT seconds (handles
+    # disconnects/crashes — the dumb relay doesn't send leave events).
+    def self.prune
+      return if @players.empty?
+      now = (System.uptime rescue nil)
+      return unless now
+      @players.keys.each do |pid|
+        ls = @last_seen[pid]
+        remove(pid) if ls && (now - ls) > Config::PRESENCE_TIMEOUT
+      end
     end
 
     def self.dispose_sprites
@@ -141,6 +156,7 @@ module PokeMMO
     def self.clear_all
       dispose_sprites
       @players.clear
+      @last_seen.clear
     end
 
     # Advance interpolation/animation for every remote each frame.

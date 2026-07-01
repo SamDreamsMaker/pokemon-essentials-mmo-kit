@@ -29,8 +29,26 @@ the port and **hosts**; the second finds it busy and **joins** automatically.
 | `BIND_HOST` | host bind address — `127.0.0.1` (same-PC, no firewall prompt) or `0.0.0.0` (LAN) |
 | `HEARTBEAT_FRAMES` | idle position re-announce interval (~frames) |
 
-**To play with friends over LAN:** host sets `BIND_HOST = "0.0.0.0"` (allow the
-Windows Firewall prompt); friends set `ROLE = :client` and `HOST = "<host LAN IP>"`.
+### LAN play without editing Ruby — `mmo_config.txt`
+
+Drop a plain-text `mmo_config.txt` in the game folder to override the defaults
+(handy for friends). Any subset of keys works; lines starting with `#` are
+comments:
+
+```ini
+# On the HOST machine:
+role = host
+bind = 0.0.0.0        # accept LAN connections (allow the Windows Firewall prompt)
+port = 9998
+
+# On each FRIEND's machine instead:
+# role = client
+# host = 192.168.1.42  # the host's LAN IP
+# port = 9998
+```
+
+Without this file, `ROLE = :auto` is used (host-or-join on `127.0.0.1`), which is
+perfect for the two-windows-on-one-PC test.
 
 ## Architecture
 

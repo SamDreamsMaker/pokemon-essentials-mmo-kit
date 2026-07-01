@@ -26,6 +26,7 @@ module PokeMMO
         r.pump if r
         c = PokeMMO.client
         c.poll.each { |m| PokeMMO::Dispatch.handle(m) } if c && c.connected?
+        PokeMMO::Remotes.prune          # drop timed-out (disconnected) players
         PokeMMO::Remotes.update_all
         PokeMMO::Presence.heartbeat
       rescue => e

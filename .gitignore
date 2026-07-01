@@ -22,6 +22,8 @@ RGSS*.dll
 mmo.log
 mmo_*.txt
 mmo_*.json
+# per-machine connection config (each deployment sets its own; documented in README)
+mmo_config.txt
 # Base-kit shortcut duplicated by the merged Essentials install
 Essentials Docs Wiki.URL
 
