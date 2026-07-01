@@ -54,9 +54,12 @@ module PokeMMO
         PokeMMO.log("auth: no server, playing offline/solo")
         return true
       end
-      @account_id ||= load_local_account
+      # Guest mode (POKEMMO_GUEST env var): use a fresh server-assigned account,
+      # not the persisted one — lets two instances on ONE PC be distinct players.
+      guest = !ENV["POKEMMO_GUEST"].to_s.strip.empty?
+      @account_id ||= load_local_account unless guest
       c.send_message({ :type => :login, :account_id => @account_id })
-      PokeMMO.log("auth: sent :login (account=#{@account_id.inspect}), waiting")
+      PokeMMO.log("auth: sent :login (account=#{@account_id.inspect}#{guest ? ' GUEST' : ''}), waiting")
       deadline = mono + Config::LOGIN_TIMEOUT
       while mono < deadline
         # Do NOT call Graphics.update here: driving it manually from inside the
@@ -72,7 +75,7 @@ module PokeMMO
           @account_id    = m[:account_id]
           @pending_state = m[:state]
           @logged_in     = true
-          save_local_account(@account_id)
+          save_local_account(@account_id) unless guest
           PokeMMO.set_self_id(@account_id)   # account id becomes our presence id
           PokeMMO.log("auth: login_ok account=#{@account_id} state=#{m[:state] ? 'received' : 'new'}")
           done = true

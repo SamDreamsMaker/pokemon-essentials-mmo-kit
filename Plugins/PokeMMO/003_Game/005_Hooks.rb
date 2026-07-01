@@ -62,6 +62,23 @@ EventHandlers.add(:on_new_spriteset_map, :pokemmo_remote_sprites,
 EventHandlers.add(:on_enter_map, :pokemmo_zone_reset,
   proc { |_old_map_id| PokeMMO::Remotes.clear_all; PokeMMO::Presence.announce_soon })
 
+# --- Battle challenge (Phase 4a): pause-menu option + the prompt driver --------
+MenuHandlers.add(:pause_menu, :mmo_challenge, {
+  "name"      => _INTL("Défier"),
+  "order"     => 55,
+  "condition" => proc { next PokeMMO.enabled? && PokeMMO.client && PokeMMO.client.connected? },
+  "effect"    => proc { |menu|
+    menu.pbHideMenu
+    PokeMMO::Challenge.pbChallengeFromMenu
+    menu.pbEndScene
+    next true
+  }
+})
+
+# Shows incoming challenge prompts / replies on a safe frame (not in the pump).
+EventHandlers.add(:on_frame_update, :pokemmo_challenge_ui,
+  proc { PokeMMO::Challenge.update_ui })
+
 # --- Keep the network alive during blocking overworld loops -------------------
 # pbUpdateSceneMap is the single global function every message/menu/wait loop
 # calls; aliasing it (guarded, idempotent) pumps there too. Pump.tick throttles

@@ -13,7 +13,8 @@
 #===============================================================================
 module PokeMMO
   class RemotePlayer < Game_Character
-    attr_reader :player_id
+    attr_reader   :player_id
+    attr_accessor :player_name
 
     def initialize(player_id, map = nil)
       super(map)
@@ -77,6 +78,7 @@ module PokeMMO
       end
       rp = get_or_create(pid)
       @last_seen[pid] = (System.uptime rescue 0.0)
+      rp.player_name = msg[:name] if msg[:name] && !msg[:name].to_s.empty?
       sp = msg[:speed]                 # glide at the sender's real speed (anti-burst)
       rp.move_speed = sp if sp.is_a?(Numeric) && sp > 0 && rp.move_speed != sp
       cs = msg[:char]

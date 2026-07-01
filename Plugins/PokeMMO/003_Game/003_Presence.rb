@@ -32,7 +32,8 @@ module PokeMMO
         :speed  => $game_player.move_speed,   # so the remote glides at OUR rate
         :mode   => movement_mode,
         :char   => $game_player.character_name,
-        :outfit => ($player ? $player.outfit : 0)
+        :outfit => ($player ? $player.outfit : 0),
+        :name   => ($player ? $player.name : "")
       }
     end
 

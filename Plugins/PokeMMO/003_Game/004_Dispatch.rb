@@ -18,6 +18,8 @@ module PokeMMO
         $player.pokemmo_apply_economy(msg[:field], msg[:value]) if $player && msg[:value].is_a?(Integer)
       when :badge_ack
         $player.pokemmo_apply_badge(msg[:index], msg[:owned]) if $player && msg[:index].is_a?(Integer)
+      when :challenge, :challenge_accept, :challenge_decline
+        Challenge.on_message(msg)
       when NetClient::DISCONNECTED
         PokeMMO.log("disconnected from server")
       end
