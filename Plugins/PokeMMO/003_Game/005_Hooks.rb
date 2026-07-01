@@ -79,9 +79,20 @@ MenuHandlers.add(:pause_menu, :mmo_challenge, {
 EventHandlers.add(:on_frame_update, :pokemmo_challenge_ui,
   proc { PokeMMO::Challenge.update_ui })
 
-# Shows the "opponent team ready" confirmation once a party has been exchanged.
-EventHandlers.add(:on_frame_update, :pokemmo_battlesetup_ui,
-  proc { PokeMMO::BattleSetup.update_ui })
+# Start an accepted PvP battle from a CLEAN stack point: the top of
+# Scene_Map#update, before updateSpritesets runs. Launching from :on_frame_update
+# (fired from *inside* updateSpritesets) would nest the battle's own
+# updateSpritesets calls and crash overworld sprites. This is where the engine
+# itself starts battles (pbMapInterpreter.update, also before updateSpritesets).
+class Scene_Map
+  unless method_defined?(:pokemmo_orig_scene_update)
+    alias_method :pokemmo_orig_scene_update, :update
+    def update
+      PokeMMO::BattleSetup.run_pending_launch
+      pokemmo_orig_scene_update
+    end
+  end
+end
 
 # --- Keep the network alive during blocking overworld loops -------------------
 # pbUpdateSceneMap is the single global function every message/menu/wait loop

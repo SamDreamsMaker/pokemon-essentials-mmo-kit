@@ -1,10 +1,10 @@
 #===============================================================================
-# PokeMMO :: BattleSetup  (Phase 4b.1 — team exchange)
+# PokeMMO :: BattleSetup  (Phase 4b — team exchange + battle launch)
 #-------------------------------------------------------------------------------
 # Once a challenge is accepted, both players send each other their party (the
 # Pokémon objects ride along in a Marshal'd message, exactly as RecordedBattle
-# already serialises parties). Each side stores the opponent's team; launching
-# the actual battle from these teams is Phase 4b.2.
+# already serialises parties). When THIS side has received the opponent's team,
+# it starts the battle (BattleLauncher) on a safe frame.
 #
 # NOTE: teams currently go through the broadcast relay (filtered by :to), so a
 # team is visible to every connected client — fine for a trusted host+friends
@@ -13,8 +13,9 @@
 #===============================================================================
 module PokeMMO
   module BattleSetup
-    @opponents = {}   # account_id => { :name, :party }  (received opponent teams)
-    @queued    = nil  # a message to show on the next safe frame
+    @opponents      = {}   # account_id => { :name, :party }  (received opponent teams)
+    @pending_launch = nil  # opponent hash to start a battle against, on the next safe frame
+    @launching      = false # re-entrancy guard (a battle is blocking)
 
     def self.own_name
       ($player && $player.name) ? $player.name : "?"
@@ -28,29 +29,41 @@ module PokeMMO
       PokeMMO.log("battle: sent my team (#{$player.party.length} Pokemon) to #{to_id}")
     end
 
-    # Routed from Dispatch (inside the pump — no blocking UI here).
+    # Routed from Dispatch (inside the pump — no blocking UI/battle here).
     def self.on_team(msg)
       return unless msg[:to] == PokeMMO.self_id
       party = msg[:party]
       return unless party.is_a?(Array) && !party.empty?
-      @opponents[msg[:from]] = { :name => msg[:name] || "?", :party => party }
+      remote = { :name => msg[:name] || "?", :party => party }
+      @opponents[msg[:from]] = remote
       PokeMMO.log("battle: received team from #{msg[:from]} (#{party.length} Pokemon)")
-      names = party.map { |pk| (pk.name rescue nil) || "?" }.join(", ")
-      @queued = _INTL("{1}'s team is ready: {2}\n(The battle itself starts in Phase 4b.2.)",
-                      msg[:name] || "?", names)
+      @pending_launch = remote   # both teams are known on this side -> start the battle
     end
 
     def self.opponent(account_id)
       @opponents[account_id]
     end
 
-    # Shows the queued confirmation on a safe frame (from :on_frame_update).
-    def self.update_ui
-      return unless @queued
-      return unless $scene.is_a?(Scene_Map) && $game_temp && !$game_temp.in_menu
-      m = @queued
-      @queued = nil
-      pbMessage(m)
+    # Starts the pending battle from a CLEAN stack point — the top of
+    # Scene_Map#update, before updateSpritesets (see Hooks). Launching from
+    # :on_frame_update instead nests the battle inside updateSpritesets, so
+    # pbBattleAnimation re-enters updateSpritesets and crashes overworld sprites
+    # (e.g. berry plants). This mirrors how the engine starts normal battles
+    # (from pbMapInterpreter.update, also before updateSpritesets).
+    def self.run_pending_launch
+      return if @launching
+      return unless @pending_launch
+      return unless $scene.is_a?(Scene_Map) && $player
+      return if $game_temp && ($game_temp.in_menu || $game_temp.in_battle)
+      return if $game_player && $game_player.moving?
+      remote = @pending_launch
+      @pending_launch = nil
+      @launching = true
+      begin
+        BattleLauncher.start_vs_ai(remote)
+      ensure
+        @launching = false
+      end
     end
   end
 end
