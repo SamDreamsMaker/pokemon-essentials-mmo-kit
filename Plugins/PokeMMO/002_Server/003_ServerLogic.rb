@@ -47,6 +47,13 @@ module PokeMMO
         acct  = @conn_account[conn_id]
         server.send_to(conn_id, { :type => :mutate_ack, :field => field, :value => canon })
         PokeMMO.log("server: mutate account=#{acct} #{field}=#{val}->#{canon}")
+      when :badge
+        idx   = msg[:index]
+        owned = msg[:owned] ? true : false
+        return unless idx.is_a?(Integer) && idx >= 0 && idx < 64   # sane range
+        acct = @conn_account[conn_id]
+        server.send_to(conn_id, { :type => :badge_ack, :index => idx, :owned => owned })
+        PokeMMO.log("server: badge account=#{acct} [#{idx}]=#{owned}")
       end
     rescue => e
       PokeMMO.log("ServerLogic error (#{msg && msg[:type]}): #{e.class}: #{e.message}")

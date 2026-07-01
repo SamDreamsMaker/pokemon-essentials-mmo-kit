@@ -16,6 +16,8 @@ module PokeMMO
       when :mutate_ack
         # Server's canonical economy value (client applies it, no re-notify).
         $player.pokemmo_apply_economy(msg[:field], msg[:value]) if $player && msg[:value].is_a?(Integer)
+      when :badge_ack
+        $player.pokemmo_apply_badge(msg[:index], msg[:owned]) if $player && msg[:index].is_a?(Integer)
       when NetClient::DISCONNECTED
         PokeMMO.log("disconnected from server")
       end
