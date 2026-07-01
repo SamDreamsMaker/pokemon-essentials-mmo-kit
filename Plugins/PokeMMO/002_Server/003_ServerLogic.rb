@@ -54,6 +54,11 @@ module PokeMMO
         acct = @conn_account[conn_id]
         server.send_to(conn_id, { :type => :badge_ack, :index => idx, :owned => owned })
         PokeMMO.log("server: badge account=#{acct} [#{idx}]=#{owned}")
+      when :inv
+        # Bag/box operations. Logged now (foundation/observability); server-side
+        # inventory validation is a later phase, so there is no ack to apply.
+        acct = @conn_account[conn_id]
+        PokeMMO.log("server: inv account=#{acct} #{msg[:op]} item=#{msg[:item].inspect} qty=#{msg[:qty].inspect} box=#{msg[:box].inspect} index=#{msg[:index].inspect}")
       end
     rescue => e
       PokeMMO.log("ServerLogic error (#{msg && msg[:type]}): #{e.class}: #{e.message}")
