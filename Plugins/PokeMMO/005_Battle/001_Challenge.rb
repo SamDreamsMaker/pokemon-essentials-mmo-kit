@@ -49,6 +49,7 @@ module PokeMMO
       when :challenge_accept
         return unless msg[:to] == PokeMMO.self_id
         @outgoing = nil
+        BattleSetup.send_team(msg[:from])   # 4b.1: send our party to the accepter
         @pending_message = _INTL("{1} accepted your battle request!", msg[:name] || "?")
       when :challenge_decline
         return unless msg[:to] == PokeMMO.self_id
@@ -74,7 +75,8 @@ module PokeMMO
           if pbConfirmMessage(_INTL("{1} wants to battle! Accept?", inc[:name]))
             PokeMMO.send_message({ :type => :challenge_accept, :from => PokeMMO.self_id,
                                    :name => own_name, :to => inc[:from] })
-            pbMessage(_INTL("Battle accepted! (The battle itself is coming in Phase 4b.)"))
+            PokeMMO::BattleSetup.send_team(inc[:from])   # 4b.1: exchange parties
+            pbMessage(_INTL("Battle accepted!"))
           else
             PokeMMO.send_message({ :type => :challenge_decline, :from => PokeMMO.self_id,
                                    :name => own_name, :to => inc[:from] })

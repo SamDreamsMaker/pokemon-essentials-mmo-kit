@@ -79,6 +79,10 @@ MenuHandlers.add(:pause_menu, :mmo_challenge, {
 EventHandlers.add(:on_frame_update, :pokemmo_challenge_ui,
   proc { PokeMMO::Challenge.update_ui })
 
+# Shows the "opponent team ready" confirmation once a party has been exchanged.
+EventHandlers.add(:on_frame_update, :pokemmo_battlesetup_ui,
+  proc { PokeMMO::BattleSetup.update_ui })
+
 # --- Keep the network alive during blocking overworld loops -------------------
 # pbUpdateSceneMap is the single global function every message/menu/wait loop
 # calls; aliasing it (guarded, idempotent) pumps there too. Pump.tick throttles

@@ -20,6 +20,8 @@ module PokeMMO
         $player.pokemmo_apply_badge(msg[:index], msg[:owned]) if $player && msg[:index].is_a?(Integer)
       when :challenge, :challenge_accept, :challenge_decline
         Challenge.on_message(msg)
+      when :battle_team
+        BattleSetup.on_team(msg)
       when NetClient::DISCONNECTED
         PokeMMO.log("disconnected from server")
       end
