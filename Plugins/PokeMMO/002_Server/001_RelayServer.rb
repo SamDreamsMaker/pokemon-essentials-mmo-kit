@@ -1,0 +1,142 @@
+#===============================================================================
+# PokeMMO :: RelayServer
+#-------------------------------------------------------------------------------
+# The Phase 1 "walking skeleton" server: a dumb, authority-less TCP relay. It
+# accepts client connections and rebroadcasts every inbound frame to all OTHER
+# connected clients — pure presence/position fan-out, no game logic.
+#
+# ARCHITECTURE (shaped by measured mkxp-z behaviour, see architecture doc §4):
+#   * ONE background thread only — a blocking `accept` loop — which just hands
+#     newly accepted sockets to a thread-safe Queue. (Blocking accept on a
+#     main-spawned thread is the one threading pattern that tested reliable;
+#     select-on-listening-socket and non-main-spawned threads did NOT.)
+#   * Everything else runs on the MAIN thread via #pump (called once per frame):
+#     it registers freshly accepted clients and relays their frames using
+#     read_nonblock. No thread-per-client — which also fixes the scaling cost
+#     the audit flagged (§10-G7).
+#
+# The relay NEVER decodes (Marshal.load) client bytes: it forwards the raw
+# length-prefixed frame as-is, keeping the untrusted-deserialisation trust
+# boundary on the clients (MessageCodec, architecture doc §5/§10).
+#
+# Same MRI runtime as the client: the "host on Windows" model runs this
+# in-process; a dedicated Linux server runs the same code headless.
+#===============================================================================
+module PokeMMO
+  class RelayServer
+    attr_reader :port, :frames_in, :frames_out   # simple metrics / observability
+
+    def initialize(port = Config::PORT, host = "0.0.0.0")
+      @port     = port
+      @host     = host
+      @server   = nil
+      @acceptor = nil
+      @pending  = Queue.new    # accepted sockets, acceptor-thread -> main #pump
+      @clients  = {}           # id => socket   (main thread / #pump only)
+      @buffers  = {}           # id => partial-read buffer
+      @running  = false
+      @next_id  = 0
+      @frames_in  = 0
+      @frames_out = 0
+    end
+
+    # Binds and starts accepting. Returns true on success (never raises).
+    # Call from the main thread (the acceptor must be main-spawned).
+    def start
+      require "socket"
+      @server  = TCPServer.new(@host, @port)
+      @port    = @server.addr[1]      # resolve the real port (handles port 0)
+      @running = true
+      @acceptor = Thread.new do
+        while @running
+          sock = (@server.accept rescue nil)
+          break unless sock
+          @pending << sock
+        end
+      end
+      true
+    rescue => e
+      @running = false
+      false
+    end
+
+    def running?
+      @running
+    end
+
+    def client_count
+      @clients.size
+    end
+
+    # Drives the server. Call once per frame from the MAIN thread:
+    #   1. registers any newly accepted clients,
+    #   2. reads whatever each client has sent and relays it to the others.
+    def pump
+      register_pending
+      @clients.to_a.each do |id, sock|
+        begin
+          loop { @buffers[id] << sock.read_nonblock(4096) }
+        rescue IO::WaitReadable
+          # nothing more from this client this tick
+        rescue EOFError, Errno::ECONNRESET, Errno::EPIPE, IOError, SystemCallError
+          drop(id); next
+        rescue => e
+          drop(id); next
+        end
+        relay_frames(id)
+      end
+    end
+
+    # Stops the server and closes all links. Idempotent.
+    def stop
+      @running = false
+      (@server.close if @server) rescue nil
+      (@acceptor.join(1) if @acceptor) rescue nil
+      @clients.each_value { |s| s.close rescue nil }
+      @clients.clear
+      @buffers.clear
+    end
+
+    private
+
+    def register_pending
+      loop do
+        sock = (@pending.pop(true) rescue nil)
+        break unless sock
+        id = (@next_id += 1)
+        @clients[id] = sock
+        @buffers[id] = "".b
+      end
+    end
+
+    def relay_frames(id)
+      buf = @buffers[id]
+      loop do
+        break if buf.bytesize < Config::LENGTH_BYTES
+        len = buf[0, Config::LENGTH_BYTES].unpack1("N")
+        return drop(id) if len > Config::MAX_MESSAGE_BYTES
+        total = Config::LENGTH_BYTES + len
+        break if buf.bytesize < total
+        frame = buf.slice!(0, total)     # raw framed bytes, forwarded as-is
+        @frames_in += 1
+        broadcast(id, frame)
+      end
+    end
+
+    # Fan a pre-framed message out to every client except the sender.
+    def broadcast(sender_id, frame)
+      n = 0
+      @clients.each do |cid, sock|
+        next if cid == sender_id
+        (sock.write(frame); n += 1) rescue nil
+      end
+      @frames_out += n
+    end
+
+    def drop(id)
+      s = @clients.delete(id)
+      @buffers.delete(id)
+      (s.close if s) rescue nil
+    end
+  end
+end

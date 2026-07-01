@@ -1,0 +1,42 @@
+#===============================================================================
+# PokeMMO :: Config
+#-------------------------------------------------------------------------------
+# Central configuration for the MMO layer. Kept tiny and dependency-free so it
+# loads first (alphanumerically) and can be read by every other module.
+#===============================================================================
+module PokeMMO
+  module Config
+    # Master switch. When false, the plugin loads but stays completely inert,
+    # so the game behaves exactly like vanilla Essentials.
+    ENABLED = true
+
+    # Role of this game instance:
+    #   :auto   - try to host; if the port is already taken (another instance is
+    #             hosting on this PC), automatically join it as a client.
+    #             => launch the game twice for a zero-config local test.
+    #   :host   - host the relay AND play (friends connect to your LAN IP).
+    #   :client - join a host at HOST:PORT.
+    #   :off    - fully disabled (vanilla behaviour).
+    ROLE = :auto
+
+    # Client connect target (the host's IP). Loopback for a same-PC test; set to
+    # the host's LAN IP for :client instances playing with friends.
+    HOST = "127.0.0.1"
+    PORT = 9998
+
+    # Address the host relay binds to. "127.0.0.1" keeps it same-PC only and
+    # avoids a Windows Firewall prompt; use "0.0.0.0" to accept LAN friends.
+    BIND_HOST = "127.0.0.1"
+
+    # How often (in frames) an idle player re-announces its position, so players
+    # who join later still see everyone. ~30 frames ≈ 0.5 s.
+    HEARTBEAT_FRAMES = 30
+
+    # Wire framing: a big-endian uint32 length prefix precedes each payload.
+    # Must stay in sync with the server. (Validated in Phase 0: sockets + this
+    # framing round-trip correctly under mkxp-z / MRI 3.1.3.)
+    LENGTH_BYTES      = 4
+    MAX_MESSAGE_BYTES = 1 << 20   # 1 MiB hard cap; frames larger than this are
+                                  # treated as a protocol error and drop the link.
+  end
+end

@@ -1,7 +1,9 @@
 # Audio, Graphics and Plugins folders
 Audio/
 Graphics/
-Plugins/
+Plugins/*
+# ...but keep the versioned MMO SDK plugin (throwaway/diagnostic plugins stay ignored)
+!Plugins/PokeMMO/
 Screenshots/
 
 # Data folder, but not Data/Scripts folder or messages_core.dat
@@ -15,6 +17,13 @@ errorlog.txt
 Game.ini
 Game.rxproj
 RGSS*.dll
+
+# PokeMMO SDK runtime artifacts (logs + throwaway diagnostic reports)
+mmo.log
+mmo_*.txt
+mmo_*.json
+# Base-kit shortcut duplicated by the merged Essentials install
+Essentials Docs Wiki.URL
 
 # Common code editor folders & files
 .vscode/
