@@ -22,6 +22,8 @@ module PokeMMO
         Challenge.on_message(msg)
       when :battle_team
         BattleSetup.on_team(msg)
+      when :battle_start, :battle_choice, :battle_round, :battle_end
+        BattleNet.on_message(msg)
       when NetClient::DISCONNECTED
         PokeMMO.log("disconnected from server")
       end
