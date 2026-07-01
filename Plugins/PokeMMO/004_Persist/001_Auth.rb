@@ -14,7 +14,8 @@
 #===============================================================================
 module PokeMMO
   module Auth
-    ACCOUNT_FILE = "mmo_account.dat"
+    ACCOUNT_FILE       = "mmo_account.dat"
+    GUEST_ACCOUNT_FILE = "mmo_account_guest.dat"
 
     @account_id    = nil
     @pending_state = nil
@@ -25,8 +26,20 @@ module PokeMMO
     def self.logged_in?;    @logged_in;     end
     def self.clear_pending; @pending_state = nil; end
 
+    # POKEMMO_GUEST makes this instance a distinct, PERSISTENT second player on
+    # the same PC: it uses its own account file (so it never collides with the
+    # main player's id), but it still saves/loads it — so the guest keeps its own
+    # progress across launches instead of restarting a new game every time.
+    def self.guest?
+      !ENV["POKEMMO_GUEST"].to_s.strip.empty?
+    end
+
+    def self.account_file
+      guest? ? GUEST_ACCOUNT_FILE : ACCOUNT_FILE
+    end
+
     def self.load_local_account
-      p = File.expand_path(ACCOUNT_FILE)
+      p = File.expand_path(account_file)
       return nil unless File.file?(p)
       Integer(File.read(p).strip)
     rescue
@@ -34,9 +47,9 @@ module PokeMMO
     end
 
     def self.save_local_account(id)
-      File.write(File.expand_path(ACCOUNT_FILE), id.to_s)
+      File.write(File.expand_path(account_file), id.to_s)
     rescue => e
-      PokeMMO.log("auth: cannot persist #{ACCOUNT_FILE}: #{e.class}: #{e.message}")
+      PokeMMO.log("auth: cannot persist #{account_file}: #{e.class}: #{e.message}")
     end
 
     def self.mono
@@ -54,10 +67,10 @@ module PokeMMO
         PokeMMO.log("auth: no server, playing offline/solo")
         return true
       end
-      # Guest mode (POKEMMO_GUEST env var): use a fresh server-assigned account,
-      # not the persisted one — lets two instances on ONE PC be distinct players.
-      guest = !ENV["POKEMMO_GUEST"].to_s.strip.empty?
-      @account_id ||= load_local_account unless guest
+      # Guest mode uses its own account file (see guest?), so two instances on ONE
+      # PC are distinct players that each keep their own persistent progress.
+      guest = guest?
+      @account_id ||= load_local_account
       c.send_message({ :type => :login, :account_id => @account_id })
       PokeMMO.log("auth: sent :login (account=#{@account_id.inspect}#{guest ? ' GUEST' : ''}), waiting")
       deadline = mono + Config::LOGIN_TIMEOUT
@@ -75,7 +88,7 @@ module PokeMMO
           @account_id    = m[:account_id]
           @pending_state = m[:state]
           @logged_in     = true
-          save_local_account(@account_id) unless guest
+          save_local_account(@account_id)
           PokeMMO.set_self_id(@account_id)   # account id becomes our presence id
           PokeMMO.log("auth: login_ok account=#{@account_id} state=#{m[:state] ? 'received' : 'new'}")
           done = true

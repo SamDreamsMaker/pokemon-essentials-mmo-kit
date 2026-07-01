@@ -25,7 +25,8 @@ mmo_*.json
 # per-machine connection config (each deployment sets its own; documented in README)
 mmo_config.txt
 # Phase 2: per-machine account id + the host's authoritative account state store
-mmo_account.dat
+# (mmo_account.dat = main player; mmo_account_guest.dat = the persistent guest player)
+mmo_account*.dat
 server_saves/
 # Base-kit shortcut duplicated by the merged Essentials install
 Essentials Docs Wiki.URL
