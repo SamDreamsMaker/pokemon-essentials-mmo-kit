@@ -5,9 +5,11 @@ editing a single core script** — everything hooks in through `EventHandlers`,
 `MenuHandlers` and guarded method aliases, so the fork stays updatable from
 upstream.
 
-> Status: **Phase 1 — "walking skeleton"**. You can see other players move around
-> the overworld, smoothly, in real time. No authority / anti-cheat yet (that's
-> Phase 2+). See the full plan in [`docs/architecture/MMO_CONVERSION_AUDIT.md`](../../docs/architecture/MMO_CONVERSION_AUDIT.md).
+> Status: **Phase 2a+2b — server identity & persistence.** Players move around
+> together in real time (Phase 1), AND the server now issues a stable account id
+> and stores each account's game state on the host's disk, so it survives a
+> server restart. Mutation validation / anti-cheat (Phase 2c) is next. See the
+> full plan in [`docs/architecture/MMO_CONVERSION_AUDIT.md`](../../docs/architecture/MMO_CONVERSION_AUDIT.md).
 
 ## Quick start (local test, two windows on one PC)
 

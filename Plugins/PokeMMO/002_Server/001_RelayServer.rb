@@ -97,6 +97,19 @@ module PokeMMO
       @buffers.clear
     end
 
+    # Send a message to ONE connection (authoritative server -> specific client).
+    # Public: called by ServerLogic to answer a login/save. Runs on the pump
+    # (main) thread, like every other server write, so no locking is needed.
+    def send_to(conn_id, msg)
+      sock = @clients[conn_id]
+      return false unless sock
+      sock.write(MessageCodec.encode(msg))
+      true
+    rescue
+      drop(conn_id)
+      false
+    end
+
     private
 
     def register_pending
@@ -117,9 +130,22 @@ module PokeMMO
         return drop(id) if len > Config::MAX_MESSAGE_BYTES
         total = Config::LENGTH_BYTES + len
         break if buf.bytesize < total
-        frame = buf.slice!(0, total)     # raw framed bytes, forwarded as-is
+        frame = buf.slice!(0, total)
         @frames_in += 1
-        broadcast(id, frame)
+        route(id, frame)
+      end
+    end
+
+    # Decode just enough to route: account messages (login/save) are handled by
+    # the authoritative ServerLogic and answered to the sender only; everything
+    # else (presence) is forwarded raw to the other clients, as in Phase 1.
+    def route(sender_id, frame)
+      payload = frame[Config::LENGTH_BYTES, frame.bytesize - Config::LENGTH_BYTES]
+      msg = MessageCodec.decode(payload)
+      if msg.is_a?(Hash) && Config::ACCOUNT_TYPES.include?(msg[:type])
+        PokeMMO::ServerLogic.handle(self, sender_id, msg)
+      else
+        broadcast(sender_id, frame)
       end
     end
 
@@ -137,6 +163,7 @@ module PokeMMO
       s = @clients.delete(id)
       @buffers.delete(id)
       (s.close if s) rescue nil
+      (PokeMMO::ServerLogic.forget(id) rescue nil)
     end
   end
 end

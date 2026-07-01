@@ -42,11 +42,19 @@ module PokeMMO
     # That lets friends set up LAN play without editing Ruby.
     CONFIG_FILE = "mmo_config.txt"
 
+    # Phase 2 — authoritative account messages the SERVER handles itself (login,
+    # save) instead of relaying. Everything else (presence) is broadcast as-is.
+    ACCOUNT_TYPES = [:login, :save].freeze
+
+    # Seconds to wait for the server's login response before proceeding offline.
+    LOGIN_TIMEOUT = 15.0
+
     # Wire framing: a big-endian uint32 length prefix precedes each payload.
     # Must stay in sync with the server. (Validated in Phase 0: sockets + this
     # framing round-trip correctly under mkxp-z / MRI 3.1.3.)
     LENGTH_BYTES      = 4
-    MAX_MESSAGE_BYTES = 1 << 20   # 1 MiB hard cap; frames larger than this are
-                                  # treated as a protocol error and drop the link.
+    MAX_MESSAGE_BYTES = 16 << 20  # 16 MiB hard cap. Larger frames = protocol error
+                                  # (drop the link). Sized to fit a full game save,
+                                  # which Phase 2 pushes to the server on Game.save.
   end
 end

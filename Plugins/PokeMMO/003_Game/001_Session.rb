@@ -20,6 +20,12 @@ module PokeMMO
   def self.self_id;  @self_id;  end
   def self.started?; @started;  end
 
+  # Phase 2: once the server issues a stable account/trainer id at login, it
+  # becomes our presence id too (so a player's presence and account align).
+  def self.set_self_id(v)
+    @self_id = v
+  end
+
   # Effective connection settings: Config defaults, overridden by an optional
   # plain-text mmo_config.txt in the game folder (so friends can set up LAN play
   # without touching Ruby). Resolved once, on first use.
