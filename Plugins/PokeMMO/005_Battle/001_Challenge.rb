@@ -22,22 +22,22 @@ module PokeMMO
     # --- Sending: called from the pause-menu option ---------------------------
     def self.pbChallengeFromMenu
       unless PokeMMO.client && PokeMMO.client.connected?
-        pbMessage(_INTL("Tu n'es pas connecté à un serveur."))
+        pbMessage(_INTL("You are not connected to a server."))
         return
       end
       list = PokeMMO::Remotes.players.values
       if list.empty?
-        pbMessage(_INTL("Il n'y a aucun autre joueur sur cette carte."))
+        pbMessage(_INTL("There are no other players on this map."))
         return
       end
-      names  = list.map { |rp| rp.player_name || _INTL("Joueur {1}", rp.player_id) }
-      choice = pbMessage(_INTL("Défier quel joueur ?"), names + [_INTL("Annuler")], list.length)
+      names  = list.map { |rp| rp.player_name || _INTL("Player {1}", rp.player_id) }
+      choice = pbMessage(_INTL("Challenge which player?"), names + [_INTL("Cancel")], list.length)
       return if choice < 0 || choice >= list.length
       target = list[choice]
       @outgoing = target.player_id
       PokeMMO.send_message({ :type => :challenge, :from => PokeMMO.self_id,
                              :name => own_name, :to => target.player_id })
-      pbMessage(_INTL("Défi envoyé à {1}...", names[choice]))
+      pbMessage(_INTL("Battle request sent to {1}...", names[choice]))
     end
 
     # --- Receiving: routed from Dispatch (runs inside the pump — no UI here) ---
@@ -49,11 +49,11 @@ module PokeMMO
       when :challenge_accept
         return unless msg[:to] == PokeMMO.self_id
         @outgoing = nil
-        @pending_message = _INTL("{1} a accepté le combat !", msg[:name] || "?")
+        @pending_message = _INTL("{1} accepted your battle request!", msg[:name] || "?")
       when :challenge_decline
         return unless msg[:to] == PokeMMO.self_id
         @outgoing = nil
-        @pending_message = _INTL("{1} a refusé le combat.", msg[:name] || "?")
+        @pending_message = _INTL("{1} declined your battle request.", msg[:name] || "?")
       end
     end
 
@@ -71,10 +71,10 @@ module PokeMMO
         elsif @incoming
           inc = @incoming
           @incoming = nil
-          if pbConfirmMessage(_INTL("{1} te défie en combat ! Accepter ?", inc[:name]))
+          if pbConfirmMessage(_INTL("{1} wants to battle! Accept?", inc[:name]))
             PokeMMO.send_message({ :type => :challenge_accept, :from => PokeMMO.self_id,
                                    :name => own_name, :to => inc[:from] })
-            pbMessage(_INTL("Combat accepté ! (le combat lui-même arrive en Phase 4b.)"))
+            pbMessage(_INTL("Battle accepted! (The battle itself is coming in Phase 4b.)"))
           else
             PokeMMO.send_message({ :type => :challenge_decline, :from => PokeMMO.self_id,
                                    :name => own_name, :to => inc[:from] })

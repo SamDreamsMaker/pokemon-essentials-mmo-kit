@@ -64,7 +64,7 @@ EventHandlers.add(:on_enter_map, :pokemmo_zone_reset,
 
 # --- Battle challenge (Phase 4a): pause-menu option + the prompt driver --------
 MenuHandlers.add(:pause_menu, :mmo_challenge, {
-  "name"      => _INTL("Défier"),
+  "name"      => _INTL("Battle Player"),
   "order"     => 55,
   "condition" => proc { next PokeMMO.enabled? && PokeMMO.client && PokeMMO.client.connected? },
   "effect"    => proc { |menu|

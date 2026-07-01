@@ -1,8 +1,8 @@
 @echo off
-rem Lance une 2e instance en mode INVITE (compte frais/distinct, non persiste),
-rem pour tester le multijoueur sur UN seul PC avec deux joueurs differents :
-rem   - fenetre 1 : PlayMMO-debug.bat  (ton compte habituel)
-rem   - fenetre 2 : PlayMMO-guest.bat  (un joueur invite distinct)
+rem Launches a 2nd instance in GUEST mode (fresh, distinct, non-persisted
+rem account), to test multiplayer on ONE PC with two different players:
+rem   - window 1: PlayMMO-debug.bat  (your usual account)
+rem   - window 2: PlayMMO-guest.bat  (a distinct guest player)
 cd /d "%~dp0"
 set POKEMMO_GUEST=1
 start "" "Game.exe" debug

@@ -34,7 +34,7 @@ if (-not (Test-Path -LiteralPath $rxdata)) {
 }
 
 $excludeDirs  = @(".git", ".claude", "docs", "tools", ".vscode", "Screenshots", "__pycache__")
-$excludeFiles = @("mmo.log", "errorlog.txt", "PlayMMO-debug.bat", "scripts_extract.rb",
+$excludeFiles = @("mmo.log", "errorlog.txt", "PlayMMO-debug.bat", "PlayMMO-guest.bat", "scripts_extract.rb",
                   "scripts_combine.rb", "*.mkproj", "Game.rxproj", "*.code-workspace",
                   # dev-only tools/config, not needed to play
                   ".gitignore", ".rubocop.yml", "*.URL", "*.url",

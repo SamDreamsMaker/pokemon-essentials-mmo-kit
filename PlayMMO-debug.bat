@@ -1,8 +1,8 @@
 @echo off
-rem Lance Pokemon Essentials MMO Kit en mode debug (charge le plugin PokeMMO
-rem depuis les sources et donne acces au menu debug). Double-clique ce fichier
-rem DEUX fois pour tester le multijoueur en local :
-rem   - 1re instance = hote (bind du port 9998 sur 127.0.0.1)
-rem   - 2e instance  = client (rejoint automatiquement, ROLE=:auto)
+rem Launches Pokemon Essentials MMO Kit in debug mode (loads the PokeMMO plugin
+rem from source and enables the debug menu). Double-click this file twice to test
+rem multiplayer locally:
+rem   - 1st instance = host (binds port 9998 on 127.0.0.1)
+rem   - 2nd instance = client (joins automatically, ROLE=:auto)
 cd /d "%~dp0"
 start "" "Game.exe" debug
