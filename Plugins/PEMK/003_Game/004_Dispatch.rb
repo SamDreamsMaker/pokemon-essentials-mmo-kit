@@ -25,6 +25,11 @@ module PEMK
             $player.pokemmo_apply_economy(msg[:field], msg[:value])
           end
         end
+      when :inv_ack
+        # Detection-only telemetry: log a server flag, NEVER write $bag (the bag is
+        # blob-authoritative in M2.3; there is no inventory applier). :inv_rej is
+        # reserved for M3 server-authoritative rollback.
+        Inventory.on_ack(msg)
       when :challenge, :challenge_accept, :challenge_decline
         Challenge.on_message(msg)
       when :battle_team

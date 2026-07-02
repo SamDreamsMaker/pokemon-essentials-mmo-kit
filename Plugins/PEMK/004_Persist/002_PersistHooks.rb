@@ -55,6 +55,9 @@ module Game
         pokemmo_orig_start_new
         PEMK::Auth.apply_identity
         PEMK::Auth.reconcile_economy       # ledger snapshot (empty for a new account)
+        # Detection-only: mark the bag dirty so the first flush ships it and the
+        # server record converges. MUST NOT write $bag (the bag is blob-authoritative).
+        (PEMK::Inventory.capture_on_load rescue nil)
         # Server-authoritative: the local Game.rxdata is a disposable per-session
         # cache, so overwriting it is always fine. Clear begun_new_game so the core
         # skips its "a different game is already saved" warning on the next save.
@@ -65,6 +68,7 @@ module Game
         pokemmo_orig_load(save_data)
         PEMK::Auth.apply_identity
         PEMK::Auth.reconcile_economy       # ledger is the economy authority, over the blob
+        (PEMK::Inventory.capture_on_load rescue nil)   # detection-only: mark dirty, never write $bag
         PEMK::Auth.clear_pending
       end
 

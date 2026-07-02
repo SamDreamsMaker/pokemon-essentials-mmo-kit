@@ -21,6 +21,7 @@ module PEMK
     BLOB_MIN_INTERVAL = 30.0    # seconds between throttled (non-forced) blob pushes
 
     @econ        = {}           # field => latest absolute value (coalesced; badges ride here as a :badges bitmask)
+    @inv_dirty   = false        # bag changed since the last flush -> re-read the WHOLE bag once at flush
     @seq         = Hash.new(0)  # channel => monotonic seq (adopted from the server on login)
     @dirty_since = nil
     @last_change = nil
@@ -33,6 +34,7 @@ module PEMK
     # does not share must never keep stale dedup/seq baselines — see design §10).
     def reset
       @econ = {}
+      @inv_dirty = false
       @seq = Hash.new(0)
       @dirty_since = nil
       @last_change = nil
@@ -48,6 +50,11 @@ module PEMK
       @seq[:economy] = n if n.is_a?(Integer) && n > @seq[:economy]
     end
 
+    # Twin of adopt_econ_seq for the independent :inv channel (bag snapshots).
+    def adopt_inv_seq(n)
+      @seq[:inv] = n if n.is_a?(Integer) && n > @seq[:inv]
+    end
+
     # --- OBSERVER entry points (called from the mutation aliases) ---------------
     def mark_econ(field, value)
       return unless value.is_a?(Integer)
@@ -56,8 +63,15 @@ module PEMK
       touch
     end
 
+    # Bag mutation: flag-only (the whole bag is re-read once at flush, not per op —
+    # a loop of 500 adds costs 500 flag-sets, one snapshot).
+    def mark_inv
+      @inv_dirty = true
+      touch
+    end
+
     def dirty?
-      !@econ.empty?
+      !@econ.empty? || @inv_dirty
     end
 
     # --- EVENT: flush now (map change, battle end, menu/scene close, quit) ------
@@ -83,9 +97,23 @@ module PEMK
       @econ.each do |field, value|
         c.send_message({ :type => :econ, :field => field, :value => value, :seq => (@seq[:economy] += 1) })
       end
+      # Bag: one whole-bag read HERE (game thread), sent as an absolute snapshot.
+      # An empty bag ({}) is a valid send; only a nil (no $bag yet) keeps the flag.
+      if @inv_dirty
+        bag = PEMK::Inventory.full_bag
+        if bag
+          c.send_message({ :type => :inv, :bag => bag, :seq => (@seq[:inv] += 1) })
+          @inv_dirty = false
+        end
+      end
       @econ = {}
-      @dirty_since = nil
-      @last_change = nil
+      # If a channel is still dirty (e.g. the bag couldn't be read this pass so
+      # @inv_dirty stayed set), keep the debounce/staleness clocks armed so tick()
+      # retries — resetting them unconditionally would strand the pending snapshot.
+      unless dirty?
+        @dirty_since = nil
+        @last_change = nil
+      end
     end
 
     # Push the full save blob, but only when it actually changed (content hash) and
