@@ -27,8 +27,9 @@ module PEMK
       @config   = config
       @log      = logger || self.class.method(:log)
       @db       = DB.connect(@config.database_url, max_connections: WORKERS + 2)
-      @accounts = Accounts.new(@db)
-      @sessions = Sessions.new(@db)
+      @accounts   = Accounts.new(@db)
+      @sessions   = Sessions.new(@db)
+      @characters = Characters.new(@db)
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
       @reactor  = Reactor.new(
@@ -91,8 +92,10 @@ module PEMK
       when :register then handle_register(conn, env)
       when :login    then handle_login(conn, env)
       when :auth     then handle_auth(conn, env)
+      when :save     then handle_save(env, dec[:body], authed)
       else
-        # Authenticated gameplay frame — mailbox routing + handlers land next.
+        # Authenticated gameplay frame — per-player mailbox routing + economy/
+        # presence handlers land in the next increments.
         @log.call("server: authed #{type.inspect} from account #{authed}")
       end
     end
@@ -123,14 +126,15 @@ module PEMK
       addr = conn.addr
       @pool.submit do
         acct, err = @accounts.authenticate(user, pw)
-        token     = acct && @sessions.issue(acct[:id], remote_addr: addr)
-        @reactor.post do
-          if acct
+        if acct
+          token = @sessions.issue(acct[:id], remote_addr: addr)
+          blob  = @characters.load_blob(acct[:id])   # opaque; never loaded here
+          @reactor.post do
             bind(conn, acct[:id])
-            reply(conn, type: :login_ok, account_id: acct[:id], token: token)
-          else
-            reply(conn, type: :login_err, reason: err.to_s)
+            reply_body(conn, { type: :login_ok, account_id: acct[:id], token: token }, blob)
           end
+        else
+          @reactor.post { reply(conn, type: :login_err, reason: err.to_s) }
         end
       end
     end
@@ -139,14 +143,32 @@ module PEMK
       token = env[:token].to_s
       @pool.submit do
         account_id = @sessions.resolve(token)
-        @reactor.post do
-          if account_id
+        if account_id
+          blob = @characters.load_blob(account_id)
+          @reactor.post do
             bind(conn, account_id)
-            reply(conn, type: :auth_ok, account_id: account_id)
-          else
-            reply(conn, type: :auth_err, reason: "invalid_token")
+            reply_body(conn, { type: :auth_ok, account_id: account_id }, blob)
           end
+        else
+          @reactor.post { reply(conn, type: :auth_err, reason: "invalid_token") }
         end
+      end
+    end
+
+    # Persist the opaque save body (never Marshal.load'd server-side). Fire-and-
+    # forget on the pool; the client's local save is the immediate copy.
+    def handle_save(env, body, account_id)
+      unless body.is_a?(String) && !body.empty?
+        @log.call("server: empty :save from account #{account_id} -> ignore")
+        return
+      end
+
+      tid = env[:trainer_id]
+      sv  = env[:save_version]
+      wv  = env[:wire_version]
+      @pool.submit do
+        @characters.store(account_id, blob: body, trainer_id: tid, save_version: sv, wire_version: wv)
+        @log.call("server: saved account #{account_id} (#{body.bytesize}B)")
       end
     end
 
@@ -157,6 +179,10 @@ module PEMK
 
     def reply(conn, **env)
       @reactor.send_frame(conn, Wire.encode_split(env))
+    end
+
+    def reply_body(conn, env, body)
+      @reactor.send_frame(conn, Wire.encode_split(env, body))
     end
 
     def on_close(_conn); end
