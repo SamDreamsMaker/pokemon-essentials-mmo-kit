@@ -5,6 +5,11 @@
 require "pemk_wire"        # PEMK::Wire (from protocol/)
 require "pemk/config"
 require "pemk/db"
+require "pemk/password"
+require "pemk/accounts"
+require "pemk/sessions"
+require "pemk/rate_limiter"
+require "pemk/worker_pool"
 require "pemk/reactor"
 require "pemk/server"
 

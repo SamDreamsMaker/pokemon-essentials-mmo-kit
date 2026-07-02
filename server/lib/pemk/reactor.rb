@@ -1,22 +1,24 @@
 # frozen_string_literal: true
 
 require "socket"
+require "thread"
 
 module PEMK
-  # Single-threaded, non-blocking TCP reactor built on stdlib IO.select — no async
-  # gem, no nio4r. It owns the listen socket + every client socket, slices
-  # length-prefixed frames out of per-connection inbound buffers, and drains a
-  # bounded per-connection outbound buffer (backpressure; a slow client is dropped
-  # rather than blocking the loop). It knows NOTHING about message semantics: it
-  # hands complete frame payloads to on_frame and lets the caller decode/route.
+  # Single-threaded, non-blocking TCP reactor on stdlib IO.select — no async gem,
+  # no nio4r. Owns the listen socket + every client socket, slices length-prefixed
+  # frames into per-connection buffers, and drains a bounded per-connection
+  # outbound buffer (backpressure: a slow client is dropped, never blocks the loop).
+  #
+  # Off-thread work (DB, bcrypt) runs on a worker pool; a worker hands a reply back
+  # by calling #post(&block), which wakes the reactor through a self-pipe and runs
+  # the block ON THE REACTOR THREAD — so all connection state and socket writes stay
+  # single-threaded and lock-free.
   class Reactor
-    OUTBUF_CAP = 4 << 20            # 4 MiB per-conn outbound cap -> drop slow client
+    OUTBUF_CAP = 4 << 20
     READ_CHUNK = 64 * 1024
     LEN_BYTES  = 4
     MAX_FRAME  = PEMK::Wire::MAX_MESSAGE_BYTES
 
-    # Per-connection state. `data` is a free-form Hash for the app layer (auth,
-    # account_id, current map_id for zone presence, ...).
     class Conn
       attr_reader :io, :addr
       attr_accessor :inbuf, :outbuf, :closing, :data
@@ -40,11 +42,14 @@ module PEMK
     def initialize(host:, port:, on_frame:, on_close: nil, logger: nil)
       @host     = host
       @port     = port
-      @on_frame = on_frame          # ->(conn, payload)
-      @on_close = on_close          # ->(conn)
+      @on_frame = on_frame
+      @on_close = on_close
       @log      = logger || ->(_m) {}
-      @conns    = {}                # io => Conn
+      @conns    = {}
       @running  = false
+      @posts    = Queue.new
+      @wmutex   = Mutex.new
+      @wake_r, @wake_w = IO.pipe
     end
 
     def start
@@ -56,6 +61,7 @@ module PEMK
 
     def stop
       @running = false
+      wake!   # break the IO.select so the loop notices @running == false
     end
 
     def running?
@@ -68,25 +74,43 @@ module PEMK
 
     def run
       start unless @server
-      tick while @running
+      run_loop
+    end
+
+    def run_loop
+      while @running
+        begin
+          tick
+        rescue StandardError => e
+          @log.call("reactor: tick error #{e.class}: #{e.message}")
+        end
+      end
     ensure
       shutdown
     end
 
-    # One select/read/write cycle. Exposed for deterministic tests.
     def tick(timeout = 0.5)
-      reads  = [@server, *@conns.keys]
+      reads  = [@server, @wake_r, *@conns.keys]
       writes = @conns.values.select(&:want_write?).map(&:io)
       readable, writable, = IO.select(reads, (writes.empty? ? nil : writes), nil, timeout)
-      readable&.each { |io| io.equal?(@server) ? accept_conns : read_conn(@conns[io]) }
+      readable&.each do |io|
+        if    io.equal?(@server) then accept_conns
+        elsif io.equal?(@wake_r) then drain_wake
+        else  read_conn(@conns[io])
+        end
+      end
       writable&.each { |io| write_conn(@conns[io]) }
     end
 
-    # Queue a frame to a connection and try to flush immediately. Safe to call
-    # from the reactor thread (the app handler runs there today; a worker pool
-    # will wake the reactor via a self-pipe in a later milestone).
+    # Thread-safe: schedule a block to run on the reactor thread and wake it.
+    def post(&block)
+      @posts << block
+      wake!
+    end
+
+    # Reactor-thread only. Queue a frame to a live connection, try to flush now.
     def send_frame(conn, frame)
-      return if conn.nil? || conn.closing
+      return if conn.nil? || conn.closing || !@conns.key?(conn.io)
 
       conn.outbuf << frame
       if conn.outbuf.bytesize > OUTBUF_CAP
@@ -101,9 +125,30 @@ module PEMK
       (@server.close rescue nil) if @server
       @conns.values.each { |c| close_conn(c) }
       @conns.clear
+      (@wake_r.close rescue nil)
+      (@wake_w.close rescue nil)
     end
 
     private
+
+    def wake!
+      @wmutex.synchronize { @wake_w.write("x") }
+    rescue IOError, SystemCallError
+      nil
+    end
+
+    def drain_wake
+      loop do
+        d = @wake_r.read_nonblock(4096, exception: false)
+        break if d == :wait_readable || d.nil?
+      end
+      loop do
+        block = (@posts.pop(true) rescue nil)
+        break unless block
+
+        block.call
+      end
+    end
 
     def accept_conns
       loop do
@@ -121,7 +166,7 @@ module PEMK
 
       loop do
         data = conn.io.read_nonblock(READ_CHUNK, exception: false)
-        return close_conn(conn) if data.nil?           # EOF
+        return close_conn(conn) if data.nil?
         break if data == :wait_readable
 
         conn.inbuf << data
@@ -146,7 +191,10 @@ module PEMK
         payload = buf.byteslice(LEN_BYTES, len)
         conn.inbuf = buf = (buf.byteslice(total, buf.bytesize - total) || +"".b)
         @on_frame.call(conn, payload)
-        return if conn.closing
+        if conn.closing
+          close_conn(conn) if conn.outbuf.empty?   # else write_conn closes after flush
+          return
+        end
       end
     end
 
