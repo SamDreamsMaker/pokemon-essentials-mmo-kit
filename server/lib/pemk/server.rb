@@ -36,6 +36,7 @@ module PEMK
       @accounts   = Accounts.new(@db)
       @sessions   = Sessions.new(@db)
       @characters = Characters.new(@db)
+      @ledger     = Ledger.new(@db, @config.economy_caps)
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
       @zones    = Hash.new { |h, k| h[k] = Set.new }   # map_id => Set(conn); reactor-thread only
@@ -44,6 +45,7 @@ module PEMK
         host: @config.bind, port: @config.port,
         on_frame: method(:on_frame), on_close: method(:on_close), logger: @log
       )
+      @mailbox  = PlayerMailbox.new(pool: @pool, post: @reactor.method(:post), logger: @log)
     end
 
     def port
@@ -101,6 +103,7 @@ module PEMK
       when :login    then handle_login(conn, env)
       when :auth     then handle_auth(conn, env)
       when :save     then handle_save(env, dec[:body], authed)
+      when :econ     then handle_econ(conn, env, authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
       else
@@ -139,9 +142,10 @@ module PEMK
         if acct
           token = @sessions.issue(acct[:id], remote_addr: addr)
           blob  = @characters.load_blob(acct[:id])   # opaque; never loaded here
+          rec   = reconcile_block(acct[:id])
           @reactor.post do
             bind(conn, acct[:id])
-            reply_body(conn, { type: :login_ok, account_id: acct[:id], token: token }, blob)
+            reply_body(conn, { type: :login_ok, account_id: acct[:id], token: token }.merge(rec), blob)
           end
         else
           @reactor.post { reply(conn, type: :login_err, reason: err.to_s) }
@@ -155,9 +159,10 @@ module PEMK
         account_id = @sessions.resolve(token)
         if account_id
           blob = @characters.load_blob(account_id)
+          rec  = reconcile_block(account_id)
           @reactor.post do
             bind(conn, account_id)
-            reply_body(conn, { type: :auth_ok, account_id: account_id }, blob)
+            reply_body(conn, { type: :auth_ok, account_id: account_id }.merge(rec), blob)
           end
         else
           @reactor.post { reply(conn, type: :auth_err, reason: "invalid_token") }
@@ -180,6 +185,31 @@ module PEMK
         @characters.store(account_id, blob: body, trainer_id: tid, save_version: sv, wire_version: wv)
         @log.call("server: saved account #{account_id} (#{body.bytesize}B)")
       end
+    end
+
+    # Server-authoritative economy. Serialized per account on the mailbox: apply the
+    # absolute value through the ledger (cap-checked, gap-safe idempotent), then
+    # ACK the canonical balance or REJECT (the client rolls back to it).
+    def handle_econ(conn, env, account_id)
+      field = env[:field]
+      value = env[:value]
+      seq   = env[:seq]
+      @mailbox.submit(account_id) do
+        status = @ledger.apply_econ(account_id, field, value, seq)
+        @reactor.post do
+          case status.first
+          when :ack, :dup then reply(conn, type: :econ_ack, field: field, value: status[1], seq: seq)
+          when :rej       then reply(conn, type: :econ_rej, field: field, value: status[1], seq: seq, reason: status[2].to_s)
+          end
+        end
+      end
+    end
+
+    # Canonical primitives the client reconciles onto its save at load (login_ok /
+    # auth_ok), plus the per-channel seq the client adopts as its next-seq authority.
+    def reconcile_block(account_id)
+      snap = @ledger.snapshot(account_id)
+      { econ: snap[:balances], econ_seq: snap[:last_seq] }
     end
 
     # Zone-scoped presence: track each player's current map and fan a position
