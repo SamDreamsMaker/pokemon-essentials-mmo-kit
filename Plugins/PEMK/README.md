@@ -146,9 +146,11 @@ false`, so real parties, Exp, money and the Pokédex are never touched.
   The only remaining `Marshal.load` of a peer-influenced graph is on the **client**
   — its own save, or a team it is about to battle — the accepted residual of the
   trusted-host model.
-- **Debug-mode entry:** loading server state can intermittently hit an mkxp-z
-  boot-stack `SystemStackError`; it is load-only and a relaunch recovers. Release
-  builds (compiled plugins, no critical-code wrapper) are far less exposed.
+- **Debug-mode boot stack.** Loading server state at the debug boot used to
+  intermittently hit an mkxp-z `SystemStackError` (load-only, a relaunch
+  recovered). The wire-hardening shrank the load-path stack (no repro in 55
+  launches) and the debug launchers now set `RUBY_THREAD_VM_STACK_SIZE` for ~16×
+  more VM-stack headroom (measured); release builds were always far less exposed.
 
 ## Diagnostics
 
