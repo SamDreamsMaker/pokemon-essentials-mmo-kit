@@ -24,8 +24,10 @@ module PEMK
       Config::ACCOUNT_TYPES.include?(type)
     end
 
-    # Called by RelayServer for a decoded account message from connection +conn_id+.
-    def self.handle(server, conn_id, msg)
+    # Called by RelayServer for a decoded account envelope from connection
+    # +conn_id+. +body+ is the frame's opaque body (raw bytes) when present — used
+    # by :save so the host stores the save without Marshal.loading its graph.
+    def self.handle(server, conn_id, msg, body = nil)
       case msg[:type]
       when :login
         acct = msg[:account_id]
@@ -37,8 +39,10 @@ module PEMK
       when :save
         acct = @conn_account[conn_id]
         return unless acct
-        ok = ServerStore.save_state(acct, msg[:state])
-        PEMK.log("server: save account=#{acct} -> #{ok}")
+        # The save graph rides in the opaque body; the host writes it verbatim and
+        # never Marshal.loads it (no RCE via a hostile :save).
+        ok = ServerStore.save_state(acct, body)
+        PEMK.log("server: save account=#{acct} -> #{ok} (#{body ? body.bytesize : 0} bytes)")
       when :mutate
         # Economy sync + hard cap. (True anti-cheat needs server-side game logic,
         # a later phase; for now the server enforces the range and can reject.)

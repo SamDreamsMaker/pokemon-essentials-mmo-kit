@@ -71,10 +71,10 @@ module PEMK
     nil
   end
 
-  def self.send_message(hash)
+  def self.send_message(hash, body = nil)
     c = @client
     return false unless c && c.connected?
-    c.send_message(hash)
+    c.send_message(hash, body)
   end
 
   # Idempotent: opens the relay (if hosting) and the client connection. Sets

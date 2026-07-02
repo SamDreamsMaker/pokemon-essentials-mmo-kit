@@ -47,10 +47,12 @@ module PEMK
       false
     end
 
-    # Sends a message Hash. Main-thread write; never raises.
-    def send_message(msg)
+    # Sends a message Hash, optionally with an opaque body (raw bytes shipped in a
+    # split frame so the host routes on the primitive envelope and never decodes
+    # the body). Main-thread write; never raises.
+    def send_message(msg, body = nil)
       return false unless @connected
-      @socket.write(MessageCodec.encode(msg))
+      @socket.write(body.nil? ? MessageCodec.encode(msg) : MessageCodec.encode_split(msg, body))
       true
     rescue => e
       @connected = false

@@ -160,7 +160,7 @@ module PEMK
       return unless dec   # undecodable / oversized / hostile envelope -> drop, never broadcast
       msg = dec[:env]
       if Config::ACCOUNT_TYPES.include?(msg[:type])
-        PEMK::ServerLogic.handle(self, sender_id, msg)
+        PEMK::ServerLogic.handle(self, sender_id, msg, dec[:body])
       elsif !msg[:to].nil?
         unicast(sender_id, msg, frame)
       else

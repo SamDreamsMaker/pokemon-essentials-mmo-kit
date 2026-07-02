@@ -49,13 +49,18 @@ module PEMK
       nil
     end
 
-    # Persists an account's state Hash (atomic-ish). Returns true on success.
-    def self.save_state(account_id, hash)
-      return false unless hash.is_a?(Hash)
+    # Persists an account's state from the client's RAW save bytes (atomic-ish).
+    # The bytes are stored verbatim — the host never Marshal.loads/dumps the save
+    # graph, so a hostile client cannot RCE the host through :save. The on-disk
+    # shape is unchanged (still a Marshal dump of the save hash, i.e. exactly the
+    # client's Game.rxdata), so existing server_saves keep loading. Returns true
+    # on success.
+    def self.save_state(account_id, bytes)
+      return false unless bytes.is_a?(String) && !bytes.empty?
       ensure_dir
       final = path(account_id)
       tmp = final + ".tmp"
-      File.open(tmp, "wb") { |f| Marshal.dump(hash, f) }
+      File.open(tmp, "wb") { |f| f.write(bytes) }
       File.delete(final) if File.file?(final)   # Windows rename won't overwrite
       File.rename(tmp, final)
       true
