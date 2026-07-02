@@ -1,9 +1,11 @@
 #===============================================================================
 # PEMK :: RelayServer
 #-------------------------------------------------------------------------------
-# The Phase 1 "walking skeleton" server: a dumb, authority-less TCP relay. It
-# accepts client connections and rebroadcasts every inbound frame to all OTHER
-# connected clients — pure presence/position fan-out, no game logic.
+# An authority-light TCP relay. It accepts client connections and moves frames
+# between them: account messages (login/save/economy) are handled by the
+# authoritative ServerLogic, ADDRESSED frames (those carrying a :to account id —
+# challenges, team exchange, the whole battle stream) go to ONLY that recipient,
+# and unaddressed presence frames fan out to everyone else. No game simulation.
 #
 # ARCHITECTURE (shaped by measured mkxp-z behaviour, see architecture doc §4):
 #   * ONE background thread only — a blocking `accept` loop — which just hands
@@ -15,9 +17,11 @@
 #     read_nonblock. No thread-per-client — which also fixes the scaling cost
 #     the audit flagged (§10-G7).
 #
-# The relay NEVER decodes (Marshal.load) client bytes: it forwards the raw
-# length-prefixed frame as-is, keeping the untrusted-deserialisation trust
-# boundary on the clients (MessageCodec, architecture doc §5/§10).
+# The relay decodes only each frame's small envelope (MessageCodec) to choose a
+# route; it then forwards the ORIGINAL raw length-prefixed frame unchanged, so it
+# never re-serialises game payloads. (Marshal-decoding untrusted client bytes here
+# is the same trust boundary the clients already accept — replacing Marshal with a
+# safe codec is a separate hardening step, architecture doc §5/§10.)
 #
 # Same MRI runtime as the client: the "host on Windows" model runs this
 # in-process; a dedicated Linux server runs the same code headless.
@@ -140,17 +144,42 @@ module PEMK
       end
     end
 
-    # Decode just enough to route: account messages (login/save) are handled by
-    # the authoritative ServerLogic and answered to the sender only; everything
-    # else (presence) is forwarded raw to the other clients, as in Phase 1.
+    # Decode only the frame's envelope to pick a route, then forward the ORIGINAL
+    # raw frame unchanged:
+    #   * account messages (login/save/economy) -> authoritative ServerLogic;
+    #   * addressed frames (a :to account id: challenges, team exchange, the whole
+    #     battle stream) -> ONLY that recipient (unicast), so private payloads
+    #     never reach any other client;
+    #   * everything else (presence, no :to) -> every other client (broadcast).
     def route(sender_id, frame)
       payload = frame[Config::LENGTH_BYTES, frame.bytesize - Config::LENGTH_BYTES]
       msg = MessageCodec.decode(payload)
       if msg.is_a?(Hash) && Config::ACCOUNT_TYPES.include?(msg[:type])
         PEMK::ServerLogic.handle(self, sender_id, msg)
+      elsif msg.is_a?(Hash) && !msg[:to].nil?
+        unicast(sender_id, msg, frame)
       else
         broadcast(sender_id, frame)
       end
+    end
+
+    # Deliver an ADDRESSED frame to only its :to account's connection, so private
+    # payloads (teams, per-round choices, the RNG stream) are invisible to every
+    # other connected client. If the recipient is unknown/offline, DROP the frame
+    # rather than fall back to broadcast — broadcasting it would re-open the exact
+    # leak this routing exists to close.
+    def unicast(sender_id, msg, frame)
+      conn = (PEMK::ServerLogic.conn_for(msg[:to]) rescue nil)
+      if conn.nil? || conn == sender_id
+        PEMK.log("relay: no route for #{msg[:type]} -> account #{msg[:to].inspect}")
+        return
+      end
+      sock = @clients[conn]
+      return unless sock
+      sock.write(frame)
+      @frames_out += 1
+    rescue
+      drop(conn)
     end
 
     # Fan a pre-framed message out to every client except the sender.

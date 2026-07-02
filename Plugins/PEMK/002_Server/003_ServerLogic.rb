@@ -16,6 +16,9 @@
 module PEMK
   module ServerLogic
     @conn_account = {}   # relay connection id => account (trainer) id
+    @account_conn = {}   # account (trainer) id => relay connection id (reverse of
+                         # the above, so the relay can route a :to-addressed frame
+                         # to that one recipient instead of broadcasting it)
 
     def self.account?(type)
       Config::ACCOUNT_TYPES.include?(type)
@@ -27,7 +30,7 @@ module PEMK
       when :login
         acct = msg[:account_id]
         acct = ServerStore.new_account_id if !acct.is_a?(Integer) || acct <= 0
-        @conn_account[conn_id] = acct
+        bind_account(conn_id, acct)
         state = ServerStore.load_state(acct)
         server.send_to(conn_id, { :type => :login_ok, :account_id => acct, :state => state })
         PEMK.log("server: login conn=#{conn_id} account=#{acct} state=#{state ? 'loaded' : 'new'}")
@@ -74,8 +77,25 @@ module PEMK
       end
     end
 
+    # Bind (or rebind) a connection to an account, keeping the reverse index
+    # consistent: a reconnecting account moves to its new connection, and a
+    # connection that re-logs under a new account releases its old reverse entry.
+    def self.bind_account(conn_id, acct)
+      prev = @conn_account[conn_id]
+      @account_conn.delete(prev) if prev && prev != acct && @account_conn[prev] == conn_id
+      @conn_account[conn_id] = acct
+      @account_conn[acct]    = conn_id
+    end
+
+    # Connection currently serving +account_id+, or nil if that account is offline.
+    # The relay calls this to route an addressed (:to) frame to one recipient.
+    def self.conn_for(account_id)
+      @account_conn[account_id]
+    end
+
     def self.forget(conn_id)
-      @conn_account.delete(conn_id)
+      acct = @conn_account.delete(conn_id)
+      @account_conn.delete(acct) if acct && @account_conn[acct] == conn_id
     end
   end
 end
