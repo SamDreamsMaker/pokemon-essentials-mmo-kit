@@ -25,11 +25,12 @@ class PokemonLoadScreen
       # normal local load screen.
       if PEMK::Auth.logged_in?
         state = PEMK::Auth.pending_state
-        # Use pbCloseScene (plain dispose), NOT pbEndScene: pbEndScene runs a fade
-        # loop (pbFadeOutAndHide(@sprites) { pbUpdate }) that drives Graphics.update
-        # from inside the load screen — the mkxp-z boot-stack hazard. Game.load /
-        # Game.start_new do their own transition into the map anyway.
-        (@scene.pbCloseScene rescue nil)
+        # We skipped the scene's pbStartScene, so it has no @viewport/@sprites to
+        # dispose — only close it if it was actually started (guards the nil
+        # @viewport in pbCloseScene). NOT pbEndScene: its fade loop drives
+        # Graphics.update from the load screen (the mkxp-z boot-stack hazard).
+        # Game.load / Game.start_new do their own transition into the map anyway.
+        (@scene.pbCloseScene rescue nil) if @scene && (@scene.instance_variable_get(:@viewport) rescue nil)
         if state.is_a?(Hash) && !state.empty?
           Game.load(state)         # returning account: hydrate the server save
         else
