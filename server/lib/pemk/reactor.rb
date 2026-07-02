@@ -48,7 +48,6 @@ module PEMK
       @conns    = {}
       @running  = false
       @posts    = Queue.new
-      @wmutex   = Mutex.new
       @wake_r, @wake_w = IO.pipe
     end
 
@@ -132,7 +131,10 @@ module PEMK
     private
 
     def wake!
-      @wmutex.synchronize { @wake_w.write("x") }
+      # 1-byte pipe writes are atomic (PIPE_BUF), so no lock is needed — and this
+      # MUST stay lock-free because it runs from the SIGTERM/SIGINT trap, where
+      # Mutex#synchronize raises ThreadError. write_nonblock never blocks the trap.
+      @wake_w.write_nonblock("x", exception: false)
     rescue IOError, SystemCallError
       nil
     end
