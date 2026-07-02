@@ -90,10 +90,28 @@ class InventoryTest < Minitest::Test
     assert_includes @inv.validate(big), "too_many_items"
   end
 
-  def test_snapshot_returns_last_seq
-    assert_equal 0, @inv.snapshot(@acct)[:last_seq]
-    @inv.apply_inv(@acct, { POTION: 1 }, 7)
-    assert_equal 7, @inv.snapshot(@acct)[:last_seq]
+  def test_snapshot_returns_bag_and_last_seq
+    snap0 = @inv.snapshot(@acct)
+    assert_nil snap0[:bag]              # unseeded (no row) -> nil: client keeps its blob bag
+    assert_equal 0, snap0[:last_seq]
+    @inv.apply_inv(@acct, { POTION: 5, GREAT_BALL: 2 }, 7)
+    snap = @inv.snapshot(@acct)
+    assert_equal({ POTION: 5, GREAT_BALL: 2 }, snap[:bag])   # symbolized for the client applier
+    assert_equal 7, snap[:last_seq]
+  end
+
+  def test_snapshot_of_seeded_empty_bag_is_empty_not_nil
+    @inv.apply_inv(@acct, {}, 1)
+    assert_equal({}, @inv.snapshot(@acct)[:bag])   # seeded empty IS authoritative (overwrites), unlike unseeded nil
+  end
+
+  def test_oversized_bag_is_not_shipped_in_login_snapshot
+    big = {}
+    3000.times { |i| big[:"VERY_LONG_ITEM_NAME_NUMBER_#{i}"] = 1 }   # bytes exceed SHIP_MAX_BYTES
+    @inv.apply_inv(@acct, big, 1)
+    snap = @inv.snapshot(@acct)
+    assert_nil snap[:bag]           # too big to ride login_ok -> nil (client keeps its blob bag, no login brick)
+    assert_equal 1, snap[:last_seq] # seq still advances (the record exists)
   end
 
   def test_material_divergence_is_logged

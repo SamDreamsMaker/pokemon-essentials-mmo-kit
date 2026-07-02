@@ -16,7 +16,8 @@ module PEMK
   # wrongly accept a replayed OLDER whole-bag). Runs under the per-account
   # PlayerMailbox, so an account's :inv/:econ/:save are already serialized.
   class Inventory
-    DIVERGENCE_MIN = 8   # only log a blob-vs-record divergence this material (coarse tamper signal)
+    DIVERGENCE_MIN = 8         # only log a blob-vs-record divergence this material (coarse tamper signal)
+    SHIP_MAX_BYTES = 60_000    # never ship a login bag so large it pushes login_ok past the 64 KiB wire cap
 
     def initialize(db, caps, logger: nil)
       @db   = db
@@ -53,11 +54,23 @@ module PEMK
       result
     end
 
-    # login_ok / auth_ok: the client adopts inv_seq as its next :inv-seq authority.
-    # The full bag is deliberately NOT shipped — reconcile is server-side, so a
-    # client-held server-bag would be wasted bytes a cheater controls anyway.
+    # login_ok / auth_ok: the client adopts inv_seq AND restores the bag from the
+    # server record (server-persistent, like the economy — no save needed). bag is
+    # nil when the account has NO record yet (unseeded): the client then keeps its
+    # blob bag and the first flush seeds the record. A present bag (even {}) is
+    # authoritative and overwrites the client bag on load.
     def snapshot(account_id)
-      { last_seq: @db[:inventory_snapshots].where(account_id: account_id).get(:last_seq) || 0 }
+      row = @db[:inventory_snapshots].where(account_id: account_id).first
+      return { bag: nil, last_seq: 0 } unless row
+
+      bag = (row[:bag] || {}).to_h
+      # A tampered/oversized bag must NEVER brick login: if shipping it could push
+      # login_ok past the wire envelope cap, ship nil instead (the client keeps its
+      # blob bag and re-seeds the record). Legit bags are far under this.
+      est = bag.sum { |k, _| k.to_s.bytesize + 14 }
+      return { bag: nil, last_seq: row[:last_seq] } if est > SHIP_MAX_BYTES
+
+      { bag: bag.transform_keys(&:to_sym), last_seq: row[:last_seq] }
     end
 
     # Headless STRUCTURAL checks -> array of reason strings. FLAG, never reject.

@@ -123,11 +123,12 @@ class ServerEconTest < Minitest::Test
   # SAME mailbox: server records + acks (never rejects), login carries inv_seq. Also
   # proves the real Config derived the inventory caps and the codec round-trips the
   # bag Hash as pure primitives.
-  def test_inv_records_and_login_carries_inv_seq
+  def test_inv_records_and_login_restores_the_bag
     c = open_conn
     register(c, "bag@t.co", "password1")
     lo = login(c, "bag@t.co", "password1")
     assert_equal 0, lo[:inv_seq]
+    assert_nil lo[:inv]                       # unseeded: no bag shipped -> client keeps its blob bag
 
     send_env(c, { type: :inv, bag: { POTION: 5, GREAT_BALL: 2 }, seq: 1 })
     ack = recv(c)
@@ -139,6 +140,7 @@ class ServerEconTest < Minitest::Test
     c2 = open_conn
     lo2 = login(c2, "bag@t.co", "password1")
     assert_equal 1, lo2[:inv_seq]
+    assert_equal({ POTION: 5, GREAT_BALL: 2 }, lo2[:inv])   # server-persistent: bag restored on login
     c2.close
   end
 end

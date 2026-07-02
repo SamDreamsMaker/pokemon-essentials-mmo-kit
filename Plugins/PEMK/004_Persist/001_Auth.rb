@@ -20,6 +20,7 @@ module PEMK
     @account_id    = nil
     @pending_state = nil
     @pending_econ  = nil
+    @pending_inv   = nil
     @logged_in     = false
 
     def self.account_id;    @account_id;    end
@@ -120,6 +121,7 @@ module PEMK
       @account_id    = reply[:account_id]
       @pending_state = reply[:_body] ? (Marshal.load(reply[:_body]) rescue nil) : nil
       @pending_econ  = reply[:econ].is_a?(Hash) ? reply[:econ] : nil
+      @pending_inv   = reply[:inv].is_a?(Hash) ? reply[:inv] : nil  # nil = unseeded (keep blob bag)
       @logged_in     = true
       PEMK.set_self_id(@account_id)
       (PEMK::Sync.reset rescue nil)                          # fresh socket -> drop stale dirty/seq baseline
@@ -155,6 +157,22 @@ module PEMK
           PEMK.log("auth: reconcile field #{field} error: #{e.class}: #{e.message}")
         end
       end
+    end
+
+    # Restore the bag from the server (server-persistent, like the economy). A
+    # SEEDED record (a Hash, even {}) is authoritative and overwrites $bag; an
+    # UNSEEDED account (nil) keeps its blob bag and seeds the record on the first
+    # flush. Runs at load AFTER the blob populated $bag (see PersistHooks).
+    def self.reconcile_inventory
+      inv = @pending_inv
+      @pending_inv = nil
+      if inv.is_a?(Hash)
+        PEMK::Inventory.apply_bag(inv)                 # authoritative overwrite
+      else
+        (PEMK::Inventory.capture_on_load rescue nil)   # unseeded -> seed from the blob bag
+      end
+    rescue => e
+      PEMK.log("auth: reconcile_inventory error: #{e.class}: #{e.message}")
     end
 
     # Send a message and block for one of +types+, pumping the client WITHOUT

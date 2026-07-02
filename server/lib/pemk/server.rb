@@ -223,11 +223,13 @@ module PEMK
 
     # Canonical primitives the client reconciles onto its save at load (login_ok /
     # auth_ok), plus the per-channel seq the client adopts as its next-seq authority.
-    # inv carries only the seq: the bag is not shipped (reconcile is server-side).
+    # inv carries the whole bag (server-persistent, like economy): nil when unseeded
+    # so the client keeps its blob bag and seeds the record on the first flush.
     def reconcile_block(account_id)
       snap = @ledger.snapshot(account_id)
+      inv  = @inventory.snapshot(account_id)
       { econ: snap[:balances], econ_seq: snap[:last_seq],
-        inv_seq: @inventory.snapshot(account_id)[:last_seq] }
+        inv: inv[:bag], inv_seq: inv[:last_seq] }
     end
 
     # Zone-scoped presence: track each player's current map and fan a position
