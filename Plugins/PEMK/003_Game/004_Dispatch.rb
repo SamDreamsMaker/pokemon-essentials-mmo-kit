@@ -13,9 +13,12 @@ module PEMK
         Remotes.apply_pos(msg)
       when :leave
         Remotes.remove(msg[:id])
-      when :mutate_ack
-        # Server's canonical economy value (client applies it, no re-notify).
-        $player.pokemmo_apply_economy(msg[:field], msg[:value]) if $player && msg[:value].is_a?(Integer)
+      when :econ_ack, :econ_rej
+        # Server's canonical economy balance: :econ_ack is the accepted value,
+        # :econ_rej the current balance an over-cap/invalid change rolled back to.
+        # Either way the client reconciles to it via the trusted, non-notifying
+        # setter (no echo back to the server).
+        $player.pokemmo_apply_economy(msg[:field], msg[:value]) if $player && msg[:field] && msg[:value].is_a?(Integer)
       when :badge_ack
         $player.pokemmo_apply_badge(msg[:index], msg[:owned]) if $player && msg[:index].is_a?(Integer)
       when :challenge, :challenge_accept, :challenge_decline

@@ -19,6 +19,7 @@ module PEMK
 
     @account_id    = nil
     @pending_state = nil
+    @pending_econ  = nil
     @logged_in     = false
 
     def self.account_id;    @account_id;    end
@@ -118,12 +119,31 @@ module PEMK
     def self.apply_login(reply)
       @account_id    = reply[:account_id]
       @pending_state = reply[:_body] ? (Marshal.load(reply[:_body]) rescue nil) : nil
+      @pending_econ  = reply[:econ].is_a?(Hash) ? reply[:econ] : nil
       @logged_in     = true
       PEMK.set_self_id(@account_id)
-      (PEMK::Sync.reset rescue nil)   # fresh socket -> drop any stale dirty/seq baseline
+      (PEMK::Sync.reset rescue nil)                          # fresh socket -> drop stale dirty/seq baseline
+      (PEMK::Sync.adopt_econ_seq(reply[:econ_seq]) rescue nil) # ... then adopt the server's seq authority
       save_token(reply[:token]) if reply[:token]
       save_local_account(@account_id)
-      PEMK.log("auth: #{reply[:type]} account=#{@account_id} state=#{@pending_state ? 'received' : 'new'}")
+      PEMK.log("auth: #{reply[:type]} account=#{@account_id} state=#{@pending_state ? 'received' : 'new'} econ=#{@pending_econ ? @pending_econ.size : 0}")
+    end
+
+    # Reconcile the ledger's canonical economy onto $player once the world exists
+    # (called from Game.load / Game.start_new after apply_identity). The economy is
+    # server-owned, so the ledger snapshot overrides whatever the loaded blob held.
+    # Applied through the trusted, non-notifying setter so it never echoes back.
+    # Consumed once: a new account's snapshot is empty and this is a no-op.
+    def self.reconcile_economy
+      econ = @pending_econ
+      @pending_econ = nil
+      return unless econ.is_a?(Hash) && $player
+
+      econ.each do |field, value|
+        $player.pokemmo_apply_economy(field.to_sym, value) if value.is_a?(Integer)
+      end
+    rescue => e
+      PEMK.log("auth: reconcile_economy error: #{e.class}: #{e.message}")
     end
 
     # Send a message and block for one of +types+, pumping the client WITHOUT

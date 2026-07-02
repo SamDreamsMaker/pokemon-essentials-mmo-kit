@@ -54,6 +54,7 @@ module Game
       def start_new
         pokemmo_orig_start_new
         PEMK::Auth.apply_identity
+        PEMK::Auth.reconcile_economy       # ledger snapshot (empty for a new account)
         # Server-authoritative: the local Game.rxdata is a disposable per-session
         # cache, so overwriting it is always fine. Clear begun_new_game so the core
         # skips its "a different game is already saved" warning on the next save.
@@ -63,6 +64,7 @@ module Game
       def load(save_data)
         pokemmo_orig_load(save_data)
         PEMK::Auth.apply_identity
+        PEMK::Auth.reconcile_economy       # ledger is the economy authority, over the blob
         PEMK::Auth.clear_pending
       end
 

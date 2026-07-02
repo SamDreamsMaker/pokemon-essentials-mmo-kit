@@ -42,6 +42,14 @@ module PEMK
       @blob_hash = nil
     end
 
+    # Adopt the server's canonical next-seq authority on (re)connect (from the
+    # login_ok/auth_ok snapshot): the client's next :econ send continues past the
+    # server's last recorded seq, so a replay across a reconnect can neither collide
+    # with a consumed seq nor be silently deduped against one. Call AFTER reset.
+    def adopt_econ_seq(n)
+      @seq[:economy] = n if n.is_a?(Integer) && n > @seq[:economy]
+    end
+
     # --- OBSERVER entry points (called from the mutation aliases) ---------------
     def mark_econ(field, value)
       return unless value.is_a?(Integer)

@@ -4,7 +4,7 @@
 # Routes the player's economy changes through the server: each setter applies
 # optimistically (with the core clamp), then notifies the server, which re-clamps
 # to the game cap and acks the canonical value. The client applies that ack via a
-# trusted setter that does NOT re-notify (Dispatch :mutate_ack).
+# trusted setter that does NOT re-notify (Dispatch :econ_ack / :econ_rej).
 #
 # This is a FOUNDATION, not full anti-cheat: a modified client can still lie in
 # memory — only server-computed gameplay (a later phase) truly prevents that.
@@ -40,7 +40,8 @@ class Player
     def soot=(v)          ; self.pokemmo_orig_soot = v          ; PEMK::Economy.notify(:soot, @soot)                   ; end
   end
 
-  # Trusted applier for server reconciliation (:mutate_ack) — never re-notifies.
+  # Trusted applier for server reconciliation (:econ_ack/:econ_rej + reconcile-on-
+  # load) — sets the canonical balance and never re-notifies the server.
   def pokemmo_apply_economy(field, value)
     case field
     when :money         then self.pokemmo_orig_money = value
