@@ -21,7 +21,15 @@ class PokemonLoadScreen
       if state.is_a?(Hash) && !state.empty?
         # Returning account: the server copy is authoritative — load it and skip
         # the local menu (works even on a machine with no local save).
-        (@scene.pbEndScene rescue nil)
+        #
+        # Use pbCloseScene (plain sprite/viewport dispose), NOT pbEndScene:
+        # pbEndScene runs a fade loop (pbFadeOutAndHide(@sprites) { pbUpdate })
+        # that repeatedly drives Graphics.update from inside the load screen — that
+        # is what intermittently blew mkxp-z's stack (SystemStackError on entry),
+        # and is the same pbFadeOutAndHide that raised the MessageConfig each-for-nil.
+        # pbCloseScene disposes without the fade, so both go away. Game.load fades
+        # into the map itself anyway.
+        (@scene.pbCloseScene rescue nil)
         Game.load(state)
         return
       end

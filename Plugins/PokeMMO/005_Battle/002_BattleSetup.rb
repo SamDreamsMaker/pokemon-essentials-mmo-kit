@@ -24,8 +24,9 @@ module PokeMMO
     # Send our party to +to_id+ (called by both sides when a battle is agreed).
     def self.send_team(to_id)
       return unless PokeMMO.client && PokeMMO.client.connected? && $player && $player.party
-      PokeMMO.send_message({ :type => :battle_team, :from => PokeMMO.self_id,
-                             :name => own_name, :to => to_id, :party => $player.party })
+      ttype = ($player.trainer_type rescue nil)
+      PokeMMO.send_message({ :type => :battle_team, :from => PokeMMO.self_id, :name => own_name,
+                             :to => to_id, :party => $player.party, :trainer_type => ttype })
       PokeMMO.log("battle: sent my team (#{$player.party.length} Pokemon) to #{to_id}")
     end
 
@@ -34,7 +35,8 @@ module PokeMMO
       return unless msg[:to] == PokeMMO.self_id
       party = msg[:party]
       return unless party.is_a?(Array) && !party.empty?
-      remote = { :name => msg[:name] || "?", :party => party, :id => msg[:from] }
+      remote = { :name => msg[:name] || "?", :party => party, :id => msg[:from],
+                 :trainer_type => msg[:trainer_type] }
       @opponents[msg[:from]] = remote
       PokeMMO.log("battle: received team from #{msg[:from]} (#{party.length} Pokemon)")
       @pending_launch = remote   # both teams are known on this side -> start the battle

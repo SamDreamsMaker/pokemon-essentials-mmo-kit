@@ -34,6 +34,11 @@ module PokeMMO
             @pokemmo_rng_buf.concat(pkt[:rng] || [])
           else
             return 0 if @decision != 0
+            endpkt = PokeMMO::BattleNet.take_end
+            if endpkt
+              @decision = (endpkt[:decision] && endpkt[:decision] != 0) ? endpkt[:decision] : 5
+              return 0   # host has ended: stop replaying and let the loop finish
+            end
             if !(PokeMMO.client && PokeMMO.client.connected?)
               PokeMMO.log("battle: RNG stream starved (peer gone) -> abort")
               @decision = 5
@@ -59,10 +64,17 @@ module PokeMMO
       @pokemmo_rng_sent = log.length
     end
 
-    # Ship the send-out intro RNG before the first round begins.
+    # Ship the send-out intro RNG before the first round begins; on the way out,
+    # the host flushes the last RNG and tells the client the battle is over so a
+    # lagging client can never hang waiting for a round/choice that won't come.
     def pbBattleLoop
       pokemmo_flush_rng
       super
+      if PokeMMO::BattleNet.host?
+        pokemmo_flush_rng
+        PokeMMO::BattleNet.send_end(@pokemmo_peer_id, @decision)
+        PokeMMO.log("battle: host sent :battle_end (decision=#{@decision})")
+      end
     end
 
     # Ship this round's RNG (attack phase + end-of-round) once it is generated.

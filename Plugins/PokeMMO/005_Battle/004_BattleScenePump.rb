@@ -16,6 +16,10 @@ class Battle::Scene
     def pbUpdate(cw = nil)
       pokemmo_orig_battle_pbUpdate(cw)
       PokeMMO::Pump.tick
+      # 4c.6: stream the host's RNG every frame (not just per round) so the client
+      # replays near-simultaneously instead of a whole turn behind. No-op on the
+      # client and when there is nothing new to send.
+      @battle.pokemmo_flush_rng if @battle.respond_to?(:pokemmo_flush_rng)
     end
   end
 end

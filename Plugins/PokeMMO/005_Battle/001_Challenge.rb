@@ -25,6 +25,10 @@ module PokeMMO
         pbMessage(_INTL("You are not connected to a server."))
         return
       end
+      if !$player || $player.able_pokemon_count == 0
+        pbMessage(_INTL("You have no Pokémon able to battle!"))
+        return
+      end
       list = PokeMMO::Remotes.players.values
       if list.empty?
         pbMessage(_INTL("There are no other players on this map."))
@@ -71,7 +75,11 @@ module PokeMMO
         elsif @incoming
           inc = @incoming
           @incoming = nil
-          if pbConfirmMessage(_INTL("{1} wants to battle! Accept?", inc[:name]))
+          if !$player || $player.able_pokemon_count == 0
+            pbMessage(_INTL("You have no Pokémon able to battle!"))
+            PokeMMO.send_message({ :type => :challenge_decline, :from => PokeMMO.self_id,
+                                   :name => own_name, :to => inc[:from] })
+          elsif pbConfirmMessage(_INTL("{1} wants to battle! Accept?", inc[:name]))
             PokeMMO.send_message({ :type => :challenge_accept, :from => PokeMMO.self_id,
                                    :name => own_name, :to => inc[:from] })
             PokeMMO::BattleSetup.send_team(inc[:from])   # battle launches once both teams are in

@@ -44,10 +44,15 @@ module PokeMMO
         return false
       end
       foe_party = remote[:party].map { |pk| deep_copy(pk) }.select { |pk| pk.is_a?(Pokemon) }
-      return false if foe_party.empty?
+      if foe_party.none? { |pk| pk && !pk.egg? && pk.hp > 0 }
+        pbMessage(_INTL("{1} has no Pokémon able to battle!", remote[:name] || "?"))
+        return false
+      end
       foe_name = remote[:name].to_s.strip
       foe_name = "Rival" if foe_name.empty?
-      foe = NPCTrainer.new(foe_name, $player.trainer_type)   # player's type = a guaranteed-valid placeholder
+      ttype = remote[:trainer_type]
+      ttype = $player.trainer_type unless ttype && (GameData::TrainerType.try_get(ttype) rescue nil)
+      foe = NPCTrainer.new(foe_name, ttype)   # the REMOTE player's trainer type -> correct opponent sprite
       foe.party = foe_party
       my_party = $player.party.map { |pk| deep_copy(pk) }    # battle on copies, real party untouched
 

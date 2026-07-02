@@ -83,6 +83,11 @@ module PokeMMO
         cmd = PokeMMO::BattleNet.take_choice(@pokemmo_round, idx)
         return cmd if cmd
         return nil if @decision != 0
+        endpkt = PokeMMO::BattleNet.take_end
+        if endpkt   # host ended the battle: stop waiting for a choice that won't come
+          @decision = (endpkt[:decision] && endpkt[:decision] != 0) ? endpkt[:decision] : 5
+          return nil
+        end
         waited += 1
         if waited > WAIT_TIMEOUT_FRAMES || !(PokeMMO.client && PokeMMO.client.connected?)
           PokeMMO.log("battle: remote choice timeout/disconnect (r=#{@pokemmo_round} idx=#{idx}) -> abort")
