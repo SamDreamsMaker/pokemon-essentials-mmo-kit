@@ -1,42 +1,47 @@
-﻿# Pokémon Essentials
+# PEMK — Pokémon Essentials MMO Kit
 
-Based on Essentials v21.1.
+Turn solo **Pokémon Essentials v21.1** (running under **mkxp-z**) into a small
+multiplayer game — **without editing a single core script**. PEMK is a
+self-contained plugin (`Plugins/PEMK/`) that hooks in through `EventHandlers`,
+`MenuHandlers` and guarded method aliases, so the fork stays updatable from
+upstream Essentials.
 
-You can build your fangame on top of a fork of this repository. Doing so will let you update your fangame with improvements made to this repo as soon as they are made.
+It's built to be **simple to deploy**: play with friends over LAN from Windows,
+or run a dedicated host on Linux — the same MRI 3.1 Ruby code, switched at boot
+into `client` or `host` mode.
 
-## Usage
+## What works today
 
-1. Fork this repo.
-2. Get a copy of Essentials v21.1 (a download link cannot be provided here).
-3. Clone your forked repo into the Essentials v21.1 folder, replacing the existing files with the ones from the repo.
+- **Presence** — players walk the same maps together in real time (menus included).
+- **Server identity & persistence** — the host assigns each account a stable id and
+  stores its full game state on disk (`server_saves/<id>.rxdata`), surviving a restart.
+- **Economy / badges / bag & box sync** — money, coins, BP, soot, badges and
+  inventory changes are pushed to the host and server-clamped.
+- **Synchronized PvP battles** — challenge another player on your map; a real,
+  deterministic battle runs on both screens (host-authoritative: both players'
+  choices are exchanged and the host's RNG stream is replayed by the client), and
+  each player sees their own team on the player side.
 
-From here, you can edit this project to turn it into your fangame/develop mods. When this repo is updated, you can pull the changes to update your fork and get the updates into your fangame/modding environment.
+## Quick start (two players on one PC)
 
-## Scripts
+1. Launch **`PlayMMO-debug.bat`** — your main account (it hosts).
+2. Launch **`PlayMMO-guest.bat`** — a distinct, persistent second player.
+3. Meet on the same map and walk around. To fight: pause menu → **Battle Player**
+   → pick the other player → they accept → a synchronized battle starts.
 
-The scripts no longer live in the Scripts.rxdata file. They have been extracted into separate files and placed in the Data/Scripts/ folder (and subfolders within). This makes it easier to work with other people and keep track of changes.
+`ROLE = :auto` makes this zero-config: the first instance binds the port and
+**hosts**; the second finds it busy and **joins**. LAN / dedicated-host setup,
+configuration and build-packaging are documented in the plugin README.
 
-The scripts are loaded into the game alphanumerically, starting from the top folder (Data/Scripts/) and going depth-first. That is, all scripts in a given folder are loaded, and then each of its subfolder is checked in turn (again in alphanumerical order) for files/folders to load/check.
+## Docs
 
-### Extracting and reintegrating scripts
+- **SDK guide, configuration & LAN/deploy:** [`Plugins/PEMK/README.md`](Plugins/PEMK/README.md)
+- **Architecture & conversion audit:** [`docs/architecture/MMO_CONVERSION_AUDIT.md`](docs/architecture/MMO_CONVERSION_AUDIT.md)
 
-This repo contains two script files in the main folder:
+## Base engine
 
-* scripts_extract.rb - Run this to extract all scripts from Scripts.rxdata into individual .rb files (any existing individual .rb files are deleted).
-  * Scripts.rxdata is backed up to ScriptsBackup.rxdata, and is then replaced with a version that reads the individual .rb files and does nothing else.
-* scripts_combine.rb - Run this to reintegrate all the individual .rb files back into Scripts.rxdata.
-  * The individual .rb files are left where they are, but they no longer do anything.
-
-You will need Ruby installed to run these scripts. The intention is to replace these with something more user-friendly.
-
-## Files not in the repo
-
-The .gitignore file lists the files that will not be included in this repo. These are:
-
-* The Audio/, Graphics/, Plugins/ and Screenshots/ folders and everything in them.
-* Everything in the Data/ folder, except for:
-  * The Data/Scripts/ folder and everything in there.
-  * Scripts.rxdata (a special version that just loads the individual script files).
-  * messages_core.dat, which contains common messages and is useful for translation projects.
-* A few files in the main project folder (two of the Game.xxx files, the RGSS dll file and errorlog.txt).
-* Temporary files.
+PEMK is built on **Pokémon Essentials v21.1** (© Maruno & the Essentials team) and
+is a fork of [maruno17/pokemon-essentials](https://github.com/Maruno17/pokemon-essentials).
+The engine's own scripts live in `Data/Scripts/`; PEMK never touches them, so the
+fork can still pull upstream improvements. The game bundles Nintendo-derived
+assets, so keep builds to **private tests**, not public distribution.

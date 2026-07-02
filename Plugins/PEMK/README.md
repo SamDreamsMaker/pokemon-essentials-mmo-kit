@@ -97,14 +97,14 @@ Without this file, `ROLE = :auto` is used (host-or-join on `127.0.0.1`).
              RemotePlayer      Game_Character subclass for other players (+ Remotes registry)
              Presence          builds/emits the local player's position (step/turn/heartbeat)
              Dispatch          routes inbound messages
-             Hooks             EventHandlers + the pbUpdateSceneMap alias (the pump)
+             Hooks             EventHandlers + the Graphics.update alias (the pump)
 004_Persist/ Auth              blocking login at the load screen; server state hydration
              PersistHooks      Game.load/save aliases; push saves to the host
              Economy/Badges/Inventory  mirror local changes to the host, server-clamped
 005_Battle/  Challenge         the challenge / accept handshake (pause-menu option)
              BattleSetup       exchange parties on accept, then launch
              BattleLauncher    build the battle on Marshal copies (no save side effects)
-             BattleScenePump   keep the network pump alive during a battle
+             BattleScenePump   stream the host's RNG each frame during a battle
              BattleNet         battle-stream transport + per-frame inbound queues
              NetBattles        HostBattle / ClientBattle (role-based)
              BattleChoiceSync  exchange each side's human choice per round
@@ -114,10 +114,13 @@ Without this file, `ROLE = :auto` is used (host-or-join on `127.0.0.1`).
 **The pump model.** Measured mkxp-z behaviour forced this design (audit §4): its
 scheduler starves threads spawned off the main thread and `IO.select` misses
 pending connections on a listening socket. So all socket I/O is **non-blocking
-and driven from the main thread** once per frame via `Pump.tick` — from
-`:on_frame_update`, an alias of `pbUpdateSceneMap` (message/menu loops), and an
-alias of `Battle::Scene#pbUpdate` (during battles). The only background thread is
-the relay's blocking `accept` loop.
+and driven from the main thread** once per frame via `Pump.tick`. It runs from a
+single alias of **`Graphics.update`** — the one method called exactly once per
+frame in *every* scene, so the network (and presence heartbeats) stay alive in the
+overworld, in battles, and inside full-screen menus (Bag, Pokédex, Party…) alike,
+with no double-pumping. `Pump.tick` no-ops until a game is loaded (`$player`), so
+the title/load screen is untouched; login pumps manually. The only background
+thread is the relay's blocking `accept` loop.
 
 **How PvP battles stay in sync.** Each instance runs its *own* battle with its own
 team as party 1, so the untouched scene shows each player their own perspective.
