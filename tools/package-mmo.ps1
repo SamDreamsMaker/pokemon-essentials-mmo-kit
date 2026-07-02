@@ -4,7 +4,7 @@
 
   Usage (from anywhere):
       powershell -ExecutionPolicy Bypass -File tools\package-mmo.ps1
-      # optional custom output:  -Output "C:\path\PokeMMO.zip"
+      # optional custom output:  -Output "C:\path\PEMK.zip"
 
   What it does:
     - copies the game, EXCLUDING dev-only cruft (.git, docs, tools, logs, the
@@ -14,7 +14,7 @@
 
   IMPORTANT: the plugin runs from Data/PluginScripts.rxdata (compiled). That file
   is (re)built whenever you launch the game in DEBUG (PlayMMO-debug.bat). So after
-  ANY change to Plugins/PokeMMO, launch once in debug BEFORE packaging, or the
+  ANY change to Plugins/PEMK, launch once in debug BEFORE packaging, or the
   build will ship stale plugin code.
 #>
 param([string]$Output = "")
@@ -22,8 +22,8 @@ param([string]$Output = "")
 $ErrorActionPreference = "Stop"
 $root  = Split-Path -Parent (Split-Path -Parent $PSCommandPath)   # tools/.. = game root
 $stamp = Get-Date -Format "yyyyMMdd-HHmmss"
-if (-not $Output) { $Output = Join-Path ([Environment]::GetFolderPath('Desktop')) "PokeMMO-Build-$stamp.zip" }
-$stage = Join-Path $env:TEMP "PokeMMO-stage-$stamp"
+if (-not $Output) { $Output = Join-Path ([Environment]::GetFolderPath('Desktop')) "PEMK-Build-$stamp.zip" }
+$stage = Join-Path $env:TEMP "PEMK-stage-$stamp"
 
 Write-Host "Game root : $root"
 Write-Host "Output zip: $Output"
@@ -47,7 +47,7 @@ if ($LASTEXITCODE -ge 8) { throw "robocopy failed with code $LASTEXITCODE" }
 
 # Connection-config template for the recipient.
 $cfg = @"
-# PokeMMO connection config. Uncomment and edit ONE section.
+# PEMK connection config. Uncomment and edit ONE section.
 #
 # --- Hosting (friends connect to your IP; allow the Windows Firewall prompt) ---
 # role = host

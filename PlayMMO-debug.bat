@@ -1,5 +1,5 @@
 @echo off
-rem Launches Pokemon Essentials MMO Kit in debug mode (loads the PokeMMO plugin
+rem Launches Pokemon Essentials MMO Kit in debug mode (loads the PEMK plugin
 rem from source and enables the debug menu). Double-click this file twice to test
 rem multiplayer locally:
 rem   - 1st instance = host (binds port 9998 on 127.0.0.1)

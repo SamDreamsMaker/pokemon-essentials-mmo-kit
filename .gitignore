@@ -3,7 +3,7 @@ Audio/
 Graphics/
 Plugins/*
 # ...but keep the versioned MMO SDK plugin (throwaway/diagnostic plugins stay ignored)
-!Plugins/PokeMMO/
+!Plugins/PEMK/
 Screenshots/
 
 # Data folder, but not Data/Scripts folder or messages_core.dat
@@ -15,10 +15,10 @@ Data/*
 # Files in the main project folder
 errorlog.txt
 Game.ini
-Game.rxproj
+*.rxproj
 RGSS*.dll
 
-# PokeMMO SDK runtime artifacts (logs + throwaway diagnostic reports)
+# PEMK SDK runtime artifacts (logs + throwaway diagnostic reports)
 mmo.log
 mmo_*.txt
 mmo_*.json

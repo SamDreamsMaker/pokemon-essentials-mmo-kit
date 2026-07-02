@@ -4,5 +4,5 @@ rem account), to test multiplayer on ONE PC with two different players:
 rem   - window 1: PlayMMO-debug.bat  (your usual account)
 rem   - window 2: PlayMMO-guest.bat  (a distinct guest player)
 cd /d "%~dp0"
-set POKEMMO_GUEST=1
+set PEMK_GUEST=1
 start "" "Game.exe" debug

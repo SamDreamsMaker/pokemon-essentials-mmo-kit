@@ -1,5 +1,0 @@
-Name = PokeMMO
-Version = 0.1.0
-Essentials = 21.1
-Website = https://github.com/SamDreamsMaker/pokemon-essentials-mmo-kit
-Credits = MMO Kit
