@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "time"
+require "set"
 
 module PEMK
   # Milestone 1 server: reactor + worker pool + a connection AUTH-GATE. A socket is
@@ -32,6 +33,7 @@ module PEMK
       @characters = Characters.new(@db)
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
+      @zones    = Hash.new { |h, k| h[k] = Set.new }   # map_id => Set(conn); reactor-thread only
       @reactor  = Reactor.new(
         host: @config.bind, port: @config.port,
         on_frame: method(:on_frame), on_close: method(:on_close), logger: @log
@@ -93,9 +95,10 @@ module PEMK
       when :login    then handle_login(conn, env)
       when :auth     then handle_auth(conn, env)
       when :save     then handle_save(env, dec[:body], authed)
+      when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       else
-        # Authenticated gameplay frame — per-player mailbox routing + economy/
-        # presence handlers land in the next increments.
+        # Other authenticated gameplay frames (economy, battle) — per-player mailbox
+        # routing + handlers land in later milestones.
         @log.call("server: authed #{type.inspect} from account #{authed}")
       end
     end
@@ -172,6 +175,29 @@ module PEMK
       end
     end
 
+    # Zone-scoped presence: track each player's current map and fan a position
+    # update out ONLY to same-map connections (the 500-CCU lever). Runs inline on
+    # the reactor thread — cheap, in-memory, no DB. Identity is the server-trusted
+    # account_id, not the client-provided :id (anti-spoof).
+    def handle_presence(conn, env, account_id)
+      map = env[:map]
+      return unless map.is_a?(Integer)
+
+      old = conn.data[:map_id]
+      if old && old != map
+        @zones[old].delete(conn)
+        broadcast_zone(old, conn, Wire.encode_split({ type: :leave, id: account_id }))
+      end
+      @zones[map].add(conn)
+      conn.data[:map_id] = map
+
+      broadcast_zone(map, conn, Wire.encode_split(env.merge(id: account_id)))
+    end
+
+    def broadcast_zone(map, sender, frame)
+      @zones[map].each { |c| @reactor.send_frame(c, frame) unless c.equal?(sender) }
+    end
+
     def bind(conn, account_id)
       conn.data[:account_id] = account_id
       @log.call("server: authed #{conn.addr} as account #{account_id}")
@@ -185,7 +211,14 @@ module PEMK
       @reactor.send_frame(conn, Wire.encode_split(env, body))
     end
 
-    def on_close(_conn); end
+    def on_close(conn)
+      map = conn.data[:map_id]
+      return unless map
+
+      @zones[map].delete(conn)
+      aid = conn.data[:account_id]
+      broadcast_zone(map, conn, Wire.encode_split({ type: :leave, id: aid })) if aid
+    end
 
     def install_signal_handlers
       %w[INT TERM].each { |sig| Signal.trap(sig) { @reactor.stop } }
