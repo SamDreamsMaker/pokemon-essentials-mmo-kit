@@ -15,6 +15,11 @@ module PEMK
   # increments; authenticated gameplay frames are logged here for now.
   class Server
     AUTH_TYPES     = %i[ping register login auth].freeze
+    # Authenticated point-to-point frames the server relays to the :to account
+    # (challenge handshake + the whole battle stream), the role the old in-process
+    # relay played — now with server-trusted :from and no cross-client leakage.
+    ADDRESSED      = %i[challenge challenge_accept challenge_decline battle_team
+                        battle_start battle_choice battle_round battle_switch battle_end].freeze
     WORKERS        = 8
     LOGIN_MAX      = 10          # login/register attempts ...
     LOGIN_WINDOW   = 60          # ... per this many seconds, per IP
@@ -34,6 +39,7 @@ module PEMK
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
       @zones    = Hash.new { |h, k| h[k] = Set.new }   # map_id => Set(conn); reactor-thread only
+      @online   = {}                                    # account_id => conn; reactor-thread only
       @reactor  = Reactor.new(
         host: @config.bind, port: @config.port,
         on_frame: method(:on_frame), on_close: method(:on_close), logger: @log
@@ -96,6 +102,7 @@ module PEMK
       when :auth     then handle_auth(conn, env)
       when :save     then handle_save(env, dec[:body], authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
+      when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
       else
         # Other authenticated gameplay frames (economy, battle) — per-player mailbox
         # routing + handlers land in later milestones.
@@ -198,8 +205,25 @@ module PEMK
       @zones[map].each { |c| @reactor.send_frame(c, frame) unless c.equal?(sender) }
     end
 
+    # Relay an addressed frame to ONLY the :to account's connection, re-stamping
+    # :from with the server-trusted sender id and preserving the opaque body
+    # (e.g. a battle team). Unknown/offline or self-addressed -> dropped.
+    def handle_addressed(sender, env, body, from_account)
+      target = @online[env[:to]]
+      if target.nil? || target.equal?(sender)
+        @log.call("server: no route for #{env[:type].inspect} -> #{env[:to].inspect}")
+        return
+      end
+
+      @reactor.send_frame(target, Wire.encode_split(env.merge(from: from_account), body))
+    end
+
     def bind(conn, account_id)
+      # A reconnect on a new socket takes over routing for the account.
+      previous = @online[account_id]
+      previous.closing = true if previous && !previous.equal?(conn)
       conn.data[:account_id] = account_id
+      @online[account_id] = conn
       @log.call("server: authed #{conn.addr} as account #{account_id}")
     end
 
@@ -212,11 +236,13 @@ module PEMK
     end
 
     def on_close(conn)
+      aid = conn.data[:account_id]
+      @online.delete(aid) if aid && @online[aid].equal?(conn)
+
       map = conn.data[:map_id]
       return unless map
 
       @zones[map].delete(conn)
-      aid = conn.data[:account_id]
       broadcast_zone(map, conn, Wire.encode_split({ type: :leave, id: aid })) if aid
     end
 
