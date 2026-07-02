@@ -30,6 +30,7 @@ module PEMK
         PEMK::Remotes.prune          # drop timed-out (disconnected) players
         PEMK::Remotes.update_all
         PEMK::Presence.heartbeat
+        PEMK::Sync.tick              # coalesced state-delta flush (debounce/staleness)
       rescue => e
         PEMK.log("Pump error: #{e.class}: #{e.message}")
       ensure
@@ -75,7 +76,7 @@ EventHandlers.add(:on_new_spriteset_map, :pokemmo_remote_sprites,
 # which made others briefly see us at the old spot. announce_soon defers to the
 # next idle heartbeat, which reads the settled position.
 EventHandlers.add(:on_enter_map, :pokemmo_zone_reset,
-  proc { |_old_map_id| PEMK::Remotes.clear_all; PEMK::Presence.announce_soon })
+  proc { |_old_map_id| PEMK::Remotes.clear_all; PEMK::Presence.announce_soon; PEMK::Sync.flush_event(:map) })
 
 # --- Battle challenge (Phase 4a): pause-menu option + the prompt driver --------
 MenuHandlers.add(:pause_menu, :mmo_challenge, {

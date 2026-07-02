@@ -18,10 +18,8 @@ module PEMK
     def []=(index, value)
       old    = (index >= 0 && index < length) ? self[index] : nil
       result = super
-      if !@pokemmo_silent && old != value
-        c = PEMK.client
-        c.send_message({ :type => :badge, :index => index, :owned => value ? true : false }) if c && c.connected?
-      end
+      # OBSERVER -> Sync dirty-set (coalesced), rather than a socket write per set.
+      PEMK::Sync.mark_badge(index, value ? true : false) if !@pokemmo_silent && old != value
       result
     end
   end

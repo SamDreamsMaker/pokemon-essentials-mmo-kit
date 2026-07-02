@@ -120,6 +120,7 @@ module PEMK
       @pending_state = reply[:_body] ? (Marshal.load(reply[:_body]) rescue nil) : nil
       @logged_in     = true
       PEMK.set_self_id(@account_id)
+      (PEMK::Sync.reset rescue nil)   # fresh socket -> drop any stale dirty/seq baseline
       save_token(reply[:token]) if reply[:token]
       save_local_account(@account_id)
       PEMK.log("auth: #{reply[:type]} account=#{@account_id} state=#{@pending_state ? 'received' : 'new'}")

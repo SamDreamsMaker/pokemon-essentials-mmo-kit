@@ -68,19 +68,13 @@ module Game
 
       def save(save_file = SaveData::FILE_PATH, safe: false)
         ok = pokemmo_orig_save(save_file, safe: safe)
-        begin
-          c = PEMK.client
-          if ok && c && c.connected? && File.file?(save_file)
-            # Push the save file's RAW bytes as an opaque body — the host stores
-            # them verbatim and never Marshal.loads the save graph (no host RCE via
-            # :save). We depend on no SaveData internals and don't even re-decode
-            # our own save. The bytes are exactly what Game.load reads back.
-            raw = File.binread(save_file)
-            c.send_message({ :type => :save }, raw)
-            PEMK.log("client: pushed save to server (#{raw.bytesize} bytes, opaque)")
-          end
-        rescue => e
-          PEMK.log("client: save push failed: #{e.class}: #{e.message}")
+        # An explicit save is a checkpoint: flush any pending primitive deltas, then
+        # push the full opaque blob — throttled by content hash so an UNCHANGED file
+        # is never re-sent (no more 90 KB on every save). The server stores the body
+        # verbatim and never Marshal.loads it (no host RCE via :save).
+        if ok
+          (PEMK::Sync.flush_event(:save) rescue nil)
+          (PEMK::Sync.push_blob(save_file, force: true) rescue nil)
         end
         ok
       end

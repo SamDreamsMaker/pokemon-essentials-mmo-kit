@@ -13,19 +13,17 @@
 #===============================================================================
 module PEMK
   module Economy
-    @last = {}   # field => last value sent (dedup redundant sets)
-
+    # OBSERVER: the setter aliases below call notify, which now feeds the Sync
+    # dirty-set (coalesced + flushed on events/quiescence) instead of writing the
+    # socket per mutation. mark() is the reconcile hook the server ack will use
+    # (M2.1) to keep the client baseline in step without re-notifying.
     def self.notify(field, value)
-      c = PEMK.client
-      return unless c && c.connected? && value.is_a?(Integer)
-      return if @last[field] == value
-      @last[field] = value
-      c.send_message({ :type => :mutate, :field => field, :value => value })
+      return unless value.is_a?(Integer)
+
+      PEMK::Sync.mark_econ(field, value)
     end
 
-    def self.mark(field, value)   # keep dedup state in sync after a server ack
-      @last[field] = value
-    end
+    def self.mark(_field, _value); end
   end
 end
 
