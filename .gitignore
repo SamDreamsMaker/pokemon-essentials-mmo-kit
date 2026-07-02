@@ -47,3 +47,6 @@ Thumbs.db
 # Temp files
 
 ~*
+
+# Claude Code local config (per-machine, not shared)
+.claude/
