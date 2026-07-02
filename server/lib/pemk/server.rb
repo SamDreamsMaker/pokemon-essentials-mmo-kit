@@ -37,6 +37,7 @@ module PEMK
       @sessions   = Sessions.new(@db)
       @characters = Characters.new(@db)
       @ledger     = Ledger.new(@db, @config.economy_caps)
+      @inventory  = Inventory.new(@db, @config.inventory_caps, logger: @log)
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
       @zones    = Hash.new { |h, k| h[k] = Set.new }   # map_id => Set(conn); reactor-thread only
@@ -56,6 +57,7 @@ module PEMK
       @db.test_connection
       @log.call("server: db ok (#{@db.opts[:database]}), workers=#{WORKERS}")
       @log.call("server: economy caps #{@config.economy_caps}, badges<#{@config.badges_max}")
+      @log.call("server: inventory caps #{@config.inventory_caps} (detection-only, flag-not-reject)")
       @pool.start
       @reactor.start
       @thread = Thread.new { @reactor.run_loop }
@@ -104,6 +106,7 @@ module PEMK
       when :auth     then handle_auth(conn, env)
       when :save     then handle_save(env, dec[:body], authed)
       when :econ     then handle_econ(conn, env, authed)
+      when :inv      then handle_inv(conn, env, authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
       else
@@ -205,11 +208,26 @@ module PEMK
       end
     end
 
+    # Server-side BAG record (DETECTION-ONLY): the client pushes the whole bag as an
+    # absolute {item_id => qty} snapshot. Serialized per account on the SAME mailbox
+    # as :econ/:save (no read-modify-write race). We record + structurally flag, then
+    # ALWAYS ack (never reject/roll back) — the bag stays blob-authoritative in M2.3.
+    def handle_inv(conn, env, account_id)
+      bag = env[:bag]
+      seq = env[:seq]
+      @mailbox.submit(account_id) do
+        status = @inventory.apply_inv(account_id, bag, seq)
+        @reactor.post { reply(conn, type: :inv_ack, seq: seq, flagged: status[1].any?) }
+      end
+    end
+
     # Canonical primitives the client reconciles onto its save at load (login_ok /
     # auth_ok), plus the per-channel seq the client adopts as its next-seq authority.
+    # inv carries only the seq: the bag is not shipped (reconcile is server-side).
     def reconcile_block(account_id)
       snap = @ledger.snapshot(account_id)
-      { econ: snap[:balances], econ_seq: snap[:last_seq] }
+      { econ: snap[:balances], econ_seq: snap[:last_seq],
+        inv_seq: @inventory.snapshot(account_id)[:last_seq] }
     end
 
     # Zone-scoped presence: track each player's current map and fan a position

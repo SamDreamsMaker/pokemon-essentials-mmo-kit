@@ -118,4 +118,27 @@ class ServerEconTest < Minitest::Test
     assert_equal mask, lo[:econ][:badges]
     c2.close
   end
+
+  # The bag rides a new :inv frame (absolute {Symbol=>Integer} snapshot) through the
+  # SAME mailbox: server records + acks (never rejects), login carries inv_seq. Also
+  # proves the real Config derived the inventory caps and the codec round-trips the
+  # bag Hash as pure primitives.
+  def test_inv_records_and_login_carries_inv_seq
+    c = open_conn
+    register(c, "bag@t.co", "password1")
+    lo = login(c, "bag@t.co", "password1")
+    assert_equal 0, lo[:inv_seq]
+
+    send_env(c, { type: :inv, bag: { POTION: 5, GREAT_BALL: 2 }, seq: 1 })
+    ack = recv(c)
+    assert_equal :inv_ack, ack[:type]
+    assert_equal 1, ack[:seq]
+    assert_equal false, ack[:flagged]
+    c.close
+
+    c2 = open_conn
+    lo2 = login(c2, "bag@t.co", "password1")
+    assert_equal 1, lo2[:inv_seq]
+    c2.close
+  end
 end

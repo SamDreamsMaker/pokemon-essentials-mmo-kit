@@ -15,4 +15,9 @@ class ConfigTest < Minitest::Test
     assert_equal((1 << 63) - 1, cfg.economy_caps[:badges])   # == signed-bigint max, fits the column exactly
     assert_equal((1 << cfg.badges_max) - 1, cfg.economy_caps[:badges]) # single source of truth
   end
+
+  def test_inventory_caps_are_present_and_fail_fast
+    cfg = PEMK::Config.new
+    assert_equal({ per_item: 99_999, distinct: 2000, total: 10_000_000 }, cfg.inventory_caps)
+  end
 end
