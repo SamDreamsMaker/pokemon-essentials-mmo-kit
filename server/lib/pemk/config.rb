@@ -21,6 +21,13 @@ module PEMK
         soot:          require_cap(caps, "soot")
       }
       @badges_max = require_cap(caps, "badges_max")
+      # Badges ride the economy ledger as ONE bitmask field (:badges, bit i = badge
+      # index i owned). Derive its cap from the single source of truth so the range
+      # can never drift out of the signed-bigint column: all 63 bits set == (1<<63)-1
+      # == INT64 max. This MUST land in the hash the Ledger reads (@economy_caps),
+      # not just the YAML — otherwise apply_econ's `cap = @caps[:badges]` is nil and
+      # every :badges frame is rejected :bad_field (silent no-op).
+      @economy_caps[:badges] = (1 << @badges_max) - 1
     end
 
     private

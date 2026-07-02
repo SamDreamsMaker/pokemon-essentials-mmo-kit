@@ -139,11 +139,21 @@ module PEMK
       @pending_econ = nil
       return unless econ.is_a?(Hash) && $player
 
+      # Per-field rescue (NOT one outer rescue): economy_balances row order can put
+      # :badges first, and a badge-decode fault must never skip the authoritative
+      # money reconcile for the fields after it. :badges is a bitmask -> decode it.
       econ.each do |field, value|
-        $player.pokemmo_apply_economy(field.to_sym, value) if value.is_a?(Integer)
+        next unless value.is_a?(Integer)
+        begin
+          if field.to_sym == :badges
+            $player.pokemmo_apply_badges_mask(value)
+          else
+            $player.pokemmo_apply_economy(field.to_sym, value)
+          end
+        rescue => e
+          PEMK.log("auth: reconcile field #{field} error: #{e.class}: #{e.message}")
+        end
       end
-    rescue => e
-      PEMK.log("auth: reconcile_economy error: #{e.class}: #{e.message}")
     end
 
     # Send a message and block for one of +types+, pumping the client WITHOUT

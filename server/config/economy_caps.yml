@@ -7,4 +7,6 @@ money:         999999
 coins:         99999
 battle_points: 9999
 soot:          9999
-badges_max:    64      # badge index range [0, badges_max)
+badges_max:    63      # badge index range [0, badges_max); mask bit i. 63 = the
+                       # signed-bigint ceiling: the :badges cap is DERIVED as
+                       # (1<<63)-1 in config.rb, so all 63 badges set == INT64 max.

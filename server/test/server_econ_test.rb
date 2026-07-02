@@ -96,4 +96,26 @@ class ServerEconTest < Minitest::Test
     assert_equal [100, 200, 300], acks.map { |a| a[:value] }
     c.close
   end
+
+  # Badges are just another economy field (:badges bitmask): they ride the same
+  # :econ -> :econ_ack path and land in the login snapshot. This also proves the
+  # real Config DERIVES the :badges cap into @economy_caps — a missing derivation
+  # would reject the frame as :bad_field, not ack it.
+  def test_badges_ride_the_econ_channel
+    c = open_conn
+    register(c, "badge@t.co", "password1")
+    login(c, "badge@t.co", "password1")
+    mask = 0b101   # badges 0 and 2 owned
+    send_env(c, { type: :econ, field: :badges, value: mask, seq: 1 })
+    ack = recv(c)
+    assert_equal :econ_ack, ack[:type]
+    assert_equal :badges, ack[:field]
+    assert_equal mask, ack[:value]
+    c.close
+
+    c2 = open_conn
+    lo = login(c2, "badge@t.co", "password1")
+    assert_equal mask, lo[:econ][:badges]
+    c2.close
+  end
 end

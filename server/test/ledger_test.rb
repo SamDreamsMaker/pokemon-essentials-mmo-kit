@@ -8,7 +8,7 @@ require "pemk/ledger"
 # Economy ledger: absolute-value apply, cap validation, gap-safe idempotency by
 # ledger-row existence, materialized balance, login snapshot.
 class LedgerTest < Minitest::Test
-  CAPS = { money: 999_999, coins: 99_999, battle_points: 9_999, soot: 9_999 }.freeze
+  CAPS = { money: 999_999, coins: 99_999, battle_points: 9_999, soot: 9_999, badges: (1 << 63) - 1 }.freeze
 
   def setup
     @db = Sequel.connect(ENV.fetch("DATABASE_URL"))
@@ -65,5 +65,25 @@ class LedgerTest < Minitest::Test
     rows = @db[:economy_ledger].where(account_id: @acct, field: "money").order(:seq).all
     assert_equal [500, 300], rows.map { |r| r[:balance_after] }
     assert_equal [500, -200], rows.map { |r| r[:delta] }
+  end
+
+  # Badges ride the ledger as ONE bitmask field. All 63 bits set == (1<<63)-1 ==
+  # signed-bigint max == the cap, so it stores; bit 63 is one past the cap and is
+  # refused BEFORE any INSERT (no wraparound-to-negative in the column).
+  def test_badges_bitmask_acks_at_cap_and_rejects_over
+    max = (1 << 63) - 1
+    assert_equal [:ack, max], @led.apply_econ(@acct, :badges, max, 1)
+    assert_equal max, @led.current(@acct, :badges)
+    assert_equal [:rej, max, :cap], @led.apply_econ(@acct, :badges, 1 << 63, 2)
+    assert_equal max, @led.current(@acct, :badges)
+  end
+
+  def test_snapshot_mixes_badges_and_money_with_global_max_seq
+    @led.apply_econ(@acct, :money, 500, 4)
+    @led.apply_econ(@acct, :badges, 0b1010, 9)
+    snap = @led.snapshot(@acct)
+    assert_equal 500,     snap[:balances][:money]
+    assert_equal 0b1010,  snap[:balances][:badges]
+    assert_equal 9,       snap[:last_seq]   # max across BOTH fields (the client's next-seq authority)
   end
 end

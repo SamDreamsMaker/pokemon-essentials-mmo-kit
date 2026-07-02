@@ -20,9 +20,8 @@ module PEMK
     STALENESS_FRAMES  = 300     # ~5 s hard cap: never hold a dirty change longer
     BLOB_MIN_INTERVAL = 30.0    # seconds between throttled (non-forced) blob pushes
 
-    @econ        = {}           # field => latest absolute value (coalesced)
-    @badge       = {}           # index => owned bool (coalesced)
-    @seq         = Hash.new(0)  # channel => monotonic seq (local until M2.1 adopts server seq)
+    @econ        = {}           # field => latest absolute value (coalesced; badges ride here as a :badges bitmask)
+    @seq         = Hash.new(0)  # channel => monotonic seq (adopted from the server on login)
     @dirty_since = nil
     @last_change = nil
     @blob_at     = -1.0e18
@@ -34,7 +33,6 @@ module PEMK
     # does not share must never keep stale dedup/seq baselines — see design §10).
     def reset
       @econ = {}
-      @badge = {}
       @seq = Hash.new(0)
       @dirty_since = nil
       @last_change = nil
@@ -58,15 +56,8 @@ module PEMK
       touch
     end
 
-    def mark_badge(index, owned)
-      return unless index.is_a?(Integer)
-
-      @badge[index] = (owned ? true : false)
-      touch
-    end
-
     def dirty?
-      !@econ.empty? || !@badge.empty?
+      !@econ.empty?
     end
 
     # --- EVENT: flush now (map change, battle end, menu/scene close, quit) ------
@@ -92,11 +83,7 @@ module PEMK
       @econ.each do |field, value|
         c.send_message({ :type => :econ, :field => field, :value => value, :seq => (@seq[:economy] += 1) })
       end
-      @badge.each do |index, owned|
-        c.send_message({ :type => :badge, :index => index, :owned => owned, :seq => (@seq[:badge] += 1) })
-      end
       @econ = {}
-      @badge = {}
       @dirty_since = nil
       @last_change = nil
     end
