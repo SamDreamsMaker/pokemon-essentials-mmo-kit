@@ -1,0 +1,26 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    bcrypt (3.1.22)
+    bigdecimal (4.1.2)
+    minitest (5.27.0)
+    pg (1.6.3-x86_64-linux)
+    rake (13.4.2)
+    sequel (5.106.0)
+      bigdecimal
+
+PLATFORMS
+  x86_64-linux
+
+DEPENDENCIES
+  bcrypt (~> 3.1)
+  minitest (~> 5.20)
+  pg (~> 1.5)
+  rake (~> 13.0)
+  sequel (~> 5.0)
+
+RUBY VERSION
+   ruby 3.1.2p20
+
+BUNDLED WITH
+   2.4.22

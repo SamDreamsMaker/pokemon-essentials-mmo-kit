@@ -1,0 +1,10 @@
+# Authoritative economy caps for the dedicated server. The in-process host used
+# `Settings::MAX_MONEY rescue 999_999`, which silently degrades to the literal on
+# a headless server (no game Settings loaded) — audit flagged that as a bug. Here
+# the caps are EXPLICIT config; a missing cap is a boot error, never a silent
+# default. Values mirror Pokémon Essentials v21.1 defaults.
+money:         999999
+coins:         99999
+battle_points: 9999
+soot:          9999
+badges_max:    64      # badge index range [0, badges_max)

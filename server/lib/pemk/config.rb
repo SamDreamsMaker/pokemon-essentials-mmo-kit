@@ -1,0 +1,37 @@
+# frozen_string_literal: true
+
+require "yaml"
+
+module PEMK
+  # Boot configuration from ENV + config/economy_caps.yml. Fails FAST on a missing
+  # economy cap (the audit flagged the old `rescue 999_999` silent default).
+  class Config
+    attr_reader :bind, :port, :database_url, :economy_caps, :badges_max
+
+    def initialize(env: ENV, root: File.expand_path("../..", __dir__))
+      @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
+      @port         = Integer(env.fetch("PEMK_PORT", "9998"))
+      @database_url = env.fetch("DATABASE_URL")
+
+      caps = YAML.safe_load_file(File.join(root, "config", "economy_caps.yml"))
+      @economy_caps = {
+        money:         require_cap(caps, "money"),
+        coins:         require_cap(caps, "coins"),
+        battle_points: require_cap(caps, "battle_points"),
+        soot:          require_cap(caps, "soot")
+      }
+      @badges_max = require_cap(caps, "badges_max")
+    end
+
+    private
+
+    def require_cap(caps, key)
+      value = caps.is_a?(Hash) ? caps[key] : nil
+      unless value.is_a?(Integer) && value.positive?
+        raise "economy cap '#{key}' missing/invalid in config/economy_caps.yml"
+      end
+
+      value
+    end
+  end
+end

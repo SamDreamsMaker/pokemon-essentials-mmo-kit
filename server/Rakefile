@@ -1,0 +1,34 @@
+# frozen_string_literal: true
+
+require "rake/testtask"
+
+APP_ROOT = __dir__
+
+namespace :db do
+  desc "Run pending Sequel migrations (DATABASE_URL)"
+  task :migrate do
+    require "sequel"
+    Sequel.extension :migration
+    db = Sequel.connect(ENV.fetch("DATABASE_URL"))
+    Sequel::Migrator.run(db, File.join(APP_ROOT, "db", "migrate"))
+    version = db[:schema_info].first&.fetch(:version, nil)
+    puts "db: migrated to version #{version}"
+  end
+
+  desc "Roll all migrations back to 0 (DANGEROUS — drops all data)"
+  task :reset do
+    require "sequel"
+    Sequel.extension :migration
+    db = Sequel.connect(ENV.fetch("DATABASE_URL"))
+    Sequel::Migrator.run(db, File.join(APP_ROOT, "db", "migrate"), target: 0)
+    puts "db: reset to version 0"
+  end
+end
+
+Rake::TestTask.new(:test) do |t|
+  t.libs << "test"
+  t.pattern = "test/*_test.rb"
+  t.warning = false
+end
+
+task default: :test

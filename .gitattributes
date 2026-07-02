@@ -1,0 +1,5 @@
+# The dedicated server and shared protocol run on Linux (Docker/WSL). Keep their
+# sources LF regardless of the checkout platform, so shell scripts and configs are
+# never CRLF-mangled. (The mkxp-z game tree keeps git's default handling.)
+/server/**   text eol=lf
+/protocol/** text eol=lf

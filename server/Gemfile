@@ -1,0 +1,15 @@
+# PEMK dedicated server — standalone MRI Ruby (NOT mkxp-z), so real gems work.
+# Deliberately tiny: no Rails, no async gem (the reactor is stdlib IO.select),
+# no Redis. Postgres is the only datastore.
+source "https://rubygems.org"
+
+ruby "~> 3.1"
+
+gem "pg",     "~> 1.5"    # PostgreSQL driver (native ext -> needs libpq-dev)
+gem "sequel", "~> 5.0"    # DB toolkit + migrations, without ActiveRecord weight
+gem "bcrypt", "~> 3.1"    # password hashing (cost 12 + SHA-256 pre-hash)
+gem "rake",   "~> 13.0"   # tasks: db:migrate, pemk:import_saves, pemk:backup
+
+group :development, :test do
+  gem "minitest", "~> 5.20"   # unit + integration tests
+end
