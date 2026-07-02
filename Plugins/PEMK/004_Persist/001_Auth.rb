@@ -86,11 +86,14 @@ module PEMK
         c.poll.each do |m|
           next unless m.is_a?(Hash) && m[:type] == :login_ok
           @account_id    = m[:account_id]
-          @pending_state = m[:state]
+          # Our own state comes back as an opaque body; load it CLIENT-side — this
+          # is our data, equivalent to reading our local save. (Legacy :state kept
+          # as a fallback during migration.)
+          @pending_state = m[:_body] ? (Marshal.load(m[:_body]) rescue nil) : m[:state]
           @logged_in     = true
           save_local_account(@account_id)
           PEMK.set_self_id(@account_id)   # account id becomes our presence id
-          PEMK.log("auth: login_ok account=#{@account_id} state=#{m[:state] ? 'received' : 'new'}")
+          PEMK.log("auth: login_ok account=#{@account_id} state=#{@pending_state ? 'received' : 'new'}")
           done = true
           break
         end

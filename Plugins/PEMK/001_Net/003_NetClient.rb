@@ -105,8 +105,11 @@ module PEMK
         total = Config::LENGTH_BYTES + len
         break if @buffer.bytesize < total
         payload = @buffer.slice!(0, total)[Config::LENGTH_BYTES, len]
-        m = MessageCodec.decode(payload)
-        msgs << m unless m.nil?
+        dec = MessageCodec.decode_envelope(payload)
+        next if dec.nil?
+        m = dec[:env]
+        m[:_body] = dec[:body] if dec[:body]   # opaque bytes; the consumer loads them
+        msgs << m
       end
     end
   end

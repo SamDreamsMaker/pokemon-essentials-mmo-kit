@@ -33,8 +33,10 @@ module PEMK
         acct = msg[:account_id]
         acct = ServerStore.new_account_id if !acct.is_a?(Integer) || acct <= 0
         bind_account(conn_id, acct)
-        state = ServerStore.load_state(acct)
-        server.send_to(conn_id, { :type => :login_ok, :account_id => acct, :state => state })
+        # State travels back as an opaque body; the host never Marshal.loads it —
+        # the owning client reconstructs its own state.
+        state = ServerStore.load_state(acct)   # raw bytes or nil
+        server.send_to(conn_id, { :type => :login_ok, :account_id => acct }, state)
         PEMK.log("server: login conn=#{conn_id} account=#{acct} state=#{state ? 'loaded' : 'new'}")
       when :save
         acct = @conn_account[conn_id]

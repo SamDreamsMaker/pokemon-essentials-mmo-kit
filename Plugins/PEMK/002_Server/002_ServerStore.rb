@@ -39,11 +39,14 @@ module PEMK
       end
     end
 
-    # Returns the stored state Hash for an account, or nil if this host has none.
+    # Returns an account's stored state as RAW bytes (String), or nil if this host
+    # has none. The host does NOT Marshal.load it — the bytes go straight back to
+    # the OWNING client (login_ok body), which loads its own state. So a stored
+    # (even hostile) save can never deserialise on the host.
     def self.load_state(account_id)
       p = path(account_id)
       return nil unless File.file?(p)
-      File.open(p, "rb") { |f| Marshal.load(f) }
+      File.binread(p)
     rescue => e
       PEMK.log("store: load failed for #{account_id}: #{e.class}: #{e.message}")
       nil

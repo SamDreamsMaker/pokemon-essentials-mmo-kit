@@ -106,10 +106,10 @@ module PEMK
     # Send a message to ONE connection (authoritative server -> specific client).
     # Public: called by ServerLogic to answer a login/save. Runs on the pump
     # (main) thread, like every other server write, so no locking is needed.
-    def send_to(conn_id, msg)
+    def send_to(conn_id, msg, body = nil)
       sock = @clients[conn_id]
       return false unless sock
-      sock.write(MessageCodec.encode(msg))
+      sock.write(body.nil? ? MessageCodec.encode(msg) : MessageCodec.encode_split(msg, body))
       true
     rescue
       drop(conn_id)
