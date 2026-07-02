@@ -20,7 +20,7 @@
 module PokeMMO
   module BattleNet
     @inbox_choice = {}   # [round, idxBattler] => cmd tuple
-    @inbox_round  = {}   # round => packet Hash
+    @inbox_round  = []   # FIFO of authoritative round/RNG packets (TCP keeps order)
     @inbox_start  = nil
     @inbox_end    = nil
 
@@ -31,7 +31,7 @@ module PokeMMO
     # Clear every queue (call at battle start and end).
     def self.reset
       @inbox_choice = {}
-      @inbox_round  = {}
+      @inbox_round  = []
       @inbox_start  = nil
       @inbox_end    = nil
     end
@@ -42,7 +42,7 @@ module PokeMMO
       case msg[:type]
       when :battle_start  then @inbox_start = msg
       when :battle_choice then @inbox_choice[[msg[:round], msg[:idxBattler]]] = msg[:cmd]
-      when :battle_round  then @inbox_round[msg[:round]] = msg
+      when :battle_round  then @inbox_round.push(msg)
       when :battle_end    then @inbox_end = msg
       end
     end
@@ -52,8 +52,10 @@ module PokeMMO
       @inbox_choice.delete([round, idx_battler])
     end
 
-    def self.take_round(round)
-      @inbox_round.delete(round)
+    # Oldest authoritative packet (FIFO), or nil. The RNG stream is a single
+    # ordered sequence of chunks, so the client just drains them in arrival order.
+    def self.take_round
+      @inbox_round.shift
     end
 
     def self.take_start
