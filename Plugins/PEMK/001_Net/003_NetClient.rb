@@ -47,12 +47,20 @@ module PEMK
       false
     end
 
-    # Sends a message Hash, optionally with an opaque body (raw bytes shipped in a
-    # split frame so the host routes on the primitive envelope and never decodes
-    # the body). Main-thread write; never raises.
+    # Sends a message Hash, optionally with an opaque body (raw bytes). ALWAYS a
+    # split frame: a primitive-only envelope plus the untouched body, so the host
+    # never Marshal.loads anything we send. An unencodable message (a stray
+    # non-primitive envelope field) is dropped and logged — it must not take down
+    # the link; only a socket error disconnects. Main-thread write; never raises.
     def send_message(msg, body = nil)
       return false unless @connected
-      @socket.write(body.nil? ? MessageCodec.encode(msg) : MessageCodec.encode_split(msg, body))
+      begin
+        frame = MessageCodec.encode_split(msg, body)
+      rescue => e
+        PEMK.log("net: dropping unencodable #{msg[:type].inspect}: #{e.class}: #{e.message}")
+        return false
+      end
+      @socket.write(frame)
       true
     rescue => e
       @connected = false

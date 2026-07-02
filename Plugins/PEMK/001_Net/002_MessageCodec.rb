@@ -19,13 +19,15 @@
 #
 # ⚠ SECURITY / TRUST BOUNDARY:
 #   Marshal.load on attacker-controlled bytes can instantiate arbitrary objects
-#   and is a remote-code-execution vector. The split shape exists so the HOST can
-#   route on the primitive envelope alone and never Marshal.load an untrusted deep
-#   graph (a party, a full save). The envelope codec is RCE-safe by construction
-#   (it builds no classes) and independent of any game class, so it stays correct
-#   across upstream Essentials updates. Deep graphs (party / save) remain opaque
-#   Marshal bodies precisely so they need no per-class serialisation to maintain.
-#   #decode (whole-Marshal) survives only for the legacy path during migration.
+#   and is a remote-code-execution vector. All wire traffic is now split frames:
+#   the HOST decodes only the primitive envelope (RCE-safe by construction — it
+#   builds no classes) and rejects legacy whole-Marshal frames, so no client frame
+#   can instantiate a class on the host. Deep graphs (party / save) ride as opaque
+#   bodies that transit un-decoded and stay Marshal (so they need no per-class
+#   serialisation to maintain across upstream updates). The remaining Marshal.load
+#   of a body happens only on the addressed CLIENT, on data it is entitled to
+#   (its own save, or a peer's team it is about to battle) — the accepted residual.
+#   #decode (whole-Marshal) is now used only by the client's permissive path.
 #===============================================================================
 module PEMK
   module MessageCodec
@@ -59,9 +61,10 @@ module PEMK
 
     # payload bytes -> { :env => Hash, :body => String|nil }, or nil on any error.
     # Split frames decode the envelope with the primitive codec (safe) and return
-    # the body as raw, UNLOADED bytes. Legacy frames fall back to whole-Marshal
-    # (env = the whole message, body = nil).
-    def decode_envelope(payload)
+    # the body as raw, UNLOADED bytes. When +allow_legacy+ is true, a legacy
+    # whole-Marshal frame is still accepted (env = the whole message, body = nil);
+    # the HOST passes false so no untrusted whole-Marshal decode path remains there.
+    def decode_envelope(payload, allow_legacy = true)
       return nil if payload.nil? || payload.empty?
       if payload.getbyte(0) == SPLIT_MAGIC
         return nil if payload.bytesize < 5
@@ -73,10 +76,12 @@ module PEMK
         return nil unless env.is_a?(Hash)
         body = payload.byteslice(body_at, payload.bytesize - body_at)
         { :env => env, :body => (body && !body.empty? ? body : nil) }
-      else
+      elsif allow_legacy
         env = decode(payload)
         return nil unless env.is_a?(Hash)
         { :env => env, :body => nil }
+      else
+        nil   # legacy whole-Marshal frame rejected on the hardened (host) path
       end
     rescue
       nil

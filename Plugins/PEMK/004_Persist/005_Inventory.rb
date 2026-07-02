@@ -11,6 +11,9 @@ module PEMK
     def self.notify(op, extra = {})
       c = PEMK.client
       return unless c && c.connected?
+      # Coerce any GameData value (e.g. an Item) to its primitive id so the whole
+      # message fits the primitive envelope (ids/qty/box/index stay as-is).
+      extra = extra.transform_values { |v| v.respond_to?(:id) ? v.id : v }
       c.send_message({ :type => :inv, :op => op }.merge(extra))
     end
   end

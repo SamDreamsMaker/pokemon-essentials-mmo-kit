@@ -17,11 +17,12 @@
 #     read_nonblock. No thread-per-client — which also fixes the scaling cost
 #     the audit flagged (§10-G7).
 #
-# The relay decodes only each frame's small envelope (MessageCodec) to choose a
-# route; it then forwards the ORIGINAL raw length-prefixed frame unchanged, so it
-# never re-serialises game payloads. (Marshal-decoding untrusted client bytes here
-# is the same trust boundary the clients already accept — replacing Marshal with a
-# safe codec is a separate hardening step, architecture doc §5/§10.)
+# The relay decodes ONLY each frame's primitive-codec envelope (MessageCodec) to
+# choose a route, then forwards the ORIGINAL raw frame unchanged. It NEVER
+# Marshal.loads an untrusted frame: legacy whole-Marshal frames are rejected
+# (decode_envelope allow_legacy=false) and opaque bodies (a party, a save) are
+# routed/stored without decoding. So no client frame can instantiate a class on
+# the host — the Marshal RCE surface on the host is closed (architecture §5/§10).
 #
 # Same MRI runtime as the client: the "host on Windows" model runs this
 # in-process; a dedicated Linux server runs the same code headless.
@@ -109,7 +110,7 @@ module PEMK
     def send_to(conn_id, msg, body = nil)
       sock = @clients[conn_id]
       return false unless sock
-      sock.write(body.nil? ? MessageCodec.encode(msg) : MessageCodec.encode_split(msg, body))
+      sock.write(MessageCodec.encode_split(msg, body))   # always a split frame
       true
     rescue
       drop(conn_id)
@@ -153,11 +154,12 @@ module PEMK
     #   * everything else (presence, no :to) -> every other client (broadcast).
     def route(sender_id, frame)
       payload = frame[Config::LENGTH_BYTES, frame.bytesize - Config::LENGTH_BYTES]
-      # Decode ONLY the envelope. For a split frame the opaque body is never
-      # Marshal.loaded here — the host routes on primitives alone. (Legacy frames
-      # still whole-Marshal via decode_envelope until senders migrate.)
-      dec = MessageCodec.decode_envelope(payload)
-      return unless dec   # undecodable / oversized / hostile envelope -> drop, never broadcast
+      # Decode ONLY the primitive envelope; the opaque body is never Marshal.loaded
+      # on the host. allow_legacy=false REJECTS legacy whole-Marshal frames, so the
+      # host has NO code path that Marshal.loads an untrusted frame — the only thing
+      # it ever deserialises from a client is the primitive-codec envelope.
+      dec = MessageCodec.decode_envelope(payload, false)
+      return unless dec   # undecodable / oversized / hostile / legacy -> drop, never broadcast
       msg = dec[:env]
       if Config::ACCOUNT_TYPES.include?(msg[:type])
         PEMK::ServerLogic.handle(self, sender_id, msg, dec[:body])
