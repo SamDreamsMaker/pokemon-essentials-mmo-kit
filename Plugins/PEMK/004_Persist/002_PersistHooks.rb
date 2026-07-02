@@ -54,6 +54,10 @@ module Game
       def start_new
         pokemmo_orig_start_new
         PEMK::Auth.apply_identity
+        # Server-authoritative: the local Game.rxdata is a disposable per-session
+        # cache, so overwriting it is always fine. Clear begun_new_game so the core
+        # skips its "a different game is already saved" warning on the next save.
+        ($game_temp.begun_new_game = false) if $game_temp && PEMK::Auth.logged_in?
       end
 
       def load(save_data)
