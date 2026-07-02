@@ -91,7 +91,8 @@ Without this file, `ROLE = :auto` is used (host-or-join on `127.0.0.1`).
 001_Net/     Config            central settings
              MessageCodec      length-prefixed framing + Marshal  (the wire boundary)
              NetClient         one TCP connection, non-blocking, main-thread poll
-002_Server/  RelayServer       single accept thread + main-thread pump; fans frames out
+002_Server/  RelayServer       accept thread + main-thread pump; routes addressed
+                               frames to one recipient, presence to all
              ServerStore       per-account Marshal save files (server_saves/<id>.rxdata)
              ServerLogic       login / save / mutation validation (money/badges clamps)
 003_Game/    Session           connection lifecycle (host/join), self id, logging
@@ -135,13 +136,11 @@ false`, so real parties, Exp, money and the Pokédex are never touched.
 
 ## Known limits
 
-- **No authority on movement / economy beyond clamps.** The relay broadcasts;
-  clients are trusted for presence. Economy/badge mutations are range-clamped by
-  the host, but this is a trusted host+friends model, not anti-cheat.
+- **No authority on movement / economy beyond clamps.** Presence is broadcast and
+  clients are trusted for it. Economy/badge mutations are range-clamped by the
+  host, but this is a trusted host+friends model, not anti-cheat.
 - **`Marshal` wire-format** is an RCE vector on untrusted input — fine for a
   trusted host, **must be replaced** before any public deployment (audit §10-G9).
-- **Battle team confidentiality:** parties are currently broadcast (filtered by
-  `:to`), so a team is visible to every connected client — to be server-routed.
 - **Debug-mode entry:** loading server state can intermittently hit an mkxp-z
   boot-stack `SystemStackError`; it is load-only and a relaunch recovers. Release
   builds (compiled plugins, no critical-code wrapper) are far less exposed.
