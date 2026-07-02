@@ -17,20 +17,24 @@ class PokemonLoadScreen
     alias_method :pokemmo_orig_pbStartLoadScreen, :pbStartLoadScreen
     def pbStartLoadScreen
       PEMK::Auth.login_blocking
-      state = PEMK::Auth.pending_state
-      if state.is_a?(Hash) && !state.empty?
-        # Returning account: the server copy is authoritative — load it and skip
-        # the local menu (works even on a machine with no local save).
-        #
-        # Use pbCloseScene (plain sprite/viewport dispose), NOT pbEndScene:
-        # pbEndScene runs a fade loop (pbFadeOutAndHide(@sprites) { pbUpdate })
-        # that repeatedly drives Graphics.update from inside the load screen — that
-        # is what intermittently blew mkxp-z's stack (SystemStackError on entry),
-        # and is the same pbFadeOutAndHide that raised the MessageConfig each-for-nil.
-        # pbCloseScene disposes without the fade, so both go away. Game.load fades
-        # into the map itself anyway.
+      # When we are logged in to the dedicated server, the server is the sole
+      # source of truth: skip the local New Game / Continue screen entirely. Load
+      # our server save if we have one, otherwise start a fresh game for this
+      # account (the local Game.rxdata is unrelated to a server account and would
+      # show as a misleading "Continue"). Only OFFLINE do we fall back to the
+      # normal local load screen.
+      if PEMK::Auth.logged_in?
+        state = PEMK::Auth.pending_state
+        # Use pbCloseScene (plain dispose), NOT pbEndScene: pbEndScene runs a fade
+        # loop (pbFadeOutAndHide(@sprites) { pbUpdate }) that drives Graphics.update
+        # from inside the load screen — the mkxp-z boot-stack hazard. Game.load /
+        # Game.start_new do their own transition into the map anyway.
         (@scene.pbCloseScene rescue nil)
-        Game.load(state)
+        if state.is_a?(Hash) && !state.empty?
+          Game.load(state)         # returning account: hydrate the server save
+        else
+          Game.start_new           # new account: run the intro, no local "Continue"
+        end
         return
       end
       pokemmo_orig_pbStartLoadScreen
