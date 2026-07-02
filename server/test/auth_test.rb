@@ -10,6 +10,8 @@ require "pemk/sessions"
 # Auth data-access tests against the real Postgres (DATABASE_URL). Each test
 # starts from an empty accounts table (delete cascades to sessions).
 class AuthTest < Minitest::Test
+  EMAIL = "trainer@example.com"
+
   def setup
     @db = Sequel.connect(ENV.fetch("DATABASE_URL"))
     @db[:accounts].delete
@@ -29,7 +31,7 @@ class AuthTest < Minitest::Test
   end
 
   def test_register_then_authenticate
-    id = @accounts.create(username: "Ash", password: "pikapika123")
+    id = @accounts.create(username: "Ash", password: "pikapika123", email: EMAIL)
     assert_kind_of Integer, id
     acct, err = @accounts.authenticate("Ash", "pikapika123")
     assert_nil err
@@ -37,19 +39,21 @@ class AuthTest < Minitest::Test
   end
 
   def test_duplicate_username_rejected_case_insensitively
-    assert @accounts.create(username: "Misty", password: "password1")
-    assert_nil @accounts.create(username: "Misty", password: "password2")
-    assert_nil @accounts.create(username: "MISTY", password: "password3") # citext
+    assert @accounts.create(username: "Misty", password: "password1", email: "a@b.co")
+    assert_nil @accounts.create(username: "Misty", password: "password2", email: "c@d.co")
+    assert_nil @accounts.create(username: "MISTY", password: "password3", email: "e@f.co") # citext
   end
 
   def test_malformed_input_raises
-    assert_raises(ArgumentError) { @accounts.create(username: "ab", password: "password1") }
-    assert_raises(ArgumentError) { @accounts.create(username: "Ash", password: "short") }
-    assert_raises(ArgumentError) { @accounts.create(username: "bad name!", password: "password1") }
+    assert_raises(ArgumentError) { @accounts.create(username: "ab", password: "password1", email: EMAIL) }
+    assert_raises(ArgumentError) { @accounts.create(username: "Ash", password: "short", email: EMAIL) }
+    assert_raises(ArgumentError) { @accounts.create(username: "bad name!", password: "password1", email: EMAIL) }
+    assert_raises(ArgumentError) { @accounts.create(username: "NoMail", password: "password1", email: "") }
+    assert_raises(ArgumentError) { @accounts.create(username: "BadMail", password: "password1", email: "nope") }
   end
 
   def test_lockout_after_five_failures
-    @accounts.create(username: "Brock", password: "onixrock1")
+    @accounts.create(username: "Brock", password: "onixrock1", email: EMAIL)
     5.times { assert_equal :bad_password, @accounts.authenticate("Brock", "nope").last }
     assert_equal :locked, @accounts.authenticate("Brock", "onixrock1").last # locked despite correct pw
   end
@@ -59,7 +63,7 @@ class AuthTest < Minitest::Test
   end
 
   def test_session_issue_resolve_revoke
-    id = @accounts.create(username: "Gary", password: "oakoakoak1")
+    id = @accounts.create(username: "Gary", password: "oakoakoak1", email: EMAIL)
     token = @sessions.issue(id, remote_addr: "127.0.0.1")
     assert_equal 64, token.length
     assert_equal id, @sessions.resolve(token)
@@ -69,7 +73,7 @@ class AuthTest < Minitest::Test
   end
 
   def test_session_absolute_expiry
-    id = @accounts.create(username: "Oak", password: "professor1")
+    id = @accounts.create(username: "Oak", password: "professor1", email: EMAIL)
     token = @sessions.issue(id, now: Time.now - (40 * 24 * 3600))
     assert_nil @sessions.resolve(token)
   end

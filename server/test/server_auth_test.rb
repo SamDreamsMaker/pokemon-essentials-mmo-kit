@@ -51,13 +51,13 @@ class ServerAuthTest < Minitest::Test
 
   def test_register_login_token_reconnect
     c = open_conn
-    send_env(c, { type: :register, username: "Red", password: "charizard1" })
+    send_env(c, { type: :register, username: "Red", password: "charizard1", email: "red@t.co" })
     reg = recv_env(c)
     assert_equal :register_ok, reg[:type]
     account_id = reg[:account_id]
     assert_kind_of Integer, account_id
 
-    send_env(c, { type: :register, username: "Red", password: "different1" })
+    send_env(c, { type: :register, username: "Red", password: "different1", email: "red2@t.co" })
     assert_equal :register_err, recv_env(c)[:type]
 
     send_env(c, { type: :login, username: "Red", password: "charizard1" })
@@ -78,7 +78,7 @@ class ServerAuthTest < Minitest::Test
 
   def test_bad_password_and_bad_token
     c = open_conn
-    send_env(c, { type: :register, username: "Blue", password: "blastoise1" })
+    send_env(c, { type: :register, username: "Blue", password: "blastoise1", email: "blue@t.co" })
     recv_env(c)
     send_env(c, { type: :login, username: "Blue", password: "wrongpass1" })
     assert_equal :login_err, recv_env(c)[:type]

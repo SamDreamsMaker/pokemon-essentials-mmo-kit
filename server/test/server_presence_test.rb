@@ -51,7 +51,7 @@ class ServerPresenceTest < Minitest::Test
 
   def open_authed(user, pw)
     c = TCPSocket.new("127.0.0.1", @port)
-    send_env(c, { type: :register, username: user, password: pw })
+    send_env(c, { type: :register, username: user, password: pw, email: "#{user}@t.co" })
     recv_env(c)
     send_env(c, { type: :login, username: user, password: pw })
     [c, recv_env(c)[:account_id]]

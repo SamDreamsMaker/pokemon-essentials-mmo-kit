@@ -78,7 +78,9 @@ module PEMK
       user = st[:username].to_s
       pw   = st[:password].to_s
       if user.empty? || pw.empty?
-        PEMK.log("auth: no username/password in #{Config::CONFIG_FILE} -> offline/solo")
+        # No dev shortcut credentials -> show the interactive login/register screen.
+        PEMK.log("auth: no config credentials -> in-game login/register screen")
+        PEMK::AuthUI.run(c)
         return true
       end
 

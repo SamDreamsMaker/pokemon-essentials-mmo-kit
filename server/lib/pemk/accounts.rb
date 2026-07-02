@@ -5,6 +5,7 @@ module PEMK
   # A thin data-access layer over the :accounts table (Sequel), no ORM models.
   class Accounts
     USERNAME_RE   = /\A[A-Za-z0-9_]{3,20}\z/
+    EMAIL_RE      = /\A[^@\s]+@[^@\s]+\.[^@\s]+\z/   # basic shape check, not delivery
     MIN_PASSWORD  = 8
     MAX_FAILS     = 5           # lock after this many consecutive bad passwords
     LOCK_SECONDS  = 300         # 5 minutes
@@ -15,14 +16,16 @@ module PEMK
 
     # Returns the new account id, or nil if the username/email is already taken.
     # Raises ArgumentError on malformed input (caller maps to a client error).
-    def create(username:, password:, email: nil, now: Time.now)
+    def create(username:, password:, email:, now: Time.now)
       username = username.to_s
+      email    = email.to_s.strip
       raise ArgumentError, "invalid_username" unless USERNAME_RE.match?(username)
+      raise ArgumentError, "invalid_email"    unless EMAIL_RE.match?(email)
       raise ArgumentError, "weak_password"    unless password.to_s.length >= MIN_PASSWORD
 
       @db[:accounts].insert(
         username:      username,
-        email:         (email.to_s.empty? ? nil : email.to_s),
+        email:         email,
         password_hash: Password.hash(password),
         status:        "active",
         created_at:    now

@@ -63,7 +63,7 @@ class ServerSaveTest < Minitest::Test
   end
 
   def register(sock, user, pw)
-    send_env(sock, { type: :register, username: user, password: pw })
+    send_env(sock, { type: :register, username: user, password: pw, email: "#{user}@t.co" })
     recv(sock)
   end
 
