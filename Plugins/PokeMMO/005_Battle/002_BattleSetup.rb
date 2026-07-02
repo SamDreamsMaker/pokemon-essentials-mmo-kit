@@ -34,7 +34,7 @@ module PokeMMO
       return unless msg[:to] == PokeMMO.self_id
       party = msg[:party]
       return unless party.is_a?(Array) && !party.empty?
-      remote = { :name => msg[:name] || "?", :party => party }
+      remote = { :name => msg[:name] || "?", :party => party, :id => msg[:from] }
       @opponents[msg[:from]] = remote
       PokeMMO.log("battle: received team from #{msg[:from]} (#{party.length} Pokemon)")
       @pending_launch = remote   # both teams are known on this side -> start the battle

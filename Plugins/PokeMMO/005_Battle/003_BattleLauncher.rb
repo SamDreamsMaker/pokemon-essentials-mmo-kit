@@ -61,6 +61,7 @@ module PokeMMO
       battle.expGain        = false
       battle.moneyGain      = false
       battle.canLose        = true    # a loss just ends the battle, no black-out
+      battle.pokemmo_peer_id = remote[:id] if battle.respond_to?(:pokemmo_peer_id=)
 
       $game_temp.clear_battle_rules
       $game_temp.add_battle_rule("single")
@@ -72,6 +73,7 @@ module PokeMMO
 
       cls = klass.name.to_s.split("::").last
       PokeMMO.log("battle: starting vs #{foe_name} (#{foe_party.length} Pokemon, #{cls})")
+      PokeMMO::BattleNet.reset   # drop any stale battle packets before this battle
       outcome = 0
       bgm = (pbGetTrainerBattleBGM([foe]) rescue nil)
       pbBattleAnimation(bgm, 1, [foe]) do
