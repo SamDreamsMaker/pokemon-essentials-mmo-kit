@@ -38,6 +38,7 @@ module PEMK
       @characters = Characters.new(@db)
       @ledger     = Ledger.new(@db, @config.economy_caps)
       @inventory  = Inventory.new(@db, @config.inventory_caps, logger: @log)
+      @monsters   = Monsters.new(@db, @config.monster_caps, logger: @log)
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
       @zones    = Hash.new { |h, k| h[k] = Set.new }   # map_id => Set(conn); reactor-thread only
@@ -58,6 +59,7 @@ module PEMK
       @log.call("server: db ok (#{@db.opts[:database]}), workers=#{WORKERS}")
       @log.call("server: economy caps #{@config.economy_caps}, badges<#{@config.badges_max}")
       @log.call("server: inventory caps #{@config.inventory_caps} (detection-only, flag-not-reject)")
+      @log.call("server: monster caps #{@config.monster_caps} (uid registry, flag-not-reject)")
       @pool.start
       @reactor.start
       @thread = Thread.new { @reactor.run_loop }
@@ -107,6 +109,8 @@ module PEMK
       when :save     then handle_save(env, dec[:body], authed)
       when :econ     then handle_econ(conn, env, authed)
       when :inv      then handle_inv(conn, env, authed)
+      when :uid_req  then handle_uid_req(conn, env, authed)
+      when :mon_party then handle_mon_party(conn, env, authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
       else
@@ -221,15 +225,45 @@ module PEMK
       end
     end
 
+    # Server-issued monster UIDs (M3.1): mint one uid per swept instance, matched by
+    # the client's persisted nonce. Idempotent by the monsters_mint_dedup unique
+    # index — a replayed request re-receives the SAME uids. On the mailbox like all
+    # per-account mutations.
+    def handle_uid_req(conn, env, account_id)
+      mons = env[:mons]
+      seq  = env[:seq]
+      @mailbox.submit(account_id) do
+        status = @monsters.mint_batch(account_id, mons)
+        if status.first == :ack
+          @reactor.post { reply(conn, type: :uid_grant, grants: status[1], seq: seq) }
+        else
+          @log.call("server: bad :uid_req from account #{account_id} -> ignored")
+        end
+      end
+    end
+
+    # Party projection (detection-only shadow): record + cross-check against the
+    # registry, FLAG never reject, always ack.
+    def handle_mon_party(conn, env, account_id)
+      mons = env[:mons]
+      seq  = env[:seq]
+      @mailbox.submit(account_id) do
+        status = @monsters.apply_party(account_id, mons, seq)
+        @reactor.post { reply(conn, type: :mon_ack, seq: seq, flagged: status[1].any?) }
+      end
+    end
+
     # Canonical primitives the client reconciles onto its save at load (login_ok /
     # auth_ok), plus the per-channel seq the client adopts as its next-seq authority.
     # inv carries the whole bag (server-persistent, like economy): nil when unseeded
     # so the client keeps its blob bag and seeds the record on the first flush.
+    # mon_seq is the :mon_party high-water; no monster data flows down in M3.1.
     def reconcile_block(account_id)
       snap = @ledger.snapshot(account_id)
       inv  = @inventory.snapshot(account_id)
       { econ: snap[:balances], econ_seq: snap[:last_seq],
-        inv: inv[:bag], inv_seq: inv[:last_seq] }
+        inv: inv[:bag], inv_seq: inv[:last_seq],
+        mon_seq: @monsters.mon_seq(account_id) }
     end
 
     # Zone-scoped presence: track each player's current map and fan a position

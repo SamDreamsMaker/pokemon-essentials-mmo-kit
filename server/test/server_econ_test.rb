@@ -21,6 +21,7 @@ class ServerEconTest < Minitest::Test
 
   def setup
     @db = Sequel.connect(ENV.fetch("DATABASE_URL"))
+    @db[:monsters].delete rescue nil   # no cascade from accounts (deliberate)
     @db[:accounts].delete
     @server = PEMK::Server.new(logger: ->(_m) {})
     @server.start

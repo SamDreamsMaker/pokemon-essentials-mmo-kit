@@ -18,3 +18,8 @@ badges_max:    63      # badge index range [0, badges_max); mask bit i. 63 = the
 inv_max_per_item:  99999      # soft: under infinite pockets a legit item spans many 999-slots
 inv_max_distinct:  2000       # distinct item ids in one bag
 inv_max_total:     10000000   # grand total across all items
+
+# M3.1 monster UID registry bounds.
+mon_uid_req_max:   64         # mint entries per :uid_req frame (~5 KB, 12x under the 64 KiB envelope)
+mon_party_max:     6          # party projection entries
+mon_level_max:     100        # Settings::MAXIMUM_LEVEL — structural flag bound for at-issue level

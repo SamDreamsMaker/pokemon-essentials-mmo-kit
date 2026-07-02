@@ -6,7 +6,8 @@ module PEMK
   # Boot configuration from ENV + config/economy_caps.yml. Fails FAST on a missing
   # economy cap (the audit flagged the old `rescue 999_999` silent default).
   class Config
-    attr_reader :bind, :port, :database_url, :economy_caps, :badges_max, :inventory_caps
+    attr_reader :bind, :port, :database_url, :economy_caps, :badges_max, :inventory_caps,
+                :monster_caps
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -35,6 +36,14 @@ module PEMK
         per_item: require_cap(caps, "inv_max_per_item"),
         distinct: require_cap(caps, "inv_max_distinct"),
         total:    require_cap(caps, "inv_max_total")
+      }
+
+      # M3.1 monster registry bounds (fail-fast; must land in the hash the handler
+      # reads — the :badges nil-cap bug is the precedent).
+      @monster_caps = {
+        uid_req_max: require_cap(caps, "mon_uid_req_max"),
+        party_max:   require_cap(caps, "mon_party_max"),
+        level_max:   require_cap(caps, "mon_level_max")
       }
     end
 

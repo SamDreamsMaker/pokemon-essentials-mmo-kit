@@ -12,6 +12,7 @@ class LedgerTest < Minitest::Test
 
   def setup
     @db = Sequel.connect(ENV.fetch("DATABASE_URL"))
+    @db[:monsters].delete rescue nil   # no cascade from accounts (deliberate)
     @db[:accounts].delete
     @acct = @db[:accounts].insert(email: "led@x.co", password_hash: "x", status: "active", created_at: Time.now)
     @led = PEMK::Ledger.new(@db, CAPS)

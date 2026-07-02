@@ -20,4 +20,9 @@ class ConfigTest < Minitest::Test
     cfg = PEMK::Config.new
     assert_equal({ per_item: 99_999, distinct: 2000, total: 10_000_000 }, cfg.inventory_caps)
   end
+
+  def test_monster_caps_are_present_and_fail_fast
+    cfg = PEMK::Config.new
+    assert_equal({ uid_req_max: 64, party_max: 6, level_max: 100 }, cfg.monster_caps)
+  end
 end
