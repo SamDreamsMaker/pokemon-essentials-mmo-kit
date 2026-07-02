@@ -22,7 +22,7 @@ module PEMK
         Challenge.on_message(msg)
       when :battle_team
         BattleSetup.on_team(msg)
-      when :battle_start, :battle_choice, :battle_round, :battle_end
+      when :battle_start, :battle_choice, :battle_round, :battle_switch, :battle_end
         BattleNet.on_message(msg)
       when NetClient::DISCONNECTED
         PEMK.log("disconnected from server")

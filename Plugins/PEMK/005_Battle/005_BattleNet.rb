@@ -15,12 +15,15 @@
 #   :battle_start  host->client  battle properties to build the playback battle
 #   :battle_choice client->host   one human choice for a round/battler
 #   :battle_round  host->client   the authoritative per-round replay packet
+#   :battle_switch either way     a mid-round replacement pick (whoever owns the
+#                                 switching battler sends its party index)
 #   :battle_end    host->client   final decision + any post-battle rolls
 #===============================================================================
 module PEMK
   module BattleNet
     @inbox_choice = {}   # [round, idxBattler] => cmd tuple
     @inbox_round  = []   # FIFO of authoritative round/RNG packets (TCP keeps order)
+    @inbox_switch = {}   # [round, idxBattler, seq] => party index of the replacement
     @inbox_start  = nil
     @inbox_end    = nil
 
@@ -32,6 +35,7 @@ module PEMK
     def self.reset
       @inbox_choice = {}
       @inbox_round  = []
+      @inbox_switch = {}
       @inbox_start  = nil
       @inbox_end    = nil
     end
@@ -43,6 +47,7 @@ module PEMK
       when :battle_start  then @inbox_start = msg
       when :battle_choice then @inbox_choice[[msg[:round], msg[:idxBattler]]] = msg[:cmd]
       when :battle_round  then @inbox_round.push(msg)
+      when :battle_switch then @inbox_switch[[msg[:round], msg[:idxBattler], msg[:seq]]] = msg[:idx]
       when :battle_end    then @inbox_end = msg
       end
     end
@@ -50,6 +55,10 @@ module PEMK
     # --- polled by the battle loops (non-blocking; nil until it has arrived) -----
     def self.take_choice(round, idx_battler)
       @inbox_choice.delete([round, idx_battler])
+    end
+
+    def self.take_switch(round, idx_battler, seq)
+      @inbox_switch.delete([round, idx_battler, seq])
     end
 
     # Oldest authoritative packet (FIFO), or nil. The RNG stream is a single
@@ -79,6 +88,11 @@ module PEMK
     def self.send_choice(to_id, round, idx_battler, cmd)
       PEMK.send_message({ :type => :battle_choice, :from => PEMK.self_id, :to => to_id,
                              :round => round, :idxBattler => idx_battler, :cmd => cmd })
+    end
+
+    def self.send_switch(to_id, round, idx_battler, seq, idx)
+      PEMK.send_message({ :type => :battle_switch, :from => PEMK.self_id, :to => to_id,
+                             :round => round, :idxBattler => idx_battler, :seq => seq, :idx => idx })
     end
 
     def self.send_round(to_id, round, packet)
