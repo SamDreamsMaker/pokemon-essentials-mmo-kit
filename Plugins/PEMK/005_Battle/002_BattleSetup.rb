@@ -1,15 +1,16 @@
 #===============================================================================
 # PEMK :: BattleSetup  (Phase 4b — team exchange + battle launch)
 #-------------------------------------------------------------------------------
-# Once a challenge is accepted, both players send each other their party (the
-# Pokémon objects ride along in a Marshal'd message, exactly as RecordedBattle
-# already serialises parties). When THIS side has received the opponent's team,
+# Once a challenge is accepted, both players send each other their party. The
+# Pokémon objects ride as an OPAQUE Marshal body (kept as Marshal so it stays
+# correct across upstream Pokémon-class changes); the primitive envelope carries
+# only routing/name/trainer-type. When THIS side has received the opponent's team,
 # it starts the battle (BattleLauncher) on a safe frame.
 #
-# NOTE: teams currently go through the broadcast relay (filtered by :to), so a
-# team is visible to every connected client — fine for a trusted host+friends
-# setup, to be tightened (server-routed, confidential) alongside the filtered
-# replay in Phase 4d.
+# The relay routes the team to the addressed recipient ALONE and never decodes the
+# body, so a party is confidential and the host never Marshal.loads it. Only the
+# recipient reconstructs the party (a bounded Pokémon-graph load — the accepted
+# residual of the wire-hardening work).
 #===============================================================================
 module PEMK
   module BattleSetup
@@ -25,15 +26,20 @@ module PEMK
     def self.send_team(to_id)
       return unless PEMK.client && PEMK.client.connected? && $player && $player.party
       ttype = ($player.trainer_type rescue nil)
+      # The party (Pokémon objects) rides as an opaque body; the relay never loads
+      # it and only +to_id+ receives it.
+      body = Marshal.dump($player.party)
       PEMK.send_message({ :type => :battle_team, :from => PEMK.self_id, :name => own_name,
-                             :to => to_id, :party => $player.party, :trainer_type => ttype })
+                             :to => to_id, :trainer_type => ttype }, body)
       PEMK.log("battle: sent my team (#{$player.party.length} Pokemon) to #{to_id}")
     end
 
     # Routed from Dispatch (inside the pump — no blocking UI/battle here).
     def self.on_team(msg)
       return unless msg[:to] == PEMK.self_id
-      party = msg[:party]
+      # Reconstruct the opponent party from the opaque body (our own decode, on the
+      # addressed frame). Legacy :party kept as a fallback during migration.
+      party = (msg[:_body] ? (Marshal.load(msg[:_body]) rescue nil) : msg[:party])
       return unless party.is_a?(Array) && !party.empty?
       remote = { :name => msg[:name] || "?", :party => party, :id => msg[:from],
                  :trainer_type => msg[:trainer_type] }
