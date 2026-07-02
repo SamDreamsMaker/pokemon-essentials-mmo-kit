@@ -127,6 +127,7 @@ module PEMK
       (PEMK::Sync.reset rescue nil)                          # fresh socket -> drop stale dirty/seq baseline
       (PEMK::Sync.adopt_econ_seq(reply[:econ_seq]) rescue nil) # ... then adopt the server's seq authority
       (PEMK::Sync.adopt_inv_seq(reply[:inv_seq]) rescue nil)  # ... same for the independent :inv channel
+      (PEMK::Sync.adopt_mon_seq(reply[:mon_seq]) rescue nil)  # ... and the :mon_party projection channel
       save_token(reply[:token]) if reply[:token]
       save_local_account(@account_id)
       PEMK.log("auth: #{reply[:type]} account=#{@account_id} state=#{@pending_state ? 'received' : 'new'} econ=#{@pending_econ ? @pending_econ.size : 0}")
@@ -173,6 +174,13 @@ module PEMK
       end
     rescue => e
       PEMK.log("auth: reconcile_inventory error: #{e.class}: #{e.message}")
+    end
+
+    # Monster channel seed (M3.1 write-only shadow): mark the :mon channel dirty so
+    # the first flush after entering the world sweeps for missing uids (legacy-save
+    # adoption) and ships the first party projection. NEVER writes any Pokémon data.
+    def self.reconcile_monsters
+      (PEMK::Sync.mark_mon rescue nil)
     end
 
     # Send a message and block for one of +types+, pumping the client WITHOUT

@@ -30,6 +30,12 @@ module PEMK
         # blob-authoritative in M2.3; there is no inventory applier). :inv_rej is
         # reserved for M3 server-authoritative rollback.
         Inventory.on_ack(msg)
+      when :uid_grant
+        # Server-minted monster identities: matched to instances by persisted nonce.
+        Monsters.on_grant(msg)
+      when :mon_ack
+        # Party-projection telemetry (detection-only): log a flag, never write.
+        Monsters.on_ack(msg)
       when :challenge, :challenge_accept, :challenge_decline
         Challenge.on_message(msg)
       when :battle_team

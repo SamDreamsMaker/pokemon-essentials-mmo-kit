@@ -22,6 +22,8 @@ module PEMK
 
     @econ        = {}           # field => latest absolute value (coalesced; badges ride here as a :badges bitmask)
     @inv_dirty   = false        # bag changed since the last flush -> re-read the WHOLE bag once at flush
+    @mon_dirty   = false        # monsters may need uids / the party projection may have changed
+    @mon_last    = nil          # hash of the last-sent party projection (send only on change)
     @seq         = Hash.new(0)  # channel => monotonic seq (adopted from the server on login)
     @dirty_since = nil
     @last_change = nil
@@ -35,6 +37,9 @@ module PEMK
     def reset
       @econ = {}
       @inv_dirty = false
+      @mon_dirty = false
+      @mon_last = nil
+      (PEMK::Monsters.reset rescue nil)
       @seq = Hash.new(0)
       @dirty_since = nil
       @last_change = nil
@@ -55,6 +60,12 @@ module PEMK
       @seq[:inv] = n if n.is_a?(Integer) && n > @seq[:inv]
     end
 
+    # Twin for the :mon_party projection channel. (:uid_req needs NO adoption — its
+    # seq is log-correlation only; mint idempotency lives in the persisted nonce.)
+    def adopt_mon_seq(n)
+      @seq[:mon] = n if n.is_a?(Integer) && n > @seq[:mon]
+    end
+
     # --- OBSERVER entry points (called from the mutation aliases) ---------------
     def mark_econ(field, value)
       return unless value.is_a?(Integer)
@@ -70,12 +81,22 @@ module PEMK
       touch
     end
 
+    # Monster channel: uid sweep + party projection at the next flush. Flag-only;
+    # the sweep is microseconds and the projection is hash-gated, so cheap to mark.
+    def mark_mon
+      @mon_dirty = true
+      touch
+    end
+
     def dirty?
-      !@econ.empty? || @inv_dirty
+      !@econ.empty? || @inv_dirty || @mon_dirty
     end
 
     # --- EVENT: flush now (map change, battle end, menu/scene close, quit) ------
+    # Every event flush also sweeps the monster channel (new catches between events
+    # are covered by the latency aliases; this is the self-healing catch-all).
     def flush_event(_reason = nil)
+      @mon_dirty = true
       flush_primitives
     end
 
@@ -105,6 +126,21 @@ module PEMK
           c.send_message({ :type => :inv, :bag => bag, :seq => (@seq[:inv] += 1) })
           @inv_dirty = false
         end
+      end
+      # Monsters: (a) mint sweep — one <=64-entry :uid_req chunk per pass; a legacy
+      # save with hundreds of mons drains over successive flushes (self-healing);
+      # (b) party projection, sent only when it actually changed (hash gate).
+      if @mon_dirty
+        entries, more = PEMK::Monsters.pending_batch
+        if entries && !entries.empty?
+          c.send_message({ :type => :uid_req, :mons => entries, :seq => (@seq[:uid] += 1) })
+        end
+        proj = PEMK::Monsters.projection
+        if proj && proj.hash != @mon_last
+          c.send_message({ :type => :mon_party, :mons => proj, :seq => (@seq[:mon] += 1) })
+          @mon_last = proj.hash
+        end
+        @mon_dirty = more ? true : false   # stay dirty while mints remain pending
       end
       @econ = {}
       # If a channel is still dirty (e.g. the bag couldn't be read this pass so

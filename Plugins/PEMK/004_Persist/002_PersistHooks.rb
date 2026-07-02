@@ -56,6 +56,7 @@ module Game
         PEMK::Auth.apply_identity
         PEMK::Auth.reconcile_economy       # ledger snapshot (empty for a new account)
         PEMK::Auth.reconcile_inventory     # unseeded -> seed the fresh bag on the first flush
+        PEMK::Auth.reconcile_monsters      # uid sweep + first party projection
         # Server-authoritative: the local Game.rxdata is a disposable per-session
         # cache, so overwriting it is always fine. Clear begun_new_game so the core
         # skips its "a different game is already saved" warning on the next save.
@@ -67,19 +68,22 @@ module Game
         PEMK::Auth.apply_identity
         PEMK::Auth.reconcile_economy       # ledger is the economy authority, over the blob
         PEMK::Auth.reconcile_inventory     # server bag overwrites the blob bag (or seeds if unseeded)
+        PEMK::Auth.reconcile_monsters      # uid sweep (legacy-save adoption) + first party projection
         PEMK::Auth.clear_pending
       end
 
       def save(save_file = SaveData::FILE_PATH, safe: false)
+        # An explicit save is a checkpoint. Flush the primitive channels BEFORE the
+        # blob is written: the monster sweep assigns mint nonces at flush, and they
+        # must Marshal into the very file being saved (else a crash before the NEXT
+        # save re-mints those mons under fresh uids — identity churn the persisted
+        # nonce exists to prevent). Econ/inv flushing earlier is content-identical.
+        (PEMK::Sync.flush_event(:save) rescue nil)
         ok = pokemmo_orig_save(save_file, safe: safe)
-        # An explicit save is a checkpoint: flush any pending primitive deltas, then
-        # push the full opaque blob — throttled by content hash so an UNCHANGED file
-        # is never re-sent (no more 90 KB on every save). The server stores the body
-        # verbatim and never Marshal.loads it (no host RCE via :save).
-        if ok
-          (PEMK::Sync.flush_event(:save) rescue nil)
-          (PEMK::Sync.push_blob(save_file, force: true) rescue nil)
-        end
+        # Push the full opaque blob — throttled by content hash so an UNCHANGED file
+        # is never re-sent. The server stores the body verbatim and never
+        # Marshal.loads it (no host RCE via :save).
+        (PEMK::Sync.push_blob(save_file, force: true) rescue nil) if ok
         ok
       end
     end
