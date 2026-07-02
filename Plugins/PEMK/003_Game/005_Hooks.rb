@@ -16,6 +16,7 @@ module PEMK
 
     def self.tick
       return if @in_pump
+      return unless $player   # only once a game is loaded (skip title / load screen)
       fc = (Graphics.frame_count rescue -1)
       return if fc != -1 && fc == @last_frame   # already pumped this frame
       @in_pump = true
@@ -38,11 +39,25 @@ module PEMK
   end
 end
 
-# --- Per-frame pump in the overworld (Scene_Map#updateSpritesets) -------------
-# NB: EventHandlers.add(event, key, proc) takes the handler as its 3rd argument
-# (a proc), not a block.
-EventHandlers.add(:on_frame_update, :pokemmo_pump,
-  proc { PEMK::Pump.tick })
+# --- The single per-frame pump: alias Graphics.update -------------------------
+# Graphics.update is called exactly once per frame in EVERY scene — the overworld,
+# battles, AND every full-screen menu (Bag, Pokédex, Party, Storage, Pokégear…).
+# Driving the pump from here, and NOWHERE else, keeps presence/networking alive
+# everywhere (including inside big menus, which have their own update loops and
+# never call pbUpdateSceneMap), with exactly one pump per frame (no burst).
+# Pump.tick no-ops until a game is loaded ($player), so the title/load screen is
+# untouched; login runs its own manual pump.
+module Graphics
+  class << self
+    unless method_defined?(:pemk_orig_update)
+      alias_method :pemk_orig_update, :update
+      def update(*args)
+        pemk_orig_update(*args)
+        PEMK::Pump.tick
+      end
+    end
+  end
+end
 
 # --- Emit the local player's presence on step / turn --------------------------
 EventHandlers.add(:on_player_step_taken, :pokemmo_emit_step,
@@ -90,21 +105,6 @@ class Scene_Map
     def update
       PEMK::BattleSetup.run_pending_launch
       pokemmo_orig_scene_update
-    end
-  end
-end
-
-# --- Keep the network alive during blocking overworld loops -------------------
-# pbUpdateSceneMap is the single global function every message/menu/wait loop
-# calls; aliasing it (guarded, idempotent) pumps there too. Pump.tick throttles
-# itself per frame, so being called from both paths is safe.
-class Object
-  unless private_method_defined?(:pokemmo_orig_pbUpdateSceneMap) ||
-         method_defined?(:pokemmo_orig_pbUpdateSceneMap)
-    alias_method :pokemmo_orig_pbUpdateSceneMap, :pbUpdateSceneMap
-    def pbUpdateSceneMap
-      pokemmo_orig_pbUpdateSceneMap
-      PEMK::Pump.tick
     end
   end
 end
