@@ -57,5 +57,11 @@ module PEMK
     MAX_MESSAGE_BYTES = 16 << 20  # 16 MiB hard cap. Larger frames = protocol error
                                   # (drop the link). Sized to fit a full game save,
                                   # which Phase 2 pushes to the server on Game.save.
+
+    # Wire hardening (see MessageCodec's split "safe envelope + opaque body" shape).
+    # ENVELOPE_MAX bounds the primitive envelope a host will decode; PRIM_MAX_ELEMS
+    # bounds any Array/Hash element count in the primitive codec (anti-memory-bomb).
+    ENVELOPE_MAX   = 64 << 10     # 64 KiB — routing/control data only, never a graph
+    PRIM_MAX_ELEMS = 4_096
   end
 end
