@@ -2,12 +2,13 @@
 # PEMK :: AuthUI  (client side)
 #-------------------------------------------------------------------------------
 # The in-game login / registration screen shown at the load crossroads when there
-# is no valid session token AND no credentials in mmo_config.txt. Uses Essentials'
-# own message/free-text widgets (pbMessageFreeText masks the password), so it
-# works at the load screen exactly like its New Game / Continue menu.
+# is no valid session token AND no credentials in mmo_config.txt. Accounts are
+# identified by EMAIL (email + password); the in-game display name is the
+# character's own name (chosen in the intro), not a separate handle.
 #
-# mmo_config.txt credentials remain a dev shortcut (they skip this screen), which
-# keeps the two-window local test fast.
+# Built on Essentials' own message + free-text widgets (pbMessageFreeText masks
+# the password), so it works at the load screen like its New Game / Continue menu.
+# mmo_config.txt credentials remain a dev shortcut that skips this screen.
 #===============================================================================
 module PEMK
   module AuthUI
@@ -31,13 +32,13 @@ module PEMK
     end
 
     def login(c)
-      user = ask(_INTL("Enter your username:"), false, 20)
-      return false if user.empty?
+      email = ask(_INTL("Enter your email:"), false, 100)
+      return false if email.empty?
 
       pw = ask(_INTL("Enter your password:"), true, 64)
       return false if pw.empty?
 
-      reply = PEMK::Auth.send_and_wait(c, { :type => :login, :username => user, :password => pw },
+      reply = PEMK::Auth.send_and_wait(c, { :type => :login, :email => email, :password => pw },
                                        [:login_ok, :login_err])
       return true if apply(reply, :login_ok)
 
@@ -46,10 +47,7 @@ module PEMK
     end
 
     def register(c)
-      user = ask(_INTL("Choose a username (3-20 letters, digits or _):"), false, 20)
-      return false if user.empty?
-
-      email = ask(_INTL("Enter your email:"), false, 100)
+      email = ask(_INTL("Enter your email (this is your login):"), false, 100)
       return false if email.empty?
 
       pw = ask(_INTL("Choose a password (at least 8 characters):"), true, 64)
@@ -60,17 +58,17 @@ module PEMK
         return false
       end
 
-      reg = PEMK::Auth.send_and_wait(c, { :type => :register, :username => user, :email => email, :password => pw },
+      reg = PEMK::Auth.send_and_wait(c, { :type => :register, :email => email, :password => pw },
                                      [:register_ok, :register_err])
       unless reg && reg[:type] == :register_ok
         pbMessage(_INTL("Could not create the account: {1}.", friendly(reg)))
         return false
       end
 
-      reply = PEMK::Auth.send_and_wait(c, { :type => :login, :username => user, :password => pw },
+      reply = PEMK::Auth.send_and_wait(c, { :type => :login, :email => email, :password => pw },
                                        [:login_ok, :login_err])
       if apply(reply, :login_ok)
-        pbMessage(_INTL("Welcome, {1}! Your account is ready.", user))
+        pbMessage(_INTL("Your account is ready. Welcome!"))
         return true
       end
       pbMessage(_INTL("Account created, but automatic login failed — pick \"Log in\"."))
@@ -91,15 +89,14 @@ module PEMK
 
     def friendly(reply)
       case reply && reply[:reason]
-      when "not_found"        then _INTL("no account with that username")
-      when "bad_password"     then _INTL("wrong password")
-      when "locked"           then _INTL("too many attempts, try again later")
-      when "rate_limited"     then _INTL("too many attempts, wait a moment")
-      when "taken"            then _INTL("that username is already taken")
-      when "invalid_username" then _INTL("username must be 3-20 letters, digits or _")
-      when "invalid_email"    then _INTL("that email looks invalid")
-      when "weak_password"    then _INTL("password needs at least 8 characters")
-      when nil                then _INTL("no response from the server")
+      when "not_found"     then _INTL("no account with that email")
+      when "bad_password"  then _INTL("wrong password")
+      when "locked"        then _INTL("too many attempts, try again later")
+      when "rate_limited"  then _INTL("too many attempts, wait a moment")
+      when "taken"         then _INTL("that email is already registered")
+      when "invalid_email" then _INTL("that email looks invalid")
+      when "weak_password" then _INTL("password needs at least 8 characters")
+      when nil             then _INTL("no response from the server")
       else (reply[:reason]).to_s
       end
     end

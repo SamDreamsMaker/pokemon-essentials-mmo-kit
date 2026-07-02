@@ -59,9 +59,8 @@ module PEMK
     end
 
     # Blocking handshake against the dedicated server. Always returns true (any
-    # failure => offline/solo play proceeds). Order: reuse a stored session token,
-    # else log in with the configured username/password, registering the account
-    # first if it does not exist yet.
+    # failure => offline/solo play proceeds). Order: (1) config email+password dev
+    # shortcut, (2) a stored session token, (3) the interactive in-game screen.
     def self.login_blocking
       return true if @logged_in
       PEMK.ensure_started
@@ -71,40 +70,36 @@ module PEMK
         return true
       end
 
-      token = load_token
-      return true if token && try_auth(c, token)
+      st    = PEMK.settings
+      email = st[:email].to_s
+      pw    = st[:password].to_s
 
-      st   = PEMK.settings
-      user = st[:username].to_s
-      pw   = st[:password].to_s
-      if user.empty? || pw.empty?
-        # No dev shortcut credentials -> show the interactive login/register screen.
-        PEMK.log("auth: no config credentials -> in-game login/register screen")
-        PEMK::AuthUI.run(c)
-        return true
+      if !email.empty? && !pw.empty?
+        config_login(c, email, pw)            # dev shortcut: the configured account
+      elsif (token = load_token) && try_auth(c, token)
+        # reconnected as the last account via its saved session token
+      else
+        PEMK::AuthUI.run(c)                    # players: log in / create account in-game
       end
+      true
+    end
 
-      reply = send_and_wait(c, { :type => :login, :username => user, :password => pw },
-                            [:login_ok, :login_err])
+    # Non-interactive login for the mmo_config.txt dev shortcut: log in the
+    # configured email, registering it first if it does not exist yet.
+    def self.config_login(c, email, pw)
+      reply = send_and_wait(c, { :type => :login, :email => email, :password => pw }, [:login_ok, :login_err])
       if reply && reply[:type] == :login_err && reply[:reason] == "not_found"
-        PEMK.log("auth: account #{user.inspect} not found -> registering")
-        reg = send_and_wait(c, { :type => :register, :username => user, :password => pw },
-                            [:register_ok, :register_err])
-        if reg && reg[:type] == :register_ok
-          reply = send_and_wait(c, { :type => :login, :username => user, :password => pw },
-                                [:login_ok, :login_err])
-        else
-          PEMK.log("auth: register failed (#{reg && reg[:reason]}) -> offline/solo")
-          return true
-        end
-      end
+        PEMK.log("auth: config account #{email.inspect} not found -> registering")
+        reg = send_and_wait(c, { :type => :register, :email => email, :password => pw }, [:register_ok, :register_err])
+        return PEMK.log("auth: config register failed (#{reg && reg[:reason]})") unless reg && reg[:type] == :register_ok
 
+        reply = send_and_wait(c, { :type => :login, :email => email, :password => pw }, [:login_ok, :login_err])
+      end
       if reply && reply[:type] == :login_ok
         apply_login(reply)
       else
-        PEMK.log("auth: login failed (#{reply && reply[:reason]}) -> offline/solo")
+        PEMK.log("auth: config login failed (#{reply && reply[:reason]})")
       end
-      true
     end
 
     # Reconnect with a stored session token; true on success.
@@ -147,22 +142,21 @@ module PEMK
       guest? ? "mmo_session_guest.dat" : "mmo_session.dat"
     end
 
-    # The token is bound to the configured username, so switching accounts in
-    # mmo_config.txt cleanly forces a fresh password login instead of reusing a
-    # token for the wrong account.
+    # The saved session token is the LAST logged-in account. It is only consulted
+    # when there are no config credentials (those take priority and override it),
+    # so no per-account binding is needed here.
     def self.load_token
       path = File.expand_path(token_file)
       return nil unless File.file?(path)
-      owner, tok = File.read(path).split("\n", 2)
-      return nil unless owner == PEMK.settings[:username].to_s && tok
 
-      tok.strip
+      tok = File.read(path).strip
+      tok.empty? ? nil : tok
     rescue
       nil
     end
 
     def self.save_token(token)
-      File.write(File.expand_path(token_file), "#{PEMK.settings[:username]}\n#{token}")
+      File.write(File.expand_path(token_file), token.to_s)
     rescue => e
       PEMK.log("auth: cannot persist token: #{e.class}: #{e.message}")
     end

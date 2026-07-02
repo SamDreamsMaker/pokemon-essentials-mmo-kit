@@ -7,11 +7,9 @@ require "pemk/password"
 require "pemk/accounts"
 require "pemk/sessions"
 
-# Auth data-access tests against the real Postgres (DATABASE_URL). Each test
-# starts from an empty accounts table (delete cascades to sessions).
+# Auth data-access tests against the real Postgres (DATABASE_URL). Accounts are
+# identified by email. Each test starts from an empty table (delete cascades).
 class AuthTest < Minitest::Test
-  EMAIL = "trainer@example.com"
-
   def setup
     @db = Sequel.connect(ENV.fetch("DATABASE_URL"))
     @db[:accounts].delete
@@ -30,40 +28,43 @@ class AuthTest < Minitest::Test
     refute PEMK::Password.verify("x", "not-a-bcrypt-hash")
   end
 
-  def test_register_then_authenticate
-    id = @accounts.create(username: "Ash", password: "pikapika123", email: EMAIL)
+  def test_register_then_authenticate_by_email
+    id = @accounts.create(email: "ash@pallet.town", password: "pikapika123", username: "Ash")
     assert_kind_of Integer, id
-    acct, err = @accounts.authenticate("Ash", "pikapika123")
+    acct, err = @accounts.authenticate("ash@pallet.town", "pikapika123")
     assert_nil err
     assert_equal id, acct[:id]
   end
 
-  def test_duplicate_username_rejected_case_insensitively
-    assert @accounts.create(username: "Misty", password: "password1", email: "a@b.co")
-    assert_nil @accounts.create(username: "Misty", password: "password2", email: "c@d.co")
-    assert_nil @accounts.create(username: "MISTY", password: "password3", email: "e@f.co") # citext
+  def test_username_is_optional
+    id = @accounts.create(email: "nohandle@x.co", password: "password1")
+    assert_kind_of Integer, id
+  end
+
+  def test_duplicate_email_rejected_case_insensitively
+    assert @accounts.create(email: "Misty@x.co", password: "password1")
+    assert_nil @accounts.create(email: "misty@x.co", password: "password2") # citext
   end
 
   def test_malformed_input_raises
-    assert_raises(ArgumentError) { @accounts.create(username: "ab", password: "password1", email: EMAIL) }
-    assert_raises(ArgumentError) { @accounts.create(username: "Ash", password: "short", email: EMAIL) }
-    assert_raises(ArgumentError) { @accounts.create(username: "bad name!", password: "password1", email: EMAIL) }
-    assert_raises(ArgumentError) { @accounts.create(username: "NoMail", password: "password1", email: "") }
-    assert_raises(ArgumentError) { @accounts.create(username: "BadMail", password: "password1", email: "nope") }
+    assert_raises(ArgumentError) { @accounts.create(email: "", password: "password1") }
+    assert_raises(ArgumentError) { @accounts.create(email: "notanemail", password: "password1") }
+    assert_raises(ArgumentError) { @accounts.create(email: "ok@x.co", password: "short") }
+    assert_raises(ArgumentError) { @accounts.create(email: "ok2@x.co", password: "password1", username: "bad name!") }
   end
 
   def test_lockout_after_five_failures
-    @accounts.create(username: "Brock", password: "onixrock1", email: EMAIL)
-    5.times { assert_equal :bad_password, @accounts.authenticate("Brock", "nope").last }
-    assert_equal :locked, @accounts.authenticate("Brock", "onixrock1").last # locked despite correct pw
+    @accounts.create(email: "brock@x.co", password: "onixrock1")
+    5.times { assert_equal :bad_password, @accounts.authenticate("brock@x.co", "nope").last }
+    assert_equal :locked, @accounts.authenticate("brock@x.co", "onixrock1").last
   end
 
-  def test_unknown_user
-    assert_equal :not_found, @accounts.authenticate("Ghost", "whatever").last
+  def test_unknown_email
+    assert_equal :not_found, @accounts.authenticate("ghost@x.co", "whatever").last
   end
 
   def test_session_issue_resolve_revoke
-    id = @accounts.create(username: "Gary", password: "oakoakoak1", email: EMAIL)
+    id = @accounts.create(email: "gary@x.co", password: "oakoakoak1")
     token = @sessions.issue(id, remote_addr: "127.0.0.1")
     assert_equal 64, token.length
     assert_equal id, @sessions.resolve(token)
@@ -73,7 +74,7 @@ class AuthTest < Minitest::Test
   end
 
   def test_session_absolute_expiry
-    id = @accounts.create(username: "Oak", password: "professor1", email: EMAIL)
+    id = @accounts.create(email: "oak@x.co", password: "professor1")
     token = @sessions.issue(id, now: Time.now - (40 * 24 * 3600))
     assert_nil @sessions.resolve(token)
   end

@@ -16,12 +16,15 @@ module PEMK
 
     # Returns the new account id, or nil if the username/email is already taken.
     # Raises ArgumentError on malformed input (caller maps to a client error).
-    def create(username:, password:, email:, now: Time.now)
-      username = username.to_s
+    # Accounts are keyed by email (the login). username is an optional display
+    # handle. Returns the new id, or nil if the email is already registered.
+    def create(email:, password:, username: nil, now: Time.now)
       email    = email.to_s.strip
-      raise ArgumentError, "invalid_username" unless USERNAME_RE.match?(username)
+      username = username.to_s.strip
+      username = nil if username.empty?
       raise ArgumentError, "invalid_email"    unless EMAIL_RE.match?(email)
       raise ArgumentError, "weak_password"    unless password.to_s.length >= MIN_PASSWORD
+      raise ArgumentError, "invalid_username" if username && !USERNAME_RE.match?(username)
 
       @db[:accounts].insert(
         username:      username,
@@ -37,8 +40,8 @@ module PEMK
     # -> [account_row, nil] on success, or [nil, reason] where reason is one of
     # :not_found, :locked, :bad_password. Consumes a failed attempt + locks the
     # account after MAX_FAILS; resets the counter on success.
-    def authenticate(username, password, now: Time.now)
-      acct = @db[:accounts].where(username: username.to_s).first
+    def authenticate(email, password, now: Time.now)
+      acct = @db[:accounts].where(email: email.to_s.strip).first
       return [nil, :not_found] unless acct
       return [nil, :locked] if acct[:locked_until] && acct[:locked_until] > now
 

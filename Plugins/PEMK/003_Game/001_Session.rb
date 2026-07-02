@@ -35,7 +35,7 @@ module PEMK
 
   def self.resolve_settings
     s = { :role => Config::ROLE, :host => Config::HOST, :port => Config::PORT,
-          :bind => Config::BIND_HOST, :username => nil, :password => nil }
+          :bind => Config::BIND_HOST, :email => nil, :password => nil }
     # A guest instance (PEMK_GUEST) reads its OWN config so two windows on one PC
     # can log in as distinct accounts.
     file = ENV["PEMK_GUEST"].to_s.strip.empty? ? Config::CONFIG_FILE : "mmo_config_guest.txt"
@@ -53,11 +53,11 @@ module PEMK
         when "host"     then s[:host] = v
         when "port"     then s[:port] = v.to_i if v.to_i > 0
         when "bind"     then s[:bind] = v
-        when "username" then s[:username] = v
+        when "email"    then s[:email] = v
         when "password" then s[:password] = v   # never logged
         end
       end
-      log("config: #{file} -> host=#{s[:host]} port=#{s[:port]} user=#{s[:username].inspect}")
+      log("config: #{file} -> host=#{s[:host]} port=#{s[:port]} email=#{s[:email].inspect}")
     end
     s
   rescue => e

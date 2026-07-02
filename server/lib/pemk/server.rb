@@ -113,13 +113,13 @@ module PEMK
     def handle_register(conn, env)
       return reply(conn, type: :register_err, reason: "rate_limited") unless @limiter.allow?(conn.addr)
 
-      user  = env[:username].to_s
+      email = env[:email].to_s
       pw    = env[:password].to_s
-      email = env[:email]
+      uname = env[:username]   # optional display handle
       @pool.submit do
         result =
           begin
-            id = @accounts.create(username: user, password: pw, email: email)
+            id = @accounts.create(email: email, password: pw, username: uname)
             id ? { type: :register_ok, account_id: id } : { type: :register_err, reason: "taken" }
           rescue ArgumentError => e
             { type: :register_err, reason: e.message }
@@ -131,11 +131,11 @@ module PEMK
     def handle_login(conn, env)
       return reply(conn, type: :login_err, reason: "rate_limited") unless @limiter.allow?(conn.addr)
 
-      user = env[:username].to_s
-      pw   = env[:password].to_s
-      addr = conn.addr
+      email = env[:email].to_s
+      pw    = env[:password].to_s
+      addr  = conn.addr
       @pool.submit do
-        acct, err = @accounts.authenticate(user, pw)
+        acct, err = @accounts.authenticate(email, pw)
         if acct
           token = @sessions.issue(acct[:id], remote_addr: addr)
           blob  = @characters.load_blob(acct[:id])   # opaque; never loaded here
