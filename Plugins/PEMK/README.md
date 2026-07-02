@@ -18,7 +18,8 @@ at boot into `client` or `host` mode.
 >   inventory changes are pushed to the host (server-clamped).
 > - **PvP battles** — challenge another player on your map; a real, deterministic
 >   battle runs on both screens, host-authoritative (choices exchanged + the
->   host's RNG stream replayed), each player seeing their own team.
+>   host's RNG stream replayed), each player seeing their own team. Full multi-
+>   Pokémon teams: mid-round replacement switches (faints, U-turn) stay in sync.
 >
 > Full design + roadmap in
 > [`docs/architecture/MMO_CONVERSION_AUDIT.md`](../../docs/architecture/MMO_CONVERSION_AUDIT.md).
@@ -109,6 +110,7 @@ Without this file, `ROLE = :auto` is used (host-or-join on `127.0.0.1`).
              NetBattles        HostBattle / ClientBattle (role-based)
              BattleChoiceSync  exchange each side's human choice per round
              BattleRngSync     the host's authoritative RNG stream, replayed by the client
+             BattleSwitchSync  mid-round replacement picks (faints, U-turn) across the mirror
 ```
 
 **The pump model.** Measured mkxp-z behaviour forced this design (audit §4): its
@@ -140,8 +142,6 @@ false`, so real parties, Exp, money and the Pokédex are never touched.
   trusted host, **must be replaced** before any public deployment (audit §10-G9).
 - **Battle team confidentiality:** parties are currently broadcast (filtered by
   `:to`), so a team is visible to every connected client — to be server-routed.
-- **Mid-round replacement switches** (after a faint, in multi-Pokémon battles) are
-  not synchronized yet; a fully clean battle uses one Pokémon per side.
 - **Debug-mode entry:** loading server state can intermittently hit an mkxp-z
   boot-stack `SystemStackError`; it is load-only and a relaunch recovers. Release
   builds (compiled plugins, no critical-code wrapper) are far less exposed.
