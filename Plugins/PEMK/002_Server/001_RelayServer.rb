@@ -153,10 +153,15 @@ module PEMK
     #   * everything else (presence, no :to) -> every other client (broadcast).
     def route(sender_id, frame)
       payload = frame[Config::LENGTH_BYTES, frame.bytesize - Config::LENGTH_BYTES]
-      msg = MessageCodec.decode(payload)
-      if msg.is_a?(Hash) && Config::ACCOUNT_TYPES.include?(msg[:type])
+      # Decode ONLY the envelope. For a split frame the opaque body is never
+      # Marshal.loaded here — the host routes on primitives alone. (Legacy frames
+      # still whole-Marshal via decode_envelope until senders migrate.)
+      dec = MessageCodec.decode_envelope(payload)
+      return unless dec   # undecodable / oversized / hostile envelope -> drop, never broadcast
+      msg = dec[:env]
+      if Config::ACCOUNT_TYPES.include?(msg[:type])
         PEMK::ServerLogic.handle(self, sender_id, msg)
-      elsif msg.is_a?(Hash) && !msg[:to].nil?
+      elsif !msg[:to].nil?
         unicast(sender_id, msg, frame)
       else
         broadcast(sender_id, frame)
