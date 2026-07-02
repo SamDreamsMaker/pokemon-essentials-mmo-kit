@@ -89,7 +89,7 @@ Without this file, `ROLE = :auto` is used (host-or-join on `127.0.0.1`).
 
 ```
 001_Net/     Config            central settings
-             MessageCodec      length-prefixed framing + Marshal  (the wire boundary)
+             MessageCodec      split framing: safe primitive envelope + opaque body
              NetClient         one TCP connection, non-blocking, main-thread poll
 002_Server/  RelayServer       accept thread + main-thread pump; routes addressed
                                frames to one recipient, presence to all
@@ -139,8 +139,13 @@ false`, so real parties, Exp, money and the Pokédex are never touched.
 - **No authority on movement / economy beyond clamps.** Presence is broadcast and
   clients are trusted for it. Economy/badge mutations are range-clamped by the
   host, but this is a trusted host+friends model, not anti-cheat.
-- **`Marshal` wire-format** is an RCE vector on untrusted input — fine for a
-  trusted host, **must be replaced** before any public deployment (audit §10-G9).
+- **`Marshal` on the wire — host closed, small client-side residual.** The host
+  never `Marshal.load`s an untrusted frame: it routes on a self-contained
+  primitive-codec envelope and rejects legacy whole-Marshal frames, while deep
+  graphs (saves, teams) ride as opaque bodies it stores/forwards without decoding.
+  The only remaining `Marshal.load` of a peer-influenced graph is on the **client**
+  — its own save, or a team it is about to battle — the accepted residual of the
+  trusted-host model.
 - **Debug-mode entry:** loading server state can intermittently hit an mkxp-z
   boot-stack `SystemStackError`; it is load-only and a relaunch recovers. Release
   builds (compiled plugins, no critical-code wrapper) are far less exposed.
