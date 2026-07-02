@@ -34,9 +34,12 @@ module PEMK
   end
 
   def self.resolve_settings
-    s = { :role => Config::ROLE, :host => Config::HOST,
-          :port => Config::PORT, :bind => Config::BIND_HOST }
-    path = File.expand_path(Config::CONFIG_FILE)
+    s = { :role => Config::ROLE, :host => Config::HOST, :port => Config::PORT,
+          :bind => Config::BIND_HOST, :username => nil, :password => nil }
+    # A guest instance (PEMK_GUEST) reads its OWN config so two windows on one PC
+    # can log in as distinct accounts.
+    file = ENV["PEMK_GUEST"].to_s.strip.empty? ? Config::CONFIG_FILE : "mmo_config_guest.txt"
+    path = File.expand_path(file)
     if File.exist?(path)
       File.foreach(path) do |line|
         line = line.strip
@@ -46,18 +49,21 @@ module PEMK
         k = k.strip.downcase
         v = v.strip
         case k
-        when "role" then s[:role] = v.downcase.to_sym
-        when "host" then s[:host] = v
-        when "port" then s[:port] = v.to_i if v.to_i > 0
-        when "bind" then s[:bind] = v
+        when "role"     then s[:role] = v.downcase.to_sym
+        when "host"     then s[:host] = v
+        when "port"     then s[:port] = v.to_i if v.to_i > 0
+        when "bind"     then s[:bind] = v
+        when "username" then s[:username] = v
+        when "password" then s[:password] = v   # never logged
         end
       end
-      log("config: #{Config::CONFIG_FILE} -> role=#{s[:role]} host=#{s[:host]} port=#{s[:port]} bind=#{s[:bind]}")
+      log("config: #{file} -> host=#{s[:host]} port=#{s[:port]} user=#{s[:username].inspect}")
     end
     s
   rescue => e
     log("config: error reading #{Config::CONFIG_FILE}: #{e.class}: #{e.message}")
-    { :role => Config::ROLE, :host => Config::HOST, :port => Config::PORT, :bind => Config::BIND_HOST }
+    { :role => Config::ROLE, :host => Config::HOST, :port => Config::PORT,
+      :bind => Config::BIND_HOST, :username => nil, :password => nil }
   end
 
   def self.enabled?
@@ -77,38 +83,20 @@ module PEMK
     c.send_message(hash, body)
   end
 
-  # Idempotent: opens the relay (if hosting) and the client connection. Sets
-  # @started up front so a failure doesn't get retried every single frame.
+  # Idempotent: opens the client connection to the DEDICATED server (there is no
+  # in-process relay any more — the authoritative Ruby+Postgres server owns data).
+  # Sets @started up front so a failure isn't retried every frame. self_id stays
+  # nil until Auth logs in and the server issues the account id.
   def self.ensure_started
     return if @started || !enabled?
     @started = true
-    @self_id = "#{rand(1 << 30)}-#{rand(1 << 30)}"
-    st   = settings
-    role = st[:role]
-    port = st[:port]
+    st = settings
     begin
-      if role == :host || role == :auto
-        relay = RelayServer.new(port, st[:bind])
-        if relay.start
-          @relay = relay
-          log("host: relay listening on #{st[:bind]}:#{port}")
-        else
-          @relay = nil
-          if role == :auto
-            role = :client   # port busy => another instance hosts; join it
-            log("auto: port #{port} busy, joining as client")
-          else
-            log("host: relay FAILED to bind port #{port}")
-          end
-        end
-      end
-      target = (role == :client) ? st[:host] : "127.0.0.1"
-      @client = NetClient.new(target, port)
+      @client = NetClient.new(st[:host], st[:port])
       if @client.connect
-        log("client: connected to #{target}:#{port} (id #{@self_id})")
-        Presence.emit(:pos)
+        log("client: connected to dedicated server #{st[:host]}:#{st[:port]}")
       else
-        log("client: FAILED to connect to #{target}:#{port}")
+        log("client: FAILED to connect to #{st[:host]}:#{st[:port]}")
       end
     rescue => e
       log("start error: #{e.class}: #{e.message}")

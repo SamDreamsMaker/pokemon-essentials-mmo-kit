@@ -58,49 +58,111 @@ module PEMK
       0.0
     end
 
-    # Blocking handshake. Always returns true (offline => solo play proceeds).
+    # Blocking handshake against the dedicated server. Always returns true (any
+    # failure => offline/solo play proceeds). Order: reuse a stored session token,
+    # else log in with the configured username/password, registering the account
+    # first if it does not exist yet.
     def self.login_blocking
       return true if @logged_in
       PEMK.ensure_started
       c = PEMK.client
       unless c && c.connected?
-        PEMK.log("auth: no server, playing offline/solo")
+        PEMK.log("auth: no server at boot, playing offline/solo")
         return true
       end
-      # Guest mode uses its own account file (see guest?), so two instances on ONE
-      # PC are distinct players that each keep their own persistent progress.
-      guest = guest?
-      @account_id ||= load_local_account
-      c.send_message({ :type => :login, :account_id => @account_id })
-      PEMK.log("auth: sent :login (account=#{@account_id.inspect}#{guest ? ' GUEST' : ''}), waiting")
-      deadline = mono + Config::LOGIN_TIMEOUT
-      while mono < deadline
-        # Do NOT call Graphics.update here: driving it manually from inside the
-        # load screen blows mkxp-z's stack. A short sleep yields the GVL so the
-        # acceptor thread runs and the relay pump processes our login; localhost
-        # login is near-instant so there is no visible freeze.
-        sleep(0.005)
-        r = PEMK.relay
-        r.pump if r                      # host: process our own login (no frame pump yet)
-        done = false
-        c.poll.each do |m|
-          next unless m.is_a?(Hash) && m[:type] == :login_ok
-          @account_id    = m[:account_id]
-          # Our own state comes back as an opaque body; load it CLIENT-side — this
-          # is our data, equivalent to reading our local save. (Legacy :state kept
-          # as a fallback during migration.)
-          @pending_state = m[:_body] ? (Marshal.load(m[:_body]) rescue nil) : m[:state]
-          @logged_in     = true
-          save_local_account(@account_id)
-          PEMK.set_self_id(@account_id)   # account id becomes our presence id
-          PEMK.log("auth: login_ok account=#{@account_id} state=#{@pending_state ? 'received' : 'new'}")
-          done = true
-          break
-        end
-        return true if done
+
+      token = load_token
+      return true if token && try_auth(c, token)
+
+      st   = PEMK.settings
+      user = st[:username].to_s
+      pw   = st[:password].to_s
+      if user.empty? || pw.empty?
+        PEMK.log("auth: no username/password in #{Config::CONFIG_FILE} -> offline/solo")
+        return true
       end
-      PEMK.log("auth: login timed out, proceeding offline")
+
+      reply = send_and_wait(c, { :type => :login, :username => user, :password => pw },
+                            [:login_ok, :login_err])
+      if reply && reply[:type] == :login_err && reply[:reason] == "not_found"
+        PEMK.log("auth: account #{user.inspect} not found -> registering")
+        reg = send_and_wait(c, { :type => :register, :username => user, :password => pw },
+                            [:register_ok, :register_err])
+        if reg && reg[:type] == :register_ok
+          reply = send_and_wait(c, { :type => :login, :username => user, :password => pw },
+                                [:login_ok, :login_err])
+        else
+          PEMK.log("auth: register failed (#{reg && reg[:reason]}) -> offline/solo")
+          return true
+        end
+      end
+
+      if reply && reply[:type] == :login_ok
+        apply_login(reply)
+      else
+        PEMK.log("auth: login failed (#{reply && reply[:reason]}) -> offline/solo")
+      end
       true
+    end
+
+    # Reconnect with a stored session token; true on success.
+    def self.try_auth(c, token)
+      reply = send_and_wait(c, { :type => :auth, :token => token }, [:auth_ok, :auth_err])
+      if reply && reply[:type] == :auth_ok
+        apply_login(reply)
+        return true
+      end
+      PEMK.log("auth: stored token rejected -> password login")
+      false
+    end
+
+    # Adopt a successful login_ok / auth_ok: identity, session token, and the
+    # server-held save (an opaque body the client Marshal-loads — its own data).
+    def self.apply_login(reply)
+      @account_id    = reply[:account_id]
+      @pending_state = reply[:_body] ? (Marshal.load(reply[:_body]) rescue nil) : nil
+      @logged_in     = true
+      PEMK.set_self_id(@account_id)
+      save_token(reply[:token]) if reply[:token]
+      save_local_account(@account_id)
+      PEMK.log("auth: #{reply[:type]} account=#{@account_id} state=#{@pending_state ? 'received' : 'new'}")
+    end
+
+    # Send a message and block for one of +types+, pumping the client WITHOUT
+    # touching Graphics.update (which blows mkxp-z's stack at the load screen).
+    def self.send_and_wait(c, msg, types, timeout = Config::LOGIN_TIMEOUT)
+      c.send_message(msg)
+      deadline = mono + timeout
+      while mono < deadline
+        sleep(0.01)
+        c.poll.each { |m| return m if m.is_a?(Hash) && types.include?(m[:type]) }
+        return nil unless c.connected?
+      end
+      nil
+    end
+
+    def self.token_file
+      guest? ? "mmo_session_guest.dat" : "mmo_session.dat"
+    end
+
+    # The token is bound to the configured username, so switching accounts in
+    # mmo_config.txt cleanly forces a fresh password login instead of reusing a
+    # token for the wrong account.
+    def self.load_token
+      path = File.expand_path(token_file)
+      return nil unless File.file?(path)
+      owner, tok = File.read(path).split("\n", 2)
+      return nil unless owner == PEMK.settings[:username].to_s && tok
+
+      tok.strip
+    rescue
+      nil
+    end
+
+    def self.save_token(token)
+      File.write(File.expand_path(token_file), "#{PEMK.settings[:username]}\n#{token}")
+    rescue => e
+      PEMK.log("auth: cannot persist token: #{e.class}: #{e.message}")
     end
 
     # Stamp the server-issued identity onto $player (overrides the random id).

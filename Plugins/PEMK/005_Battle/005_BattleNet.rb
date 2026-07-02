@@ -26,9 +26,18 @@ module PEMK
     @inbox_switch = {}   # [round, idxBattler, seq] => party index of the replacement
     @inbox_start  = nil
     @inbox_end    = nil
+    @battle_host  = false
 
+    # This instance's role for the CURRENT battle. With no in-process relay, the
+    # role is decided by the challenge handshake: the challenger HOSTS (records and
+    # streams the authoritative RNG), the accepter replays. Set via set_host just
+    # before the teams are exchanged; NOT cleared by reset (it outlives the queues).
     def self.host?
-      !PEMK.relay.nil?
+      @battle_host
+    end
+
+    def self.set_host(is_host)
+      @battle_host = is_host ? true : false
     end
 
     # Clear every queue (call at battle start and end).

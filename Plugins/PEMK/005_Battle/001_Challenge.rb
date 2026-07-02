@@ -53,6 +53,7 @@ module PEMK
       when :challenge_accept
         return unless msg[:to] == PEMK.self_id
         @outgoing = nil
+        PEMK::BattleNet.set_host(true)      # we issued the challenge -> we host this battle
         BattleSetup.send_team(msg[:from])   # battle launches once both teams are in (no blocking prompt)
       when :challenge_decline
         return unless msg[:to] == PEMK.self_id
@@ -82,6 +83,7 @@ module PEMK
           elsif pbConfirmMessage(_INTL("{1} wants to battle! Accept?", inc[:name]))
             PEMK.send_message({ :type => :challenge_accept, :from => PEMK.self_id,
                                    :name => own_name, :to => inc[:from] })
+            PEMK::BattleNet.set_host(false)           # we accepted -> we replay (client)
             PEMK::BattleSetup.send_team(inc[:from])   # battle launches once both teams are in
           else
             PEMK.send_message({ :type => :challenge_decline, :from => PEMK.self_id,

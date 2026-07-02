@@ -39,7 +39,9 @@ module PEMK
 
     def self.can_emit?
       c = PEMK.client
-      c && c.connected? && $game_player && $game_map
+      # self_id stays nil until the dedicated server authenticates us, so we never
+      # emit presence pre-login (the server would drop an unauthenticated frame).
+      c && c.connected? && $game_player && $game_map && PEMK.self_id
     end
 
     def self.key_of(h)
