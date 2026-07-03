@@ -57,8 +57,33 @@ module Graphics
     unless method_defined?(:pemk_orig_update)
       alias_method :pemk_orig_update, :update
       def update(*args)
-        pemk_orig_update(*args)
+        pemk_orig_update(*args)   # mkxp-z may raise SystemExit HERE on window close
         PEMK::Pump.tick
+      rescue SystemExit
+        # THE reliable exit backstop: the terminate exception unwinds through here
+        # while the socket and game state are still intact, unlike at_exit (which
+        # this build does not run). Take a last-chance save, then let the exit go.
+        (PEMK::Checkpoint.on_terminate rescue nil)
+        raise
+      end
+    end
+  end
+end
+
+# mkxp-z checks the async shutdown flag in BOTH Graphics.update AND Input.update
+# (Scene_Map#main calls them back-to-back each frame). A window closed while idle
+# in the overworld is USUALLY observed first by Input.update — so the terminate
+# SystemExit raises there, bypassing the Graphics.update rescue above. Mirror the
+# same backstop here (on_terminate is re-entrancy-guarded + idempotent).
+module Input
+  class << self
+    unless method_defined?(:pemk_orig_input_update)
+      alias_method :pemk_orig_input_update, :update
+      def update(*args)
+        pemk_orig_input_update(*args)
+      rescue SystemExit
+        (PEMK::Checkpoint.on_terminate rescue nil)
+        raise
       end
     end
   end

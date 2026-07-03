@@ -25,11 +25,20 @@
 #===============================================================================
 module PEMK
   module Checkpoint
-    MIN_INTERVAL     = 20.0    # seconds between auto serializes (trailing coalescing)
-    PERIODIC_S       = 120.0   # activity-gated catch-all (story flags, dex, ...)
-    FAIL_COOLDOWN    = 60.0    # after a failed write; doubles per consecutive failure
+    MIN_INTERVAL        = 20.0  # floor for AMBIENT triggers (map/periodic/t1) — avoids map-hop serialize spam
+    URGENT_MIN_INTERVAL = 1.0   # floor for HIGH-VALUE discrete gains — save within ~1s, not 20s
+    PERIODIC_S       = 120.0    # activity-gated catch-all (story flags, dex, ...)
+    FAIL_COOLDOWN    = 60.0     # after a failed write; doubles per consecutive failure
     FAIL_COOLDOWN_MAX = 960.0
-    PENDING_WARN_AGE = 300.0   # a request pending this long = a stuck gate; log once
+    PENDING_WARN_AGE = 300.0    # a request pending this long = a stuck gate; log once
+
+    # Losing a Pokémon / a battle's spoils / a badge to a quick close is the worst
+    # feel — mkxp-z gives no reliable exit hook (window close hard-terminates with
+    # NO Ruby save path), so these must checkpoint almost immediately at the next
+    # safe frame instead of waiting out the ambient 20s floor. A story gift adds
+    # its mons inside one event; the safe-frame gate holds until the script ends,
+    # so a burst still coalesces into one checkpoint.
+    URGENT = %i[pokemon battle pvp badge pc].freeze
 
     @pending        = nil      # { :reasons => [..], :since => mono }
     @last_cp        = nil      # last successful checkpoint (nil until first tick)
@@ -41,6 +50,7 @@ module PEMK
     @running        = false
     @warned_stuck   = false
     @backed_up      = false
+    @terminating    = false   # re-entrancy guard for on_terminate (exit backstop)
 
     module_function
 
@@ -141,10 +151,17 @@ module PEMK
         @warned_stuck = true
       end
       return if now < @cooldown_until
-      return if (now - @last_cp) < MIN_INTERVAL
+      # High-value discrete gains use a 1s floor so a quick close doesn't lose them;
+      # ambient triggers (map/periodic/t1) keep the 20s floor.
+      floor = urgent_pending? ? URGENT_MIN_INTERVAL : MIN_INTERVAL
+      return if (now - @last_cp) < floor
       return unless safe_frame?
 
       execute(now)
+    end
+
+    def urgent_pending?
+      @pending && @pending[:reasons].any? { |r| URGENT.include?(r) }
     end
 
     # ALL must hold on the executing frame. Verified against core Game_Temp flags;
@@ -217,6 +234,31 @@ module PEMK
       PEMK.log("checkpoint: pre-session backup failed: #{e.class}: #{e.message}")
     end
 
+    # Last-chance save when mkxp-z terminates the script (window close raises
+    # SystemExit — caught in BOTH the Graphics.update AND Input.update aliases,
+    # since either native call may observe the shutdown flag first). The socket and
+    # game state are still intact at that instant.
+    #
+    # On a SAFE frame: full commit (re-serialize + force push). On an UNSAFE frame
+    # (menu / message / mid-step — common at close), we must NOT re-serialize (torn
+    # state), but we STILL force-push the on-disk Game.rxdata: the atomic rename
+    # guarantees it is the last GOOD save, and a mon locally saved by an urgent
+    # checkpoint whose throttled push never fired would otherwise be stranded.
+    def on_terminate
+      return if @terminating
+      return unless PEMK::Auth.logged_in? && $player
+
+      @terminating = true
+      (PEMK::Sync.flush_event(:quit) rescue nil)
+      if safe_frame?
+        commit(force: true)
+      else
+        (PEMK::Sync.push_blob(SaveData::FILE_PATH, force: true) rescue nil)
+      end
+    rescue StandardError => e
+      PEMK.log("checkpoint: on_terminate error: #{e.class}: #{e.message}")
+    end
+
     def mono
       Process.clock_gettime(Process::CLOCK_MONOTONIC)
     rescue StandardError
@@ -253,6 +295,16 @@ unless defined?(pemk_ckpt_orig_pbAddPokemon)
     ret
   end
 
+  # The other acquisition chokepoints (pbStorePokemon/pbAddToPartySilent/
+  # pbGenerateEgg are aliased for mark_mon in 006_Monsters.rb — they request
+  # :pokemon there too). pbAddToParty is the one not otherwise covered.
+  alias pemk_ckpt_orig_pbAddToParty pbAddToParty
+  def pbAddToParty(pkmn, level = 1, see_form = true)
+    ret = pemk_ckpt_orig_pbAddToParty(pkmn, level, see_form)
+    (PEMK::Checkpoint.request(:pokemon) rescue nil) if ret
+    ret
+  end
+
   # PC close: box reorganization is blob-only data; defers past the PC event.
   alias pemk_ckpt_orig_pbTrainerPC pbTrainerPC
   def pbTrainerPC
@@ -268,20 +320,17 @@ unless defined?(pemk_ckpt_orig_pbAddPokemon)
     ret
   end
 
-  # --- graceful-exit hook --------------------------------------------------------
-  # Closing the window (Alt+F4 / X — the NORMAL way to leave an MMO) raises
-  # SystemExit under mkxp-z, which Essentials propagates, so at_exit runs. Flush
-  # the T1 channels (socket writes are synchronous — delivery happens before the
-  # process dies, and the server now processes frames that arrive right before
-  # EOF), take a final full checkpoint when the frame is safe (mid-battle close
-  # stays kill-equivalent for the blob — by design), then close the socket.
+  # --- best-effort at_exit (secondary) -------------------------------------------
+  # NOT reliable under this mkxp-z build: window close hard-terminates and at_exit
+  # was observed NOT to run (verified 2026-07-03 via mmo.log — nothing saved on a
+  # window close). The PRIMARY exit backstop is Checkpoint.on_terminate, driven
+  # from the Graphics.update alias which catches the terminate SystemExit while the
+  # socket + state are still alive. This at_exit stays as a harmless second net for
+  # clean-quit paths that DO run it.
   at_exit do
     begin
-      if PEMK::Auth.logged_in?
-        (PEMK::Sync.flush_event(:quit) rescue nil)
-        (PEMK::Checkpoint.commit(force: true) if PEMK::Checkpoint.safe_frame?) rescue nil
-        (PEMK.shutdown rescue nil)
-      end
+      PEMK::Checkpoint.on_terminate if PEMK::Auth.logged_in?
+      (PEMK.shutdown rescue nil)
     rescue StandardError
       nil
     end

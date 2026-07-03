@@ -141,15 +141,19 @@ module PEMK
   end
 end
 
-# --- flag-only latency aliases --------------------------------------------------
-# The event-time sweep is the catch-all; these only shorten the window between a
-# common acquisition and the next flush (flush_event fires on map/badge/save only).
-# Completeness deliberately does not matter here.
+# --- acquisition latency aliases ------------------------------------------------
+# The event-time sweep is the catch-all for UID minting; these shorten the window
+# between a common acquisition and the next flush. They ALSO arm an URGENT
+# checkpoint (:pokemon) — gaining a Pokémon is high-value and must be persisted
+# within ~1s, not the ambient 20s floor (a quick close otherwise loses it; mkxp-z
+# gives no reliable exit hook). pbStorePokemon is the box path (catch / debug
+# clone / gift-when-party-full); pbAddPokemon/pbAddToParty are aliased in 007.
 unless defined?(pemk_orig_pbStorePokemon)
   alias pemk_orig_pbStorePokemon pbStorePokemon
   def pbStorePokemon(pkmn)
     ret = pemk_orig_pbStorePokemon(pkmn)
     (PEMK::Sync.mark_mon rescue nil)
+    (PEMK::Checkpoint.request(:pokemon) rescue nil)
     ret
   end
 
@@ -157,6 +161,7 @@ unless defined?(pemk_orig_pbStorePokemon)
   def pbAddToPartySilent(pkmn, level = nil, see_form = true)
     ret = pemk_orig_pbAddToPartySilent(pkmn, level, see_form)
     (PEMK::Sync.mark_mon rescue nil)
+    (PEMK::Checkpoint.request(:pokemon) rescue nil) if ret
     ret
   end
 
@@ -164,6 +169,7 @@ unless defined?(pemk_orig_pbStorePokemon)
   def pbGenerateEgg(pkmn, text = "")
     ret = pemk_orig_pbGenerateEgg(pkmn, text)
     (PEMK::Sync.mark_mon rescue nil)
+    (PEMK::Checkpoint.request(:pokemon) rescue nil) if ret
     ret
   end
 end
