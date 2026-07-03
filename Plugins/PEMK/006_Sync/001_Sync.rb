@@ -67,11 +67,20 @@ module PEMK
     end
 
     # --- OBSERVER entry points (called from the mutation aliases) ---------------
+    # Every T1 mutation ALSO arms a blob checkpoint (flag-only, bounded by the 20s
+    # floor + safety gate): T1 state reaches the server in ~0.5s while story flags
+    # wait for the next checkpoint, so without this an event that grants an item
+    # and sets a flag had a dupe window (kill -> item restored server-side, flag
+    # rolled back -> event replayable). Arming here shrinks that skew to <=~20s;
+    # the direction is always dupe-not-loss (commit flushes T1 BEFORE the write,
+    # so the blob can never be AHEAD of the server). Full fix = M4 server-side
+    # event execution.
     def mark_econ(field, value)
       return unless value.is_a?(Integer)
 
       @econ[field] = value
       touch
+      (PEMK::Checkpoint.request(:t1) rescue nil)
     end
 
     # Bag mutation: flag-only (the whole bag is re-read once at flush, not per op —
@@ -79,13 +88,17 @@ module PEMK
     def mark_inv
       @inv_dirty = true
       touch
+      (PEMK::Checkpoint.request(:t1) rescue nil)
     end
 
     # Monster channel: uid sweep + party projection at the next flush. Flag-only;
     # the sweep is microseconds and the projection is hash-gated, so cheap to mark.
+    # Also arms a checkpoint: a freshly granted uid/nonce must reach the blob soon
+    # or a quit-without-save re-mints it as an orphan row (the VENUSAUR case).
     def mark_mon
       @mon_dirty = true
       touch
+      (PEMK::Checkpoint.request(:t1) rescue nil)
     end
 
     def dirty?
