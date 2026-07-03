@@ -38,7 +38,7 @@ module PEMK
     # safe frame instead of waiting out the ambient 20s floor. A story gift adds
     # its mons inside one event; the safe-frame gate holds until the script ends,
     # so a burst still coalesces into one checkpoint.
-    URGENT = %i[pokemon battle pvp badge pc].freeze
+    URGENT = %i[pokemon battle pvp badge pc trade].freeze
 
     @pending        = nil      # { :reasons => [..], :since => mono }
     @last_cp        = nil      # last successful checkpoint (nil until first tick)
@@ -179,6 +179,7 @@ module PEMK
       # ($PokemonGlobal.challenge is lazily allocated; never call pbBattleChallenge here.)
       return false if ($PokemonGlobal&.challenge&.pbInChallenge? rescue false)
       return false if PEMK::BattleSetup.launch_pending?   # a PvP battle is staged this frame
+      return false if (PEMK::Trade.busy? rescue false)    # never serialize a party mid-trade
       true
     rescue StandardError
       false
@@ -272,6 +273,7 @@ module PEMK
       gt = $game_temp
       return false if gt.in_battle || gt.player_transferring || gt.transition_processing || gt.in_mini_update
       return false if pbMapInterpreterRunning?
+      return false if (PEMK::Trade.busy? rescue false)
       return false if $game_system&.save_disabled || (pbInSafari? rescue false) || (pbInBugContest? rescue false)
       return false if ($PokemonGlobal&.challenge&.pbInChallenge? rescue false)
       true

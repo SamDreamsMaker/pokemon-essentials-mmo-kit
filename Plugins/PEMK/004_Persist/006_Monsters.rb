@@ -142,6 +142,75 @@ module PEMK
     def on_ack(msg)
       PEMK.log("mon: server flagged party (seq #{msg[:seq]})") if msg && msg[:flagged]
     end
+
+    # --- M3.2 trade helpers -----------------------------------------------------
+
+    # Find the owned instance carrying +uid+ (party or any box). -> Pokemon | nil.
+    def find_by_uid(uid)
+      return nil unless uid
+
+      each_owned { |p| return p if p.pemk_uid == uid }
+      nil
+    end
+
+    # Remove the instance with +uid+ from party (kept COMPACT) or a box slot.
+    # -> true if removed.
+    def remove_by_uid(uid)
+      return false unless uid && $player&.party
+
+      idx = $player.party.index { |p| p && p.pemk_uid == uid }
+      if idx
+        $player.party.delete_at(idx)
+        return true
+      end
+      storage = $PokemonStorage
+      return false unless storage&.boxes
+
+      storage.boxes.each do |box|
+        next unless box
+        box.length.times do |si|
+          p = box[si]
+          if p && p.pemk_uid == uid
+            box[si] = nil                # empty the slot
+            return true
+          end
+        end
+      end
+      false
+    end
+
+    # Login enforcement (M3.2): drop uids this account traded away and no longer
+    # owns (the server's positive eviction list). NEVER touches nil-uid mons.
+    def evict(list)
+      return unless list.is_a?(Array)
+
+      removed = 0
+      list.each do |uid|
+        next unless uid.is_a?(Integer) && uid.positive?
+        removed += 1 if remove_by_uid(uid)
+      end
+      PEMK.log("mon: evicted #{removed}/#{list.size} traded-away uid(s)") if removed.positive?
+    rescue => e
+      PEMK.log("mon: evict error: #{e.class}: #{e.message}")
+    end
+
+    # Silently add a mon received in a trade: it KEEPS its transferred pemk_uid
+    # (server-owned by us now) but drops the sender's pemk_nonce. Party if room,
+    # else a box. No pbMessage/nickname prompt.
+    def materialize(pkmn)
+      return false unless pkmn.is_a?(Pokemon) && $player
+
+      pkmn.pemk_nonce = nil
+      if $player.party.length < Settings::MAX_PARTY_SIZE
+        $player.party[$player.party.length] = pkmn
+      elsif $PokemonStorage
+        ($PokemonStorage.pbStoreCaught(pkmn) rescue nil)
+      end
+      true
+    rescue => e
+      PEMK.log("mon: materialize error: #{e.class}: #{e.message}")
+      false
+    end
   end
 end
 

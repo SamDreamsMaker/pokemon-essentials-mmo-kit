@@ -40,6 +40,7 @@ module PEMK
       @mon_dirty = false
       @mon_last = nil
       (PEMK::Monsters.reset rescue nil)
+      (PEMK::Trade.reset rescue nil)   # a fresh socket must abandon any in-flight trade
       @seq = Hash.new(0)
       @dirty_since = nil
       @last_change = nil
@@ -148,10 +149,15 @@ module PEMK
         if entries && !entries.empty?
           c.send_message({ :type => :uid_req, :mons => entries, :seq => (@seq[:uid] += 1) })
         end
-        proj = PEMK::Monsters.projection
-        if proj && proj.hash != @mon_last
-          c.send_message({ :type => :mon_party, :mons => proj, :seq => (@seq[:mon] += 1) })
-          @mon_last = proj.hash
+        # Don't project the party mid-trade: it is transiently changing (the mon
+        # we're about to lose / the foreign one we're about to gain). The post-trade
+        # mark_mon re-flushes the settled party.
+        unless (PEMK::Trade.busy? rescue false)
+          proj = PEMK::Monsters.projection
+          if proj && proj.hash != @mon_last
+            c.send_message({ :type => :mon_party, :mons => proj, :seq => (@seq[:mon] += 1) })
+            @mon_last = proj.hash
+          end
         end
         @mon_dirty = more ? true : false   # stay dirty while mints remain pending
       end

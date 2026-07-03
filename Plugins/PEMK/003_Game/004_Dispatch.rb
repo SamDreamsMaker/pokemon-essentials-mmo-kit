@@ -38,6 +38,10 @@ module PEMK
         Monsters.on_ack(msg)
       when :challenge, :challenge_accept, :challenge_decline
         Challenge.on_message(msg)
+      when :trade_invite, :trade_accept, :trade_decline, :trade_offer, :trade_lock, :trade_cancel
+        Trade.on_message(msg)          # peer handshake frames (ADDRESSED relay)
+      when :trade_result
+        Trade.on_result(msg)           # server-authoritative swap outcome
       when :battle_team
         BattleSetup.on_team(msg)
       when :battle_start, :battle_choice, :battle_round, :battle_switch, :battle_end

@@ -17,11 +17,12 @@ module PEMK
     ACCOUNT_FILE       = "mmo_account.dat"
     GUEST_ACCOUNT_FILE = "mmo_account_guest.dat"
 
-    @account_id    = nil
-    @pending_state = nil
-    @pending_econ  = nil
-    @pending_inv   = nil
-    @logged_in     = false
+    @account_id       = nil
+    @pending_state    = nil
+    @pending_econ     = nil
+    @pending_inv      = nil
+    @pending_mon_evict = nil
+    @logged_in        = false
 
     def self.account_id;    @account_id;    end
     def self.pending_state; @pending_state; end
@@ -153,6 +154,7 @@ module PEMK
       @pending_state = state
       @pending_econ  = reply[:econ].is_a?(Hash) ? reply[:econ] : nil
       @pending_inv   = reply[:inv].is_a?(Hash) ? reply[:inv] : nil  # nil = unseeded (keep blob bag)
+      @pending_mon_evict = reply[:mon_evict]                        # uids traded away (M3.2) -> evict at load
       @logged_in     = true
       PEMK.set_self_id(@account_id)
       (PEMK::Sync.reset rescue nil)                          # fresh socket -> drop stale dirty/seq baseline
@@ -260,10 +262,16 @@ module PEMK
       PEMK.log("auth: reconcile_inventory error: #{e.class}: #{e.message}")
     end
 
-    # Monster channel seed (M3.1 write-only shadow): mark the :mon channel dirty so
-    # the first flush after entering the world sweeps for missing uids (legacy-save
-    # adoption) and ships the first party projection. NEVER writes any Pokémon data.
+    # Monster reconcile at load. FIRST evict uids this account traded away and no
+    # longer owns (M3.2 enforcement — a possibly-stale blob may still show them),
+    # THEN mark the :mon channel so the sweep mints any new mons and the first
+    # party projection reflects the post-eviction party. Positive list only — an
+    # absent/empty mon_evict never removes anything.
     def self.reconcile_monsters
+      if @pending_mon_evict.is_a?(Array) && !@pending_mon_evict.empty?
+        (PEMK::Monsters.evict(@pending_mon_evict) rescue nil)
+      end
+      @pending_mon_evict = nil
       (PEMK::Sync.mark_mon rescue nil)
     end
 
