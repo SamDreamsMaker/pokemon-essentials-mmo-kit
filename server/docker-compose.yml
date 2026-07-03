@@ -1,0 +1,40 @@
+# PEMK dedicated server — one command for a self-hosting dev: `docker compose up`.
+# Brings up Postgres, runs migrations, then the server. Build context is the repo
+# root so the image can vendor ../protocol.
+name: pemk
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: pemk
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pemk_dev}
+      POSTGRES_DB: pemk
+    volumes:
+      - pemk_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pemk -d pemk"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://pemk:${POSTGRES_PASSWORD:-pemk_dev}@db:5432/pemk
+      PEMK_BIND: "0.0.0.0"
+      PEMK_PORT: "9998"
+    ports:
+      - "${PEMK_PORT:-9998}:9998"
+    stop_grace_period: 30s   # audit: give SIGTERM time to drain pending saves
+    command: ["sh", "-c", "bundle exec rake db:migrate && bundle exec ruby bin/pemk_server.rb"]
+    restart: unless-stopped
+
+volumes:
+  pemk_pgdata:

@@ -1,0 +1,5 @@
+/.env
+/.bundle/
+/vendor/bundle/
+*.log
+/tmp/

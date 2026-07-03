@@ -1,7 +1,9 @@
 # Audio, Graphics and Plugins folders
 Audio/
 Graphics/
-Plugins/
+Plugins/*
+# ...but keep the versioned MMO SDK plugin (throwaway/diagnostic plugins stay ignored)
+!Plugins/PEMK/
 Screenshots/
 
 # Data folder, but not Data/Scripts folder or messages_core.dat
@@ -13,8 +15,23 @@ Data/*
 # Files in the main project folder
 errorlog.txt
 Game.ini
-Game.rxproj
+*.rxproj
 RGSS*.dll
+
+# PEMK SDK runtime artifacts (logs + throwaway diagnostic reports)
+mmo.log
+mmo_*.txt
+mmo_*.json
+# per-machine connection config (each deployment sets its own; documented in README)
+mmo_config.txt
+# Phase 2: per-machine account id + the host's authoritative account state store
+# (mmo_account.dat = main player; mmo_account_guest.dat = the persistent guest player)
+mmo_account*.dat
+# Session tokens issued by the dedicated server — per-machine secrets, never commit
+mmo_session*.dat
+server_saves/
+# Base-kit shortcut duplicated by the merged Essentials install
+Essentials Docs Wiki.URL
 
 # Common code editor folders & files
 .vscode/
@@ -32,3 +49,6 @@ Thumbs.db
 # Temp files
 
 ~*
+
+# Claude Code local config (per-machine, not shared)
+.claude/

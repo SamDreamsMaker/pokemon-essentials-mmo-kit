@@ -1,0 +1,26 @@
+# Authoritative economy caps for the dedicated server. The in-process host used
+# `Settings::MAX_MONEY rescue 999_999`, which silently degrades to the literal on
+# a headless server (no game Settings loaded) — audit flagged that as a bug. Here
+# the caps are EXPLICIT config; a missing cap is a boot error, never a silent
+# default. Values mirror Pokémon Essentials v21.1 defaults.
+money:         999999
+coins:         99999
+battle_points: 9999
+soot:          9999
+badges_max:    63      # badge index range [0, badges_max); mask bit i. 63 = the
+                       # signed-bigint ceiling: the :badges cap is DERIVED as
+                       # (1<<63)-1 in config.rb, so all 63 badges set == INT64 max.
+
+# M2.3 bag inventory (DETECTION-ONLY): generous, FLAG-not-reject structural bounds.
+# These never roll anything back — they only flag a structurally implausible bag for
+# operator visibility. Set well above any legitimate bag; inv_max_distinct stays
+# safely below the codec's 4096-element ceiling so a big bag is flagged, not dropped.
+inv_max_per_item:  99999      # soft: under infinite pockets a legit item spans many 999-slots
+inv_max_distinct:  2000       # distinct item ids in one bag
+inv_max_total:     10000000   # grand total across all items
+
+# M3.1 monster UID registry bounds.
+mon_uid_req_max:   64         # mint entries per :uid_req frame (~5 KB, 12x under the 64 KiB envelope)
+mon_party_max:     6          # party projection entries
+mon_level_max:     100        # Settings::MAXIMUM_LEVEL — structural flag bound for at-issue level
+mon_trade_max:     1          # uids per side of a trade (M3.2 = 1-for-1; execute_trade loops so N-for-M is a cap bump)
