@@ -43,7 +43,8 @@ module PEMK
       @monster_caps = {
         uid_req_max: require_cap(caps, "mon_uid_req_max"),
         party_max:   require_cap(caps, "mon_party_max"),
-        level_max:   require_cap(caps, "mon_level_max")
+        level_max:   require_cap(caps, "mon_level_max"),
+        trade_max:   require_cap(caps, "mon_trade_max")
       }
     end
 

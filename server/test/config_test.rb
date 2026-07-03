@@ -23,6 +23,6 @@ class ConfigTest < Minitest::Test
 
   def test_monster_caps_are_present_and_fail_fast
     cfg = PEMK::Config.new
-    assert_equal({ uid_req_max: 64, party_max: 6, level_max: 100 }, cfg.monster_caps)
+    assert_equal({ uid_req_max: 64, party_max: 6, level_max: 100, trade_max: 1 }, cfg.monster_caps)
   end
 end

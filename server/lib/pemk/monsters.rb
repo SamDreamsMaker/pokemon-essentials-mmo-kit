@@ -80,6 +80,21 @@ module PEMK
       @db[:party_snapshots].where(account_id: account_id).get(:last_seq) || 0
     end
 
+    # M3.2 login enforcement (detection->enforcement flip): the POSITIVE list of
+    # uids this account TRADED AWAY and does NOT currently own — the client evicts
+    # exactly these from a possibly-stale blob at load. A positive list (not a
+    # set-difference from "owned") can never delete a legit mon on a missing/racing
+    # row. Trade-backs self-exclude: if B trades a uid back to A, A's current
+    # owner == A, so it drops out of A's list. Bounded by trade history.
+    def evictions(account_id)
+      @db[:monster_transfers]
+        .join(:monsters, Sequel[:monsters][:id] => Sequel[:monster_transfers][:uid])
+        .where(Sequel[:monster_transfers][:from_account_id] => account_id)
+        .exclude(Sequel[:monsters][:owner_account_id] => account_id)
+        .distinct
+        .select_map(Sequel[:monster_transfers][:uid])
+    end
+
     private
 
     def valid_mint_entry?(m)

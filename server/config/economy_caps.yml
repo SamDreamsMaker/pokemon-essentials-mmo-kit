@@ -23,3 +23,4 @@ inv_max_total:     10000000   # grand total across all items
 mon_uid_req_max:   64         # mint entries per :uid_req frame (~5 KB, 12x under the 64 KiB envelope)
 mon_party_max:     6          # party projection entries
 mon_level_max:     100        # Settings::MAXIMUM_LEVEL — structural flag bound for at-issue level
+mon_trade_max:     1          # uids per side of a trade (M3.2 = 1-for-1; execute_trade loops so N-for-M is a cap bump)

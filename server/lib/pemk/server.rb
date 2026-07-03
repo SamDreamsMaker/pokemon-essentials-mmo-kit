@@ -19,7 +19,9 @@ module PEMK
     # (challenge handshake + the whole battle stream), the role the old in-process
     # relay played — now with server-trusted :from and no cross-client leakage.
     ADDRESSED      = %i[challenge challenge_accept challenge_decline battle_team
-                        battle_start battle_choice battle_round battle_switch battle_end].freeze
+                        battle_start battle_choice battle_round battle_switch battle_end
+                        trade_invite trade_accept trade_decline trade_offer trade_lock trade_cancel].freeze
+    TRADE_TTL      = 15          # seconds a half-committed (lone) trade rendezvous lingers before timeout
     WORKERS        = 8
     LOGIN_MAX      = 10          # login/register attempts ...
     LOGIN_WINDOW   = 60          # ... per this many seconds, per IP
@@ -39,13 +41,16 @@ module PEMK
       @ledger     = Ledger.new(@db, @config.economy_caps)
       @inventory  = Inventory.new(@db, @config.inventory_caps, logger: @log)
       @monsters   = Monsters.new(@db, @config.monster_caps, logger: @log)
+      @trades     = Trades.new(@db)
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
       @zones    = Hash.new { |h, k| h[k] = Set.new }   # map_id => Set(conn); reactor-thread only
       @online   = {}                                    # account_id => conn; reactor-thread only
+      @pending_trades = {}                              # trade_id => rendezvous; reactor-thread only
       @reactor  = Reactor.new(
         host: @config.bind, port: @config.port,
-        on_frame: method(:on_frame), on_close: method(:on_close), logger: @log
+        on_frame: method(:on_frame), on_close: method(:on_close),
+        on_tick: method(:sweep_trades), logger: @log
       )
       @mailbox  = PlayerMailbox.new(pool: @pool, post: @reactor.method(:post), logger: @log)
     end
@@ -111,6 +116,7 @@ module PEMK
       when :inv      then handle_inv(conn, env, authed)
       when :uid_req  then handle_uid_req(conn, env, authed)
       when :mon_party then handle_mon_party(conn, env, authed)
+      when :trade_commit then handle_trade_commit(conn, env, authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
       else
@@ -273,17 +279,91 @@ module PEMK
       end
     end
 
+    # Server-authoritative trade COMMIT (M3.2). The only authoritative trade frame
+    # (invite/accept/offer/lock/cancel are pure peer relay via ADDRESSED). Each side
+    # commits ONLY after it holds the partner's uid-validated object; the server
+    # rendezvous fires the atomic swap when BOTH matching commits arrive.
+    def handle_trade_commit(conn, env, account_id)
+      trade_id = env[:trade_id]
+      partner  = env[:partner]
+      give     = env[:give]
+      recv     = env[:recv]
+      max      = @config.monster_caps[:trade_max]
+      unless trade_id.is_a?(String) && partner.is_a?(Integer) && partner != account_id &&
+             uid_list?(give, max) && uid_list?(recv, max)
+        @log.call("server: bad :trade_commit from account #{account_id} -> drop")
+        return
+      end
+      give = give.sort
+      recv = recv.sort
+
+      pending = @pending_trades[trade_id]
+      if pending.nil?
+        @pending_trades[trade_id] = { account: account_id, partner: partner,
+                                      give: give, recv: recv, conn: conn, at: Time.now }
+        return
+      end
+
+      @pending_trades.delete(trade_id)
+      # Cross-check the two commits name each other and mirror give/recv exactly. A
+      # third party guessing a trade_id fails here (its partner id won't match).
+      unless pending[:account] == partner && pending[:partner] == account_id &&
+             pending[:give] == recv && pending[:recv] == give
+        reply(conn, type: :trade_result, trade_id: trade_id, ok: false, reason: "terms")
+        reply(pending[:conn], type: :trade_result, trade_id: trade_id, ok: false, reason: "terms")
+        return
+      end
+
+      a = pending[:account]; a_conn = pending[:conn]; a_gives = pending[:give]
+      b = account_id;        b_conn = conn;           b_gives = give
+      @pool.submit do
+        st = @trades.execute_trade(trade_id, a: a, b: b, a_gives: a_gives, b_gives: b_gives)
+        @reactor.post do
+          if st.first == :ok || st.first == :ok_replay
+            reply(a_conn, type: :trade_result, trade_id: trade_id, ok: true, recv: b_gives, gave: a_gives) if @reactor.alive?(a_conn)
+            reply(b_conn, type: :trade_result, trade_id: trade_id, ok: true, recv: a_gives, gave: b_gives) if @reactor.alive?(b_conn)
+            @log.call("server: trade #{trade_id} #{a}<->#{b} swapped #{a_gives}/#{b_gives}")
+          else
+            reason = st[1].to_s
+            reply(a_conn, type: :trade_result, trade_id: trade_id, ok: false, reason: reason) if @reactor.alive?(a_conn)
+            reply(b_conn, type: :trade_result, trade_id: trade_id, ok: false, reason: reason) if @reactor.alive?(b_conn)
+          end
+        end
+      end
+    end
+
+    def uid_list?(a, max)
+      a.is_a?(Array) && a.size.between?(1, max) && a.all? { |u| u.is_a?(Integer) && u.positive? }
+    end
+
+    # Reactor-thread periodic: time out a lone (half-committed) rendezvous whose
+    # partner never committed and never disconnected. A lone commit never mutated
+    # the registry, so this only frees the entry + tells the waiter.
+    def sweep_trades
+      return if @pending_trades.empty?
+
+      now = Time.now
+      @pending_trades.reject! do |tid, p|
+        next false if (now - p[:at]) < TRADE_TTL
+
+        reply(p[:conn], type: :trade_result, trade_id: tid, ok: false, reason: "timeout") if @reactor.alive?(p[:conn])
+        true
+      end
+    end
+
     # Canonical primitives the client reconciles onto its save at load (login_ok /
     # auth_ok), plus the per-channel seq the client adopts as its next-seq authority.
     # inv carries the whole bag (server-persistent, like economy): nil when unseeded
     # so the client keeps its blob bag and seeds the record on the first flush.
-    # mon_seq is the :mon_party high-water; no monster data flows down in M3.1.
+    # mon_seq is the :mon_party high-water; mon_evict is the M3.2 positive list of
+    # uids this account traded away and no longer owns (the client evicts them).
     def reconcile_block(account_id)
       snap = @ledger.snapshot(account_id)
       inv  = @inventory.snapshot(account_id)
       { econ: snap[:balances], econ_seq: snap[:last_seq],
         inv: inv[:bag], inv_seq: inv[:last_seq],
-        mon_seq: @monsters.mon_seq(account_id) }
+        mon_seq: @monsters.mon_seq(account_id),
+        mon_evict: @monsters.evictions(account_id) }
     end
 
     # Zone-scoped presence: track each player's current map and fan a position
@@ -342,12 +422,28 @@ module PEMK
     def on_close(conn)
       aid = conn.data[:account_id]
       @online.delete(aid) if aid && @online[aid].equal?(conn)
+      cancel_pending_trades(aid, conn) if aid
 
       map = conn.data[:map_id]
       return unless map
 
       @zones[map].delete(conn)
       broadcast_zone(map, conn, Wire.encode_split({ type: :leave, id: aid })) if aid
+    end
+
+    # A dropped account cancels any rendezvous it was part of. If a LONE committer
+    # (the still-connected party) was waiting on this account, tell it "partner_left"
+    # — a single commit never mutated the registry, so nothing was traded.
+    def cancel_pending_trades(aid, closing_conn)
+      @pending_trades.reject! do |tid, p|
+        next false unless p[:account] == aid || p[:partner] == aid
+
+        waiter = p[:conn]
+        if !waiter.equal?(closing_conn) && @reactor.alive?(waiter)
+          reply(waiter, type: :trade_result, trade_id: tid, ok: false, reason: "partner_left")
+        end
+        true
+      end
     end
 
     def install_signal_handlers

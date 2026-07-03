@@ -12,6 +12,7 @@ require "pemk/sessions"
 class AuthTest < Minitest::Test
   def setup
     @db = Sequel.connect(ENV.fetch("DATABASE_URL"))
+    @db[:monster_transfers].delete rescue nil
     @db[:monsters].delete rescue nil   # no cascade from accounts (deliberate)
     @db[:accounts].delete
     @accounts = PEMK::Accounts.new(@db)

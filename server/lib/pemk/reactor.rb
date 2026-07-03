@@ -39,11 +39,12 @@ module PEMK
 
     attr_reader :port
 
-    def initialize(host:, port:, on_frame:, on_close: nil, logger: nil)
+    def initialize(host:, port:, on_frame:, on_close: nil, on_tick: nil, logger: nil)
       @host     = host
       @port     = port
       @on_frame = on_frame
       @on_close = on_close
+      @on_tick  = on_tick   # reactor-thread hook fired each loop (~<=0.5s) — coarse periodic work
       @log      = logger || ->(_m) {}
       @conns    = {}
       @running  = false
@@ -104,6 +105,7 @@ module PEMK
         end
       end
       writable&.each { |io| write_conn(@conns[io]) }
+      @on_tick&.call   # reactor-thread; keep it O(1)/coarse (it runs up to ~2x/s)
     end
 
     # Thread-safe: schedule a block to run on the reactor thread and wake it.
