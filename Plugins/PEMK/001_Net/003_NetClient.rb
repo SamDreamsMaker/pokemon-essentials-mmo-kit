@@ -40,7 +40,9 @@ module PEMK
     # Returns true on success, false on failure (never raises).
     def connect
       require "socket"
-      @socket = Socket.tcp(@host, @port, connect_timeout: CONNECT_TIMEOUT)
+      @socket = open_socket
+      return false unless @socket
+
       @socket.sync = true
       @buffer = "".b
       @connected = true
@@ -112,6 +114,37 @@ module PEMK
     end
 
     private
+
+    # Bounded connect using ONLY C-level socket APIs: mkxp-z ships the socket C
+    # extension but NOT the stdlib socket.rb layer, so Socket.tcp (a pure-Ruby
+    # convenience) does not exist there. connect_nonblock + IO.select gives the
+    # same bound. -> connected Socket | nil (refused/timeout — no blocking retry).
+    def open_socket
+      sockaddr = Socket.pack_sockaddr_in(@port, @host)
+      sock = Socket.new(Socket::AF_INET, Socket::SOCK_STREAM, 0)
+      begin
+        sock.connect_nonblock(sockaddr)
+      rescue IO::WaitWritable
+        unless IO.select(nil, [sock], nil, CONNECT_TIMEOUT)
+          (sock.close rescue nil)   # timeout: fail fast, never fall back to a ~20s blocking connect
+          return nil
+        end
+        begin
+          sock.connect_nonblock(sockaddr)   # completion check
+        rescue Errno::EISCONN
+          # connected
+        rescue StandardError
+          (sock.close rescue nil)
+          return nil
+        end
+      rescue Errno::EISCONN
+        # already connected (immediate localhost success)
+      end
+      sock
+    rescue NoMethodError, NameError
+      # This runtime lacks even the nonblock machinery -> classic blocking connect.
+      TCPSocket.new(@host, @port)
+    end
 
     # Pulls every whole [uint32 len][payload] frame out of @buffer, decodes it,
     # and appends it to +msgs+.
