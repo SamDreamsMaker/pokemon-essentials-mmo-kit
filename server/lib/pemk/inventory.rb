@@ -14,7 +14,8 @@ module PEMK
   # Idempotent by nature (an absolute snapshot) -> a simple last_seq high-water dedup,
   # NOT economy_ledger's gap-safe per-(account,field,seq) scheme (row-existence would
   # wrongly accept a replayed OLDER whole-bag). Runs under the per-account
-  # PlayerMailbox, so an account's :inv/:econ/:save are already serialized.
+  # PlayerMailbox — :inv/:econ/:save AND the login/auth state read all ride the
+  # same box, so an account's mutations and reads are strictly serialized.
   class Inventory
     DIVERGENCE_MIN = 8         # only log a blob-vs-record divergence this material (coarse tamper signal)
     SHIP_MAX_BYTES = 60_000    # never ship a login bag so large it pushes login_ok past the 64 KiB wire cap

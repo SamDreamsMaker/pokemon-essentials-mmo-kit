@@ -32,6 +32,22 @@ class PokemonLoadScreen
         # Game.load / Game.start_new do their own transition into the map anyway.
         (@scene.pbCloseScene rescue nil) if @scene && (@scene.instance_variable_get(:@viewport) rescue nil)
         if state.is_a?(Hash) && !state.empty?
+          # Vanilla-load parity: the server blob bypasses SaveData.read_from_file,
+          # so format migrations (run_conversions) must be applied here or an
+          # engine update would hand Game.load a stale-format hash. A FAILED
+          # migration takes the anti-wipe path (never Game.load a half-converted
+          # hash — the first checkpoint would fossilize it): offline session,
+          # loud notice, server blob untouched for operator recovery.
+          begin
+            SaveData.run_conversions(state)
+          rescue => e
+            PEMK.log("persist: run_conversions FAILED: #{e.class}: #{e.message} -> refusing server state (anti-wipe)")
+            (PEMK::NetStatus.notify(:corrupt, _INTL("Your online save could not be migrated to this game version. Playing OFFLINE to protect your data.")) rescue nil)
+            PEMK::Auth.abort_login!
+            (PEMK.shutdown rescue nil)
+            pokemmo_orig_pbStartLoadScreen
+            return
+          end
           Game.load(state)         # returning account: hydrate the server save
         else
           Game.start_new           # new account: run the intro, no local "Continue"
@@ -82,6 +98,12 @@ module Game
         # for the retry loop (save-and-quit during a socket drop must not lose data).
         ok, push = PEMK::Checkpoint.commit(save_file: save_file, safe: safe, force: true)
         PEMK::Checkpoint.on_manual_save(ok, push)
+        # "Saved!" must mean durable: when the local write succeeded but the push
+        # did NOT reach the server (socket down — logged_in? is sticky), tell the
+        # player instead of lying by omission. The retry loop keeps trying.
+        if ok && PEMK::Auth.logged_in? && !(push == :pushed || push == :unchanged)
+          (PEMK::NetStatus.notify(:save_not_synced, _INTL("Saved on this device, but NOT synced to the server yet. Retrying in the background...")) rescue nil)
+        end
         ok
       end
     end

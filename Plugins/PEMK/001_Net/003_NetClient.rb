@@ -19,7 +19,9 @@
 #===============================================================================
 module PEMK
   class NetClient
-    DISCONNECTED = :__disconnected__
+    DISCONNECTED    = :__disconnected__
+    CONNECT_TIMEOUT = 2.0   # bounded: an unreachable host must not freeze the game
+                            # for the OS connect timeout (~20s) on every reconnect try
 
     def initialize(host = Config::HOST, port = Config::PORT)
       @host      = host
@@ -27,20 +29,22 @@ module PEMK
       @socket    = nil
       @buffer    = "".b        # partial-frame accumulator
       @connected = false
+      @dropped   = false       # a WRITE noticed the drop; poll reports it once
     end
 
     def connected?
       @connected
     end
 
-    # Opens the connection (a brief blocking connect on the main thread).
+    # Opens the connection (a brief, BOUNDED blocking connect on the main thread).
     # Returns true on success, false on failure (never raises).
     def connect
       require "socket"
-      @socket = TCPSocket.new(@host, @port)
+      @socket = Socket.tcp(@host, @port, connect_timeout: CONNECT_TIMEOUT)
       @socket.sync = true
       @buffer = "".b
       @connected = true
+      @dropped = false
       true
     rescue => e
       @connected = false
@@ -63,7 +67,11 @@ module PEMK
       @socket.write(frame)
       true
     rescue => e
+      # A silent network death (no FIN/RST) is often first noticed by a WRITE.
+      # Flag it so the next poll emits DISCONNECTED — otherwise the reconnect FSM
+      # would never be armed and the rest of the session would silently unsync.
       @connected = false
+      @dropped   = true
       false
     end
 
@@ -72,7 +80,13 @@ module PEMK
     # link, returns a single { :type => DISCONNECTED } message and flips
     # #connected? to false.
     def poll
-      return [] unless @connected && @socket
+      unless @connected && @socket
+        if @dropped                       # write-detected drop: report it exactly once
+          @dropped = false
+          return [{ :type => DISCONNECTED }]
+        end
+        return []
+      end
       msgs = []
       loop do
         # exception: false -> :wait_readable (no data) or nil (EOF), no raise

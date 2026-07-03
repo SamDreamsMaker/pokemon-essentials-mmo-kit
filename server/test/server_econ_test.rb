@@ -144,4 +144,28 @@ class ServerEconTest < Minitest::Test
     assert_equal({ POTION: 5, GREAT_BALL: 2 }, lo2[:inv])   # server-persistent: bag restored on login
     c2.close
   end
+
+  # :save rides the per-account mailbox: rapid pushes commit in ARRIVAL order (the
+  # raw pool could commit the older blob last => silent rollback), and the login
+  # state read serializes behind any in-flight save — the relog sees the LAST blob.
+  def test_rapid_saves_commit_in_order_and_login_reads_the_last
+    c = open_conn
+    register(c, "saveorder@t.co", "password1")
+    login(c, "saveorder@t.co", "password1")
+    3.times do |i|
+      body = "BLOB-#{i}" * 200
+      c.write(W.encode_split({ type: :save, seq: i + 1 }, body))
+    end
+    c.close
+
+    c2 = open_conn
+    send_env(c2, { type: :login, email: "saveorder@t.co", password: "password1" })
+    dec = Timeout.timeout(5) do
+      hdr = c2.read(4)
+      W.decode_envelope(c2.read(hdr.unpack1("N")), false)   # need :body, not just :env
+    end
+    assert_equal :login_ok, dec[:env][:type]
+    assert_equal "BLOB-2" * 200, dec[:body]   # the LAST pushed blob won
+    c2.close
+  end
 end

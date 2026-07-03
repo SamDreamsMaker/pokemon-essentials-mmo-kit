@@ -44,6 +44,7 @@ module PEMK
         BattleNet.on_message(msg)
       when NetClient::DISCONNECTED
         PEMK.log("disconnected from server")
+        NetStatus.on_disconnect   # player notice + reconnect FSM (no-op pre-login)
       end
     end
   end

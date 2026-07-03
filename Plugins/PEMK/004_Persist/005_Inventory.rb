@@ -22,6 +22,11 @@
 module PEMK
   module Inventory
     @applying = false   # true while apply_bag rebuilds $bag -> the observers must NOT re-mark
+    @carry    = {}      # {item_id => qty} the restore could NOT re-add (unknown/renamed id
+                        # after a data update). Merged back into every full_bag flush so an
+                        # :inv snapshot can never SHRINK the server record below what the
+                        # server sent — without this, a dropped item became permanent at the
+                        # first real bag mutation. Rebuilt on every login restore.
 
     def self.applying
       @applying
@@ -55,6 +60,7 @@ module PEMK
       per_slot = (Settings::BAG_MAX_PER_SLOT rescue 999)
       per_slot = 999 unless per_slot.is_a?(Integer) && per_slot > 0
       @applying = true
+      @carry    = {}
       begin
         $bag.clear
         snapshot.each do |item_id, qty|
@@ -64,6 +70,12 @@ module PEMK
             chunk = [remaining, per_slot].min
             break unless ($bag.add(item_id, chunk) rescue nil)
             remaining -= chunk
+          end
+          if remaining > 0
+            # Unknown/renamed id (or a full refusal): PRESERVE it server-side via
+            # the carry-over instead of silently deleting the player's item.
+            @carry[item_id] = remaining
+            PEMK.log("inv: could not restore #{item_id.inspect} x#{remaining} (unknown id?) — preserved in the server record")
           end
         end
       ensure
@@ -85,6 +97,9 @@ module PEMK
           snap[slot[0]] = (snap[slot[0]] || 0) + slot[1].to_i
         end
       end
+      # Items the login restore could not re-add stay part of the absolute
+      # snapshot, so a flush can never shrink the record below the server truth.
+      @carry.each { |id, q| snap[id] = (snap[id] || 0) + q if q.is_a?(Integer) && q > 0 }
       snap
     rescue => e
       PEMK.log("inv: full_bag error: #{e.class}: #{e.message}")

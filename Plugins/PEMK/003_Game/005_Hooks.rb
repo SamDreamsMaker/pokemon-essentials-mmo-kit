@@ -26,12 +26,15 @@ module PEMK
         r = PEMK.relay
         r.pump if r
         c = PEMK.client
-        c.poll.each { |m| PEMK::Dispatch.handle(m) } if c && c.connected?
+        # Poll even when disconnected: a write-detected drop surfaces as one
+        # DISCONNECTED message from poll (arming the reconnect FSM).
+        c.poll.each { |m| PEMK::Dispatch.handle(m) } if c
         PEMK::Remotes.prune          # drop timed-out (disconnected) players
         PEMK::Remotes.update_all
         PEMK::Presence.heartbeat
         PEMK::Sync.tick              # coalesced state-delta flush (debounce/staleness)
         PEMK::Checkpoint.tick        # gated auto-persistence executor (O(1) when idle)
+        PEMK::NetStatus.tick         # mid-session reconnect FSM (no UI here)
       rescue => e
         PEMK.log("Pump error: #{e.class}: #{e.message}")
       ensure

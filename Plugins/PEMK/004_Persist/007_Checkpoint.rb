@@ -40,6 +40,7 @@ module PEMK
     @activity       = false
     @running        = false
     @warned_stuck   = false
+    @backed_up      = false
 
     module_function
 
@@ -88,11 +89,13 @@ module PEMK
     #     (MoveFileEx on Windows) — a failed write always leaves the last good file;
     # (3) push the blob. -> [ok, push_status]
     def commit(save_file: SaveData::FILE_PATH, safe: false, force: false)
+      backup_once(save_file)
       (PEMK::Sync.flush_event(:save) rescue nil)
       tmp = save_file + ".ckpt"
       ok = Game.pokemmo_orig_save(tmp, safe: safe)
       if ok
         begin
+          File.open(tmp, "rb+") { |f| f.fsync } rescue nil   # power-loss: data hits disk before the rename
           File.rename(tmp, save_file)
         rescue StandardError => e
           PEMK.log("checkpoint: atomic rename failed: #{e.class}: #{e.message}")
@@ -190,14 +193,28 @@ module PEMK
         PEMK.log("checkpoint: saved (#{reasons.join(',')}) push=#{push}")
       else
         @cooldown_until = now + @cooldown
-        # Disarm the deferred push: after a failed commit nothing new reached the
-        # disk, and the next SUCCESSFUL commit re-arms its own push (content hash
-        # covers anything the dropped retry would have sent). The atomic rename
-        # already guarantees the on-disk file is the last GOOD save regardless.
-        @push_pending = false
+        # Keep any armed deferred push: thanks to the atomic rename the on-disk
+        # file is ALWAYS the last GOOD save, so re-pushing it is safe (content
+        # hash dedups) — and a previously throttled push of good data must not
+        # be dropped just because a LATER write failed.
         PEMK.log("checkpoint: write failed, retrying in #{@cooldown.to_i}s (pending kept)")
         @cooldown = [@cooldown * 2, FAIL_COOLDOWN_MAX].min
       end
+    end
+
+    # One backup per launch, BEFORE the first overwrite of the session: converts
+    # "offline progress destroyed at next login" from irreversible to manually
+    # recoverable. Suffix deliberately != ".bak" (SaveData.delete_file removes
+    # FILE_PATH + '.bak').
+    def backup_once(save_file)
+      return if @backed_up
+
+      if File.file?(save_file)
+        File.binwrite(save_file + ".pre_session", File.binread(save_file))
+      end
+      @backed_up = true   # only after success — a failed copy retries next commit
+    rescue StandardError => e
+      PEMK.log("checkpoint: pre-session backup failed: #{e.class}: #{e.message}")
     end
 
     def mono
@@ -249,5 +266,24 @@ unless defined?(pemk_ckpt_orig_pbAddPokemon)
     ret = pemk_ckpt_orig_pbPokeCenterPC
     (PEMK::Checkpoint.request(:pc) rescue nil)
     ret
+  end
+
+  # --- graceful-exit hook --------------------------------------------------------
+  # Closing the window (Alt+F4 / X — the NORMAL way to leave an MMO) raises
+  # SystemExit under mkxp-z, which Essentials propagates, so at_exit runs. Flush
+  # the T1 channels (socket writes are synchronous — delivery happens before the
+  # process dies, and the server now processes frames that arrive right before
+  # EOF), take a final full checkpoint when the frame is safe (mid-battle close
+  # stays kill-equivalent for the blob — by design), then close the socket.
+  at_exit do
+    begin
+      if PEMK::Auth.logged_in?
+        (PEMK::Sync.flush_event(:quit) rescue nil)
+        (PEMK::Checkpoint.commit(force: true) if PEMK::Checkpoint.safe_frame?) rescue nil
+        (PEMK.shutdown rescue nil)
+      end
+    rescue StandardError
+      nil
+    end
   end
 end

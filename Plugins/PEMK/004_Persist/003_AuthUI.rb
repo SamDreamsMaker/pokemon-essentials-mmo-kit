@@ -42,6 +42,12 @@ module PEMK
                                        [:login_ok, :login_err])
       return true if apply(reply, :login_ok)
 
+      if reply && reply[:type] == :login_ok
+        # The server accepted, but the client REFUSED the state (anti-wipe guard:
+        # undecodable blob). Stop the login flow — offline session protects the data.
+        pbMessage(_INTL("Could not load your online save. Playing OFFLINE to protect your data."))
+        return true
+      end
       pbMessage(_INTL("Login failed: {1}.", friendly(reply)))
       false
     end
@@ -78,8 +84,7 @@ module PEMK
     def apply(reply, ok_type)
       return false unless reply && reply[:type] == ok_type
 
-      PEMK::Auth.apply_login(reply)
-      true
+      PEMK::Auth.apply_login(reply)   # false when the anti-wipe guard refused the state
     end
 
     # Free-text prompt (password-masked when +hidden+). Returns a stripped string.

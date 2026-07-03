@@ -71,6 +71,11 @@ module PEMK
       @conns.size
     end
 
+    # Reactor-thread only: is this connection still registered (not closed)?
+    def alive?(conn)
+      !conn.nil? && @conns.key?(conn.io)
+    end
+
     def run
       start unless @server
       run_loop
@@ -166,15 +171,23 @@ module PEMK
     def read_conn(conn)
       return unless conn
 
+      eof = false
       loop do
         data = conn.io.read_nonblock(READ_CHUNK, exception: false)
-        return close_conn(conn) if data.nil?
+        if data.nil?          # EOF — but frames may still sit in inbuf
+          eof = true
+          break
+        end
         break if data == :wait_readable
 
         conn.inbuf << data
         return close_conn(conn) if conn.inbuf.bytesize > MAX_FRAME + LEN_BYTES
       end
+      # Process buffered frames BEFORE honoring the EOF: a client that writes its
+      # last frames and immediately closes (the graceful-quit flush) must not have
+      # them silently discarded — that read+close race dropped real data.
       slice_frames(conn)
+      close_conn(conn) if eof && @conns.key?(conn.io)   # slice may have closed it already
     rescue IOError, SystemCallError
       close_conn(conn)
     end

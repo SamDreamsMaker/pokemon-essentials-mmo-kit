@@ -148,11 +148,21 @@ module PEMK
         acct, err = @accounts.authenticate(email, pw)
         if acct
           token = @sessions.issue(acct[:id], remote_addr: addr)
-          blob  = @characters.load_blob(acct[:id])   # opaque; never loaded here
-          rec   = reconcile_block(acct[:id])
+          # The state READ must serialize behind any in-flight :save/:econ/:inv for
+          # this account (a login racing a pending save would hand back a stale
+          # blob and the client's next push would fossilize the rollback). Mailbox
+          # bookkeeping is reactor-thread-only, so route the submit through post.
           @reactor.post do
-            bind(conn, acct[:id])
-            reply_body(conn, { type: :login_ok, account_id: acct[:id], token: token }.merge(rec), blob)
+            @mailbox.submit(acct[:id]) do
+              blob = @characters.load_blob(acct[:id])   # opaque; never loaded here
+              rec  = reconcile_block(acct[:id])
+              @reactor.post do
+                if @reactor.alive?(conn)   # never bind a dead conn into @online
+                  bind(conn, acct[:id])
+                  reply_body(conn, { type: :login_ok, account_id: acct[:id], token: token }.merge(rec), blob)
+                end
+              end
+            end
           end
         else
           @reactor.post { reply(conn, type: :login_err, reason: err.to_s) }
@@ -165,11 +175,18 @@ module PEMK
       @pool.submit do
         account_id = @sessions.resolve(token)
         if account_id
-          blob = @characters.load_blob(account_id)
-          rec  = reconcile_block(account_id)
+          # Same serialization as handle_login: read behind the account's mailbox.
           @reactor.post do
-            bind(conn, account_id)
-            reply_body(conn, { type: :auth_ok, account_id: account_id }.merge(rec), blob)
+            @mailbox.submit(account_id) do
+              blob = @characters.load_blob(account_id)
+              rec  = reconcile_block(account_id)
+              @reactor.post do
+                if @reactor.alive?(conn)   # never bind a dead conn into @online
+                  bind(conn, account_id)
+                  reply_body(conn, { type: :auth_ok, account_id: account_id }.merge(rec), blob)
+                end
+              end
+            end
           end
         else
           @reactor.post { reply(conn, type: :auth_err, reason: "invalid_token") }
@@ -177,8 +194,11 @@ module PEMK
       end
     end
 
-    # Persist the opaque save body (never Marshal.load'd server-side). Fire-and-
-    # forget on the pool; the client's local save is the immediate copy.
+    # Persist the opaque save body (never Marshal.load'd server-side). On the
+    # per-account MAILBOX (not the raw pool): two rapid pushes for one account
+    # must commit in arrival order (raw-pool scheduling could commit the OLDER
+    # blob last, silently rolling the account back), and the login/auth state
+    # read serializes behind any in-flight save.
     def handle_save(env, body, account_id)
       unless body.is_a?(String) && !body.empty?
         @log.call("server: empty :save from account #{account_id} -> ignore")
@@ -188,7 +208,7 @@ module PEMK
       tid = env[:trainer_id]
       sv  = env[:save_version]
       wv  = env[:wire_version]
-      @pool.submit do
+      @mailbox.submit(account_id) do
         @characters.store(account_id, blob: body, trainer_id: tid, save_version: sv, wire_version: wv)
         @log.call("server: saved account #{account_id} (#{body.bytesize}B)")
       end

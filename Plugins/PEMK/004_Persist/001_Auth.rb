@@ -69,6 +69,10 @@ module PEMK
       c = PEMK.client
       unless c && c.connected?
         PEMK.log("auth: no server at boot, playing offline/solo")
+        # The MOST COMMON offline path — must warn too (queued; shows once in-world).
+        if PEMK.enabled?
+          (PEMK::NetStatus.notify(:offline, _INTL("Playing OFFLINE — your progress will NOT be saved to the server.")) rescue nil)
+        end
         return true
       end
 
@@ -82,6 +86,11 @@ module PEMK
         # reconnected as the last account via its saved session token
       else
         PEMK::AuthUI.run(c)                    # players: log in / create account in-game
+      end
+      unless @logged_in
+        # Playing without a server session: keep vanilla semantics, but say so —
+        # a silent offline session used to be destroyed at the next login.
+        (PEMK::NetStatus.notify(:offline, _INTL("Playing OFFLINE — your progress will NOT be saved to the server.")) rescue nil)
       end
       true
     end
@@ -117,9 +126,31 @@ module PEMK
 
     # Adopt a successful login_ok / auth_ok: identity, session token, and the
     # server-held save (an opaque body the client Marshal-loads — its own data).
+    #
+    # ANTI-WIPE GUARD: an UNDECODABLE server blob (format/class drift after an
+    # update, truncation) must NOT be treated like a fresh account — that silent
+    # fallback used to run Game.start_new and the first checkpoint then destroyed
+    # the (possibly recoverable) server blob AND the local save within minutes.
+    # A present-but-corrupt body refuses the login: offline session, loud message,
+    # the server blob stays untouched for operator recovery.
     def self.apply_login(reply)
+      raw   = reply[:_body]
+      state = nil
+      if raw
+        state = (Marshal.load(raw) rescue :__corrupt__)
+        state = :__corrupt__ unless state.is_a?(Hash)
+      end
+      if state == :__corrupt__
+        PEMK.log("auth: server save for account #{reply[:account_id]} is UNDECODABLE -> refusing login (anti-wipe)")
+        (PEMK::NetStatus.notify(:corrupt, _INTL("Your online save could not be loaded (version mismatch?). Playing OFFLINE to protect your data — please contact the server operator.")) rescue nil)
+        (PEMK.shutdown rescue nil)
+        @pending_state = nil
+        @logged_in     = false
+        return false
+      end
+
       @account_id    = reply[:account_id]
-      @pending_state = reply[:_body] ? (Marshal.load(reply[:_body]) rescue nil) : nil
+      @pending_state = state
       @pending_econ  = reply[:econ].is_a?(Hash) ? reply[:econ] : nil
       @pending_inv   = reply[:inv].is_a?(Hash) ? reply[:inv] : nil  # nil = unseeded (keep blob bag)
       @logged_in     = true
@@ -131,6 +162,59 @@ module PEMK
       save_token(reply[:token]) if reply[:token]
       save_local_account(@account_id)
       PEMK.log("auth: #{reply[:type]} account=#{@account_id} state=#{@pending_state ? 'received' : 'new'} econ=#{@pending_econ ? @pending_econ.size : 0}")
+      true
+    end
+
+    # Mid-session re-auth after a reconnect (NetStatus FSM). Deliberately does NOT
+    # hydrate pending_state/econ/inv — restoring server state onto a LIVE player
+    # would rewind them; the client re-seeds the server instead (absolute values).
+    # -> :ok | :auth_err (token unusable, retrying can never work) | :net (retry)
+    def self.relogin(c)
+      token = load_token
+      return :auth_err unless token && @account_id   # nothing to retry with
+
+      reply = send_and_wait(c, { :type => :auth, :token => token }, [:auth_ok, :auth_err], 3.0)
+      return :net unless reply                        # timeout / transport — retry
+      return :auth_err unless reply[:type] == :auth_ok && reply[:account_id] == @account_id
+
+      PEMK.set_self_id(@account_id)
+      (PEMK::Sync.reset rescue nil)
+      (PEMK::Sync.adopt_econ_seq(reply[:econ_seq]) rescue nil)
+      (PEMK::Sync.adopt_inv_seq(reply[:inv_seq]) rescue nil)
+      (PEMK::Sync.adopt_mon_seq(reply[:mon_seq]) rescue nil)
+      :ok
+    end
+
+    # Abandon a login whose state cannot be used (undecodable/unmigratable blob):
+    # back to a clean offline session, the server blob untouched.
+    def self.abort_login!
+      @logged_in     = false
+      @pending_state = nil
+      @pending_econ  = nil
+      @pending_inv   = nil
+    end
+
+    # After a successful mid-session reconnect: the server may have missed up to a
+    # whole disconnected stretch. Every T1 channel is an ABSOLUTE value, so a
+    # client-wins re-seed is one mark per channel; the blob re-pushes force:true
+    # (Sync.reset cleared the content hash, so it always sends once).
+    def self.reseed_after_reconnect
+      return unless $player
+
+      (PEMK::Sync.mark_econ(:money, $player.money) rescue nil)
+      (PEMK::Sync.mark_econ(:coins, $player.coins) rescue nil)
+      (PEMK::Sync.mark_econ(:battle_points, $player.battle_points) rescue nil)
+      (PEMK::Sync.mark_econ(:soot, $player.soot) rescue nil)
+      begin
+        mask = 0
+        $player.badges.each_with_index { |v, i| mask |= (1 << i) if v && i < PEMK::BADGE_BITS }
+        PEMK::Sync.mark_econ(:badges, mask)
+      rescue StandardError
+        nil
+      end
+      (PEMK::Sync.mark_inv rescue nil)
+      (PEMK::Sync.mark_mon rescue nil)
+      (PEMK::Sync.push_blob(SaveData::FILE_PATH, force: true) rescue nil)
     end
 
     # Reconcile the ledger's canonical economy onto $player once the world exists
