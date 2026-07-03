@@ -95,7 +95,11 @@ module PEMK
     end
 
     def new_nonce
-      (SecureRandom.random_number(2**62) rescue rand(2**62)) + 1
+      # A per-instance uniqueness token, NOT a security value — plain rand is fine
+      # (62-bit collision odds are negligible, and it is scoped to one account on
+      # the server's UNIQUE(issuer, nonce) index). SecureRandom isn't loaded under
+      # mkxp-z, so don't reference it.
+      rand(2**62) + 1
     end
 
     # Match grants to instances by NONCE over party+boxes (never by index). Plain

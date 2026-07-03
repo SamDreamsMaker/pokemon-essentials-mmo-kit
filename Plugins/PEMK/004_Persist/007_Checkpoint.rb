@@ -250,13 +250,33 @@ module PEMK
 
       @terminating = true
       (PEMK::Sync.flush_event(:quit) rescue nil)
-      if safe_frame?
-        commit(force: true)
+      if exit_safe?
+        commit(force: true)   # re-serialize — captures a gain made in a menu too
       else
         (PEMK::Sync.push_blob(SaveData::FILE_PATH, force: true) rescue nil)
       end
     rescue StandardError => e
       PEMK.log("checkpoint: on_terminate error: #{e.class}: #{e.message}")
+    end
+
+    # RELAXED gate for the exit backstop only. Unlike the auto-checkpoint gate
+    # (which also refuses menus to avoid frequent mid-browse serializes), a save at
+    # EXIT is safe from a menu/storage/message — vanilla's own pause-menu Save and
+    # pbEmergencySave serialize from exactly those states. We still refuse the
+    # genuinely-corrupting ones: mid-battle (transient party state), mid-transfer
+    # (map factory half-set), and mid-EVENT (a resumed interpreter after reload
+    # could replay/dupe). This is what lets "added a mon in the debug menu, closed
+    # while still in it" persist.
+    def exit_safe?
+      return false unless $player && $game_temp
+      gt = $game_temp
+      return false if gt.in_battle || gt.player_transferring || gt.transition_processing || gt.in_mini_update
+      return false if pbMapInterpreterRunning?
+      return false if $game_system&.save_disabled || (pbInSafari? rescue false) || (pbInBugContest? rescue false)
+      return false if ($PokemonGlobal&.challenge&.pbInChallenge? rescue false)
+      true
+    rescue StandardError
+      false
     end
 
     def mono

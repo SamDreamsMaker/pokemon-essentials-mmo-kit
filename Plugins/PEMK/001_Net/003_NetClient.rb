@@ -19,9 +19,7 @@
 #===============================================================================
 module PEMK
   class NetClient
-    DISCONNECTED    = :__disconnected__
-    CONNECT_TIMEOUT = 2.0   # bounded: an unreachable host must not freeze the game
-                            # for the OS connect timeout (~20s) on every reconnect try
+    DISCONNECTED = :__disconnected__
 
     def initialize(host = Config::HOST, port = Config::PORT)
       @host      = host
@@ -115,35 +113,18 @@ module PEMK
 
     private
 
-    # Bounded connect using ONLY C-level socket APIs: mkxp-z ships the socket C
-    # extension but NOT the stdlib socket.rb layer, so Socket.tcp (a pure-Ruby
-    # convenience) does not exist there. connect_nonblock + IO.select gives the
-    # same bound. -> connected Socket | nil (refused/timeout — no blocking retry).
+    # Plain blocking connect. mkxp-z ships the socket C extension but NOT the
+    # stdlib socket.rb layer, so neither Socket.tcp NOR Socket#connect_nonblock
+    # exist there (both were tried and raise NoMethodError). TCPSocket.new is the
+    # only connect primitive available. A DEAD LOCALHOST PORT refuses instantly
+    # (no timeout), which is the case that matters for dev + the reconnect FSM
+    # against a killed local server. A genuinely-unreachable ROUTED host would
+    # block for the OS timeout — an accepted residual for remote play until a
+    # thread-free bound is found. -> connected Socket | nil.
     def open_socket
-      sockaddr = Socket.pack_sockaddr_in(@port, @host)
-      sock = Socket.new(Socket::AF_INET, Socket::SOCK_STREAM, 0)
-      begin
-        sock.connect_nonblock(sockaddr)
-      rescue IO::WaitWritable
-        unless IO.select(nil, [sock], nil, CONNECT_TIMEOUT)
-          (sock.close rescue nil)   # timeout: fail fast, never fall back to a ~20s blocking connect
-          return nil
-        end
-        begin
-          sock.connect_nonblock(sockaddr)   # completion check
-        rescue Errno::EISCONN
-          # connected
-        rescue StandardError
-          (sock.close rescue nil)
-          return nil
-        end
-      rescue Errno::EISCONN
-        # already connected (immediate localhost success)
-      end
-      sock
-    rescue NoMethodError, NameError
-      # This runtime lacks even the nonblock machinery -> classic blocking connect.
       TCPSocket.new(@host, @port)
+    rescue StandardError
+      nil
     end
 
     # Pulls every whole [uint32 len][payload] frame out of @buffer, decodes it,
