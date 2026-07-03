@@ -87,6 +87,8 @@ module PEMK
       Input.update
       $game_player.straighten
       PEMK.log("battle: ended (outcome=#{outcome})")
+      # PvP never fires :on_end_battle (no after_battle) -> arm the checkpoint here.
+      (PEMK::Checkpoint.request(:pvp) rescue nil)
       outcome
     rescue => e
       PEMK.log("battle: run_battle error: #{e.class}: #{e.message}")

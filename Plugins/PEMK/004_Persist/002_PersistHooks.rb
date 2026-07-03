@@ -73,17 +73,15 @@ module Game
       end
 
       def save(save_file = SaveData::FILE_PATH, safe: false)
-        # An explicit save is a checkpoint. Flush the primitive channels BEFORE the
-        # blob is written: the monster sweep assigns mint nonces at flush, and they
-        # must Marshal into the very file being saved (else a crash before the NEXT
-        # save re-mints those mons under fresh uids — identity churn the persisted
-        # nonce exists to prevent). Econ/inv flushing earlier is content-identical.
-        (PEMK::Sync.flush_event(:save) rescue nil)
-        ok = pokemmo_orig_save(save_file, safe: safe)
-        # Push the full opaque blob — throttled by content hash so an UNCHANGED file
-        # is never re-sent. The server stores the body verbatim and never
-        # Marshal.loads it (no host RCE via :save).
-        (PEMK::Sync.push_blob(save_file, force: true) rescue nil) if ok
+        # Manual save = a forced checkpoint. The flush-BEFORE-write-THEN-push
+        # ordering (mint nonces must Marshal into the very blob being written) is
+        # single-sourced in Checkpoint.commit, shared with the auto path; manual
+        # pushes force:true (instant full push). Battle Frontier's safe:true flows
+        # through unchanged. Accounting runs AFTER with the real outcome: only a
+        # successful write clears pending auto work, and a failed push stays armed
+        # for the retry loop (save-and-quit during a socket drop must not lose data).
+        ok, push = PEMK::Checkpoint.commit(save_file: save_file, safe: safe, force: true)
+        PEMK::Checkpoint.on_manual_save(ok, push)
         ok
       end
     end

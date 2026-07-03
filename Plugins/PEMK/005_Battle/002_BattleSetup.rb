@@ -22,6 +22,12 @@ module PEMK
       ($player && $player.name) ? $player.name : "?"
     end
 
+    # A PvP battle is staged for launch this frame (Checkpoint gate reads this —
+    # never serialize on the very frame a battle is about to start).
+    def self.launch_pending?
+      !@pending_launch.nil?
+    end
+
     # Send our party to +to_id+ (called by both sides when a battle is agreed).
     def self.send_team(to_id)
       return unless PEMK.client && PEMK.client.connected? && $player && $player.party

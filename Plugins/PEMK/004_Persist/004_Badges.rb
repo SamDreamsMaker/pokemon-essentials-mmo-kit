@@ -36,6 +36,7 @@ module PEMK
         each_with_index { |v, i| mask |= (1 << i) if v && i < PEMK::BADGE_BITS }
         PEMK::Sync.mark_econ(:badges, mask)
         (PEMK::Sync.flush_event(:badge) rescue nil)   # badges are rare -> flush now, shrinking the force-quit-before-flush loss window
+        (PEMK::Checkpoint.request(:badge) rescue nil) # checkpoint the surrounding gym story flags (defers past the ceremony)
       end
       result
     end

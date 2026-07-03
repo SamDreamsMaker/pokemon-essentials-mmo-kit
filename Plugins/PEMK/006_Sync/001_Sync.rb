@@ -153,24 +153,29 @@ module PEMK
     end
 
     # Push the full save blob, but only when it actually changed (content hash) and
-    # not more often than BLOB_MIN_INTERVAL unless +force+ (an explicit Game.save).
+    # not more often than BLOB_MIN_INTERVAL unless +force+ (a manual Game.save).
+    # Returns a status symbol (:offline / :throttled / :unchanged / :pushed) so the
+    # Checkpoint push-retry loop can tell "done" from "try again"; existing callers
+    # ignore the return.
     def push_blob(save_file, force: false)
       c = PEMK.client
-      return unless c && c.connected? && File.file?(save_file)
+      return :offline unless c && c.connected? && File.file?(save_file)
 
       now = mono
-      return if !force && (now - @blob_at) < BLOB_MIN_INTERVAL
+      return :throttled if !force && (now - @blob_at) < BLOB_MIN_INTERVAL
 
       raw = File.binread(save_file)
       h = raw.hash
-      return if h == @blob_hash   # unchanged since the last push -> skip
+      return :unchanged if h == @blob_hash   # unchanged since the last push -> skip
 
       c.send_message({ :type => :save, :seq => (@seq[:save] += 1) }, raw)
       @blob_hash = h
       @blob_at = now
       PEMK.log("sync: pushed save blob (#{raw.bytesize}B, seq #{@seq[:save]})")
+      :pushed
     rescue => e
       PEMK.log("sync: blob push failed: #{e.class}: #{e.message}")
+      :offline
     end
 
     def touch
