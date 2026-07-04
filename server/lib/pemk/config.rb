@@ -7,7 +7,8 @@ module PEMK
   # economy cap (the audit flagged the old `rescue 999_999` silent default).
   class Config
     attr_reader :bind, :port, :database_url, :economy_caps, :badges_max, :inventory_caps,
-                :monster_caps, :world_path, :position_enforcement, :pickup_enforce
+                :monster_caps, :world_path, :position_enforcement, :pickup_enforce,
+                :pickup_reset_allowed
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -31,6 +32,13 @@ module PEMK
       # client adds it. Binary + opt-in (default off); the mode is advertised to the
       # client in reconcile_block so the server is the single source of truth.
       @pickup_enforce = env.fetch("PEMK_PICKUP_ENFORCE", "off").to_s.strip.downcase == "on"
+
+      # DEV/QA ONLY: allow a client-invoked pickup reset (forget this account's taken
+      # tiles so item balls can be re-tested). Default off, and it MUST stay off in
+      # production — with it on, any client could wipe its pickups and re-farm every
+      # item ball infinitely. Advertised to the client (reconcile_block) so the F9 dev
+      # tool only offers the reset when the server actually honors it.
+      @pickup_reset_allowed = env.fetch("PEMK_ALLOW_PICKUP_RESET", "off").to_s.strip.downcase == "on"
 
       caps = YAML.safe_load_file(File.join(root, "config", "economy_caps.yml"))
       @economy_caps = {

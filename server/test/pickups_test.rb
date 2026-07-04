@@ -49,4 +49,19 @@ class PickupsTest < Minitest::Test
     assert @pk.taken?(@a, 5, 12, 8)
     refute @pk.taken?(@b, 5, 12, 8)
   end
+
+  # Dev/QA reset: clear() forgets ONLY this account's tiles, reports the row count, and
+  # leaves the tiles re-pickable (:new again); a second clear is a no-op (0 rows).
+  def test_clear_forgets_only_this_account
+    @pk.record(@a, 5, 12, 8)
+    @pk.record(@a, 5, 12, 9)
+    @pk.record(@b, 5, 12, 8)
+
+    assert_equal 2, @pk.clear(@a)          # both of A's rows, not B's
+    refute @pk.taken?(@a, 5, 12, 8)
+    refute @pk.taken?(@a, 5, 12, 9)
+    assert @pk.taken?(@b, 5, 12, 8)        # B untouched
+    assert_equal :new, @pk.record(@a, 5, 12, 8)   # re-pickable after the wipe
+    assert_equal 0, @pk.clear(999_999)             # nonexistent account -> 0 rows
+  end
 end

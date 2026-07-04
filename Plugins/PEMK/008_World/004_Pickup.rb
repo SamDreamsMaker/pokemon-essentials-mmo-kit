@@ -25,6 +25,7 @@ module PEMK
     @enforce = false   # server-advertised enforcement mode (adopted at login)
     @seq     = 0       # client-local request id, to correlate reply -> pickup
     @inbox   = {}      # seq => reply hash (delete-on-read)
+    @reset_allowed = false   # server advertises the dev-only pickup reset (F9 tool)
 
     module_function
 
@@ -33,6 +34,7 @@ module PEMK
       @enforce = false
       @seq     = 0
       @inbox   = {}
+      @reset_allowed = false
     end
 
     # Adopt the server's advertised mode from the login/auth snapshot.
@@ -40,15 +42,30 @@ module PEMK
       @enforce = (v == true)
     end
 
-    # True only when we must ask the server first: it says on AND we're a live,
-    # authenticated online client. Any false -> caller does the local pickup.
-    def enforce?
-      return false unless @enforce && PEMK.enabled? && PEMK.self_id
+    # Adopt whether the server honors the DEV-ONLY pickup reset (PEMK_ALLOW_PICKUP_RESET).
+    # Off in production, so the F9 reset tool stays inert there.
+    def adopt_reset_allowed(v)
+      @reset_allowed = (v == true)
+    end
+
+    def reset_allowed?
+      @reset_allowed == true
+    end
+
+    # A live, authenticated online client (independent of enforcement mode).
+    def online?
+      return false unless PEMK.enabled? && PEMK.self_id
 
       c = PEMK.client
       !!(c && c.connected?)
     rescue StandardError
       false
+    end
+
+    # True only when we must ask the server first: it says enforce AND we're online.
+    # Any false -> caller does the local pickup.
+    def enforce?
+      @enforce && online?
     end
 
     # The gated pickup path. +blk+ is the original pbItemBall (adds + message +
@@ -109,7 +126,21 @@ module PEMK
       @seq
     end
 
-    # Dispatch routes :pickup_grant / :pickup_deny here (delete-on-read by seq).
+    # DEV-ONLY (F9 tool): ask the server to forget this account's taken tiles so its
+    # item balls can be re-picked for testing. Blocks for the ack like a pickup (same
+    # seq/inbox path; Dispatch routes :pickups_reset_ok / :pickups_reset_deny to
+    # on_reply). Requires an online client; the server re-checks its own dev gate.
+    # -> reply hash (:pickups_reset_ok / :pickups_reset_deny) | nil (offline/timeout).
+    def request_reset
+      return nil unless online?
+
+      @inbox.clear
+      @seq += 1
+      PEMK.send_message(:type => :pickups_reset, :seq => @seq)
+      wait_for(@seq)
+    end
+
+    # Dispatch routes :pickup_grant / :pickup_deny / :pickups_reset_* here (delete-on-read by seq).
     def on_reply(msg)
       s = msg && msg[:seq]
       @inbox[s] = msg if s.is_a?(Integer)

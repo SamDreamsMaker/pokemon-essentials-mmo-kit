@@ -38,4 +38,16 @@ class ConfigTest < Minitest::Test
     assert_equal :on,     PEMK::Config.new(env: ENV.to_h.merge("PEMK_POS_ENFORCE" => "ON")).position_enforcement
     assert_equal :off,    PEMK::Config.new(env: ENV.to_h.merge("PEMK_POS_ENFORCE" => "garbage")).position_enforcement
   end
+
+  # M4 Layer C: the DEV-ONLY pickup reset gate. Default off (prod-safe), only "on" enables it.
+  def test_pickup_reset_allowed_defaults_off
+    env = ENV.to_h
+    env.delete("PEMK_ALLOW_PICKUP_RESET")
+    refute PEMK::Config.new(env: env).pickup_reset_allowed
+  end
+
+  def test_pickup_reset_allowed_reads_env
+    assert_equal true,  PEMK::Config.new(env: ENV.to_h.merge("PEMK_ALLOW_PICKUP_RESET" => "ON")).pickup_reset_allowed
+    assert_equal false, PEMK::Config.new(env: ENV.to_h.merge("PEMK_ALLOW_PICKUP_RESET" => "garbage")).pickup_reset_allowed
+  end
 end

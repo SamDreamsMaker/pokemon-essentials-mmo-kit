@@ -177,6 +177,15 @@ item balls:
   `pbItemBall` **asks first** (`:pickup_req`) and adds the item only on
   `:pickup_grant`; a `:pickup_deny` leaves the ball. Off by default; offline /
   solo / pre-login / bag-full fall back to the local pickup.
+- **Permanent per account** — pickups are one-shot *for all time*, like the money
+  ledger and badges: a client "new game" on the same account does **not** re-enable
+  taken balls (your money doesn't refund either), while a genuinely fresh start is a
+  **new account** whose pickup rows are empty (FK cascade on account delete). So
+  enforcement is safe to default on — real players never hit a stale-dup wall. The
+  only wipe path is a **dev/QA F9 tool** (`PEMK: Reset my pickups`), honored **only**
+  when the server was booted with `PEMK_ALLOW_PICKUP_RESET=on` (off in production);
+  a client-obeyed reset is deliberately *not* offered — it would be an infinite
+  item re-farm.
 
 **Honest scope:** this makes pickups server-*authorized*, not yet
 minted-into-inventory. The bag is still blob-authoritative (M2.3), so a fully

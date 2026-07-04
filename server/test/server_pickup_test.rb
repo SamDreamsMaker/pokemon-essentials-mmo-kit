@@ -45,8 +45,10 @@ class ServerPickupTest < Minitest::Test
     @db&.disconnect
   end
 
-  def start_server(pickup_enforce: false)
-    env = ENV.to_h.merge("PEMK_WORLD" => FIXTURE.path, "PEMK_PICKUP_ENFORCE" => (pickup_enforce ? "on" : "off"))
+  def start_server(pickup_enforce: false, pickup_reset_allowed: false)
+    env = ENV.to_h.merge("PEMK_WORLD" => FIXTURE.path,
+                         "PEMK_PICKUP_ENFORCE" => (pickup_enforce ? "on" : "off"),
+                         "PEMK_ALLOW_PICKUP_RESET" => (pickup_reset_allowed ? "on" : "off"))
     @server = PEMK::Server.new(config: PEMK::Config.new(env: env), logger: ->(_m) {})
     @server.start
     @port = @server.port
@@ -122,5 +124,53 @@ class ServerPickupTest < Minitest::Test
     start_server(pickup_enforce: true)
     _, lo = authed_conn("pk5@t.co")
     assert_equal true, lo[:pickup_enforce]
+  end
+
+  # DEV-ONLY pickup reset gate. Default off (production): the server FAIL-CLOSES on
+  # :pickups_reset so a client can't re-farm — and the tile stays taken.
+  def test_pickups_reset_denied_when_flag_off
+    start_server   # PEMK_ALLOW_PICKUP_RESET off by default
+    c, lo = authed_conn("pk6@t.co")
+    assert_equal false, lo[:pickup_reset_allowed]        # advertised off
+
+    send_env(c, { type: :pos, map: 5, x: 12, y: 7 })
+    send_env(c, { type: :pickup_req, kind: :item, item: :POTION, map: 5, x: 12, y: 8, seq: 1 })
+    assert_equal :pickup_grant, recv(c)[:type]
+
+    send_env(c, { type: :pickups_reset, seq: 2 })
+    r = recv(c)
+    assert_equal :pickups_reset_deny, r[:type]
+    assert_equal "not_allowed", r[:reason]
+
+    # the reset did NOTHING — the tile is still taken
+    send_env(c, { type: :pickup_req, kind: :item, item: :POTION, map: 5, x: 12, y: 8, seq: 3 })
+    r2 = recv(c)
+    assert_equal :pickup_deny, r2[:type]
+    assert_equal "already_taken", r2[:reason]
+    c.close
+  end
+
+  # With the dev flag on, the reset clears the account's tiles and the ball re-grants.
+  def test_pickups_reset_reenables_pickup_when_flag_on
+    start_server(pickup_reset_allowed: true)
+    c, lo = authed_conn("pk7@t.co")
+    assert_equal true, lo[:pickup_reset_allowed]         # advertised on
+
+    send_env(c, { type: :pos, map: 5, x: 12, y: 7 })
+    send_env(c, { type: :pickup_req, kind: :item, item: :POTION, map: 5, x: 12, y: 8, seq: 1 })
+    assert_equal :pickup_grant, recv(c)[:type]
+    send_env(c, { type: :pickup_req, kind: :item, item: :POTION, map: 5, x: 12, y: 8, seq: 2 })
+    assert_equal "already_taken", recv(c)[:reason]       # taken
+
+    send_env(c, { type: :pickups_reset, seq: 3 })
+    r = recv(c)
+    assert_equal :pickups_reset_ok, r[:type]
+    assert_equal 3, r[:seq]
+    assert_equal 1, r[:cleared]                          # exactly the one tile
+
+    # re-pickable after the wipe
+    send_env(c, { type: :pickup_req, kind: :item, item: :POTION, map: 5, x: 12, y: 8, seq: 4 })
+    assert_equal :pickup_grant, recv(c)[:type]
+    c.close
   end
 end

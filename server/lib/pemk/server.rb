@@ -74,6 +74,7 @@ module PEMK
       @log.call("server: world data #{@world.summary} (M4 Layer A, audit-only)")
       @log.call("server: position enforcement = #{@config.position_enforcement} (M4 Layer B)")
       @log.call("server: pickup enforcement = #{@config.pickup_enforce ? 'on' : 'off'} (M4 Layer C server-mint)")
+      @log.call("server: WARNING pickup reset ALLOWED (PEMK_ALLOW_PICKUP_RESET=on) — DEV ONLY, disable in production") if @config.pickup_reset_allowed
       @pool.start
       @reactor.start
       @thread = Thread.new { @reactor.run_loop }
@@ -127,6 +128,7 @@ module PEMK
       when :mon_party then handle_mon_party(conn, env, authed)
       when :interact_claim then handle_interact_claim(conn, env, authed)
       when :pickup_req then handle_pickup_req(conn, env, authed)
+      when :pickups_reset then handle_pickups_reset(conn, env, authed)
       when :trade_commit then handle_trade_commit(conn, env, authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
@@ -360,6 +362,30 @@ module PEMK
       end
     end
 
+    # DEV/QA-ONLY pickup reset (M4 Layer C polish). Forgets this account's taken tiles
+    # so its item balls can be re-tested. Fail-CLOSED: honored ONLY when the server was
+    # booted with PEMK_ALLOW_PICKUP_RESET=on. In production that flag is off, so this
+    # always denies — a client could otherwise wipe its pickups and re-farm every item
+    # ball infinitely. The client's F9 tool only offers the reset when reconcile_block
+    # advertised it, but we re-check the server flag here (never trust the client).
+    def handle_pickups_reset(conn, env, account_id)
+      seq = env[:seq]
+      unless @config.pickup_reset_allowed
+        @log.call("pickup-reset: account #{account_id} DENIED (PEMK_ALLOW_PICKUP_RESET off)")
+        return reply(conn, type: :pickups_reset_deny, seq: seq, reason: "not_allowed")
+      end
+
+      @mailbox.submit(account_id) do
+        n = @pickups.clear(account_id)
+        @reactor.post do
+          next unless @reactor.alive?(conn)
+
+          @log.call("pickup-reset: account #{account_id} cleared #{n} tile(s) (DEV)")
+          reply(conn, type: :pickups_reset_ok, seq: seq, cleared: n)
+        end
+      end
+    end
+
     # Server-authoritative trade COMMIT (M3.2). The only authoritative trade frame
     # (invite/accept/offer/lock/cancel are pure peer relay via ADDRESSED). Each side
     # commits ONLY after it holds the partner's uid-validated object; the server
@@ -445,7 +471,8 @@ module PEMK
         inv: inv[:bag], inv_seq: inv[:last_seq],
         mon_seq: @monsters.mon_seq(account_id),
         mon_evict: @monsters.evictions(account_id),
-        pickup_enforce: @config.pickup_enforce }   # M4 Layer C: client gates pickups only when on
+        pickup_enforce: @config.pickup_enforce,     # M4 Layer C: client gates pickups only when on
+        pickup_reset_allowed: @config.pickup_reset_allowed }   # dev-only F9 reset offered only when on
     end
 
     # Zone-scoped presence: track each player's current map and fan a position
