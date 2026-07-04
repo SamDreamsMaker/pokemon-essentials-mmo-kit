@@ -38,15 +38,15 @@ is Milestone 4.
 | **Pokémon identity & ownership** | server (UIDs) | ✅ yes | can't dupe — UID registry + ownership |
 | **Trades** | server | ✅ yes | can't dupe/steal — atomic CAS swap, rollback |
 | **Where a Pokémon came from (pickup, gift, catch)** | **client** | ❌ no | can fabricate acquiring one (within UID rules) |
-| **Overworld movement / position** | **client** | ⚠️ audited (M4-B) | no-clip / teleport / illegal-warp now logged vs. world model; not yet blocked |
-| **Item pickup (distance, existence)** | **client** | ⚠️ audited (M4-A) | claim now logged vs. world model; not yet blocked (no distance check) |
+| **Overworld movement / position** | client → **server-audited** | ✅ enforceable (M4-B) | no-clip / illegal-warp snapped back to last-good tile (opt-in flag; audit-only by default) |
+| **Item pickup (distance, existence)** | client → **server-granted** | ✅ enforceable (M4-C) | remote / duplicate pickups denied — distance gate + one-shot + server grant (opt-in flag) |
 | **Interacting with NPCs / objects** | **client** | ❌ no | can trigger events from anywhere |
 | **Wild encounters / which Pokémon appears** | **client** | ❌ no | can force encounters / shinies / species |
 | **Catching** | **client** | ❌ no | can claim a catch that never happened |
 | **Battle outcomes (vs NPC)** | **client** | ❌ no | can declare any result, EXP, drops |
 | **PvP battle** | both clients (relayed) | ⚠️ deterministic, not authoritative | a modified client can desync/cheat its own side |
-| **Spawn / respawn position** | **client** | ❌ no | can spawn anywhere |
-| **Map transfers / warps** | **client** | ❌ no | can warp anywhere |
+| **Spawn / respawn position** | **server** | ✅ enforceable (M4-B) | server seeds spawn from the persisted last-good position |
+| **Map transfers / warps** | client → **server-audited** | ✅ enforceable (M4-B) | illegal (non-endpoint) warps snapped back (opt-in flag) |
 
 Read the ✅ rows as: *a hacked client cannot gain here.* Read the ❌ rows as:
 *today this is a trusted-players model — a hacked client can lie and the server
@@ -101,7 +101,7 @@ battle re-simulation is only needed for the last mile (ranked PvP integrity).
 Four layers, cheapest-and-highest-value first. Each is shippable on its own and
 each makes the next easier (they share the "server has its own world data" spine).
 
-### Layer A — Server-side world data (the foundation) — *in progress*
+### Layer A — Server-side world data (the foundation) — *shipped*
 
 **Shipped so far:** the server now loads a **read-only world model** from a
 build-time JSON export (`server/data/world.json`, produced in-engine by the
@@ -130,22 +130,25 @@ server-side table, plus an **audit mode** where the server logs (doesn't block)
 mismatches between what clients claim and what the world data says. Audit-first is
 the safe way to seed the data and find bad assumptions before enforcing.
 
-### Layer B — Position authority — *in progress (audit-only)*
+### Layer B — Position authority — *shipped (opt-in enforcement)*
 
-**Shipped so far:** the server now runs a **position audit** on the presence
-stream it already receives (no new client message) — every per-step frame is
-checked against the world model and a violation is **logged**:
+**Shipped:** the server runs a **position audit** on the presence stream it
+already receives (no new client message) — every per-step frame is checked
+against the world model and a violation is classified:
 
 - **no-clip** — a step onto a fully-blocked tile (passability grid),
 - **teleport** — a same-map jump of more than one tile (Chebyshev distance),
 - **illegal-warp** — a cross-map move that matches no known warp endpoint, edge
   connection, or spawn/heal/home tile.
 
-It still **enforces nothing** (no snap-back, no disconnect) — this is the
-telemetry that will size the false-positive classes (surf, bridges, ledges,
-Fly/Dig) before any enforcement is turned on. The remaining Layer B work is to
-own **spawn/respawn** placement and to promote the checks from log-only to
-snap-back once the telemetry is clean.
+Enforcement is **live but gated** behind `PEMK_POS_ENFORCE` (off / shadow / on).
+In `on`, no-clip and illegal-warp are **snapped back** to the last-good tile
+(`:pos_correct` → client `PosCorrect`, moveto same-map / transfer cross-map),
+and the violating frame is *not* fanned out to peers; teleport stays log-only
+(too many legit sources — Fly/Dig/ledges). Default is audit-only so real players
+surface false-positive classes (surf, bridges, ledges) before anything is
+blocked. **Spawn/respawn is server-owned:** the last-good position is persisted
+(migration 007) and re-seeded at login, so a client can't spawn anywhere.
 
 The end state for Layer B:
 
@@ -158,23 +161,33 @@ The end state for Layer B:
 *Result:* teleport, no-clip, and spawn-anywhere die. This is also the prerequisite
 for the interaction check.
 
-### Layer C — Interaction authority (the "pick up the item" fix)
+### Layer C — Interaction authority (the "pick up the item" fix) — *shipped (opt-in enforcement, item pickups)*
 
-Now the server can validate an *action* against *position*:
+The server validates an *action* against *position*. **Shipped** for overworld
+item balls:
 
-- **Distance gate** — an interaction (pickup, talk, cut…) is only accepted if the
-  claimed object is **within one tile** of the player's server-known position and
-  the player is facing it. (One tile is the classic engine rule.)
+- **Distance gate** — a pickup is only accepted if the claimed object is **within
+  one tile** (Chebyshev) of the player's server-known position (Layer B). Otherwise
+  `:too_far`. (One tile is the classic engine rule.)
 - **Existence & one-shot** — the object must exist at that (map, x, y) per Layer A,
-  and single-use objects (item balls, hidden items) are **consumed server-side**,
-  so the same item can't be picked up twice or claimed by two players.
-- **Gift / event rewards** — items and Pokémon granted by an event are minted by
-  the **server** in response to a validated interaction, not announced by the
-  client. This is what finally makes *acquisition* (not just possession)
-  trustworthy.
+  and item balls are **consumed server-side** via an atomic `UNIQUE(account_id,
+  map, x, y)` row (migration 008), so the same item can't be picked up twice
+  (`already_taken`).
+- **Server grant** — with `PEMK_PICKUP_ENFORCE=on`, the client's guarded
+  `pbItemBall` **asks first** (`:pickup_req`) and adds the item only on
+  `:pickup_grant`; a `:pickup_deny` leaves the ball. Off by default; offline /
+  solo / pre-login / bag-full fall back to the local pickup.
 
-*Result:* fabricated pickups, remote/duplicate item grabs, and "I talked to the
-gift NPC 100 times" all fail.
+**Honest scope:** this makes pickups server-*authorized*, not yet
+minted-into-inventory. The bag is still blob-authoritative (M2.3), so a fully
+hacked client that edits its own bag blob is *detected* on the next snapshot, not
+*prevented* here; and because the one-shot is consumed at grant time, a lost grant
+forfeits that one item (favours anti-dupe over anti-loss). True exactly-once mint,
+plus gift/event rewards and NPC-talk gating, are deferred to the
+server-authoritative-bag milestone.
+
+*Result:* fabricated pickups, remote grabs, and duplicate item balls all fail
+(opt-in). Gift/event/NPC-spam gating remains future work.
 
 ### Layer D — Battle authority
 
@@ -199,8 +212,8 @@ of Essentials' own) and is best done last, on top of A–C.
 | Layer | Kills | Needs | Effort |
 |---|---|---|---|
 | **A. World data** *(shipped)* | (foundation) | in-engine map exporter + audit logging | medium |
-| **B. Position** *(audit-only)* | teleport, no-clip, spawn/warp-anywhere | Layer A + movement checks | medium |
-| **C. Interaction** | fake/remote/duplicate pickups, event spam | Layers A–B + distance gate + server-minted rewards | medium |
+| **B. Position** *(shipped, opt-in)* | teleport, no-clip, spawn/warp-anywhere | Layer A + movement checks | medium |
+| **C. Interaction** *(shipped, opt-in — item pickups)* | fake/remote/duplicate pickups | Layers A–B + distance gate + server grant | medium |
 | **D. Battle** | forced encounters, fake catches/rewards, PvP cheats | Layers A–C + server battle engine | large |
 
 Recommended order is A → B → C → D, and within it **audit before enforce**: ship
