@@ -42,6 +42,11 @@ module PEMK
       @inventory  = Inventory.new(@db, @config.inventory_caps, logger: @log)
       @monsters   = Monsters.new(@db, @config.monster_caps, logger: @log)
       @trades     = Trades.new(@db)
+      # M4 Layer A: read-only world model + detection-only interaction audit. Both are
+      # in-memory and DB-free; a missing export just makes the audit a no-op.
+      @world      = WorldData.new(@config.world_path, logger: @log)
+      @audit      = Audit.new(@world, logger: @log)
+      @pos_audit  = PositionAudit.new(@world, logger: @log, mode: @config.position_enforcement)   # M4 Layer B
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
       @zones    = Hash.new { |h, k| h[k] = Set.new }   # map_id => Set(conn); reactor-thread only
@@ -65,6 +70,8 @@ module PEMK
       @log.call("server: economy caps #{@config.economy_caps}, badges<#{@config.badges_max}")
       @log.call("server: inventory caps #{@config.inventory_caps} (detection-only, flag-not-reject)")
       @log.call("server: monster caps #{@config.monster_caps} (uid registry, flag-not-reject)")
+      @log.call("server: world data #{@world.summary} (M4 Layer A, audit-only)")
+      @log.call("server: position enforcement = #{@config.position_enforcement} (M4 Layer B)")
       @pool.start
       @reactor.start
       @thread = Thread.new { @reactor.run_loop }
@@ -111,11 +118,12 @@ module PEMK
       when :register then handle_register(conn, env)
       when :login    then handle_login(conn, env)
       when :auth     then handle_auth(conn, env)
-      when :save     then handle_save(env, dec[:body], authed)
+      when :save     then handle_save(env, dec[:body], authed, conn.data[:last_pos])
       when :econ     then handle_econ(conn, env, authed)
       when :inv      then handle_inv(conn, env, authed)
       when :uid_req  then handle_uid_req(conn, env, authed)
       when :mon_party then handle_mon_party(conn, env, authed)
+      when :interact_claim then handle_interact_claim(conn, env, authed)
       when :trade_commit then handle_trade_commit(conn, env, authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
@@ -162,9 +170,11 @@ module PEMK
             @mailbox.submit(acct[:id]) do
               blob = @characters.load_blob(acct[:id])   # opaque; never loaded here
               rec  = reconcile_block(acct[:id])
+              pos  = (@characters.load_position(acct[:id]) rescue nil)   # M4-B: seed last_pos (never brick login)
               @reactor.post do
                 if @reactor.alive?(conn)   # never bind a dead conn into @online
                   bind(conn, acct[:id])
+                  conn.data[:last_pos] = pos if pos
                   reply_body(conn, { type: :login_ok, account_id: acct[:id], token: token }.merge(rec), blob)
                 end
               end
@@ -186,9 +196,11 @@ module PEMK
             @mailbox.submit(account_id) do
               blob = @characters.load_blob(account_id)
               rec  = reconcile_block(account_id)
+              pos  = (@characters.load_position(account_id) rescue nil)   # M4-B: seed last_pos (never brick login)
               @reactor.post do
                 if @reactor.alive?(conn)   # never bind a dead conn into @online
                   bind(conn, account_id)
+                  conn.data[:last_pos] = pos if pos
                   reply_body(conn, { type: :auth_ok, account_id: account_id }.merge(rec), blob)
                 end
               end
@@ -205,7 +217,7 @@ module PEMK
     # must commit in arrival order (raw-pool scheduling could commit the OLDER
     # blob last, silently rolling the account back), and the login/auth state
     # read serializes behind any in-flight save.
-    def handle_save(env, body, account_id)
+    def handle_save(env, body, account_id, last_pos)
       unless body.is_a?(String) && !body.empty?
         @log.call("server: empty :save from account #{account_id} -> ignore")
         return
@@ -214,8 +226,11 @@ module PEMK
       tid = env[:trainer_id]
       sv  = env[:save_version]
       wv  = env[:wire_version]
+      # Persist the SERVER-tracked position (captured on the reactor thread when the
+      # frame arrived, not client-claimed) alongside the blob, so the next login seeds
+      # the position audit. nil (no presence yet) leaves the stored position untouched.
       @mailbox.submit(account_id) do
-        @characters.store(account_id, blob: body, trainer_id: tid, save_version: sv, wire_version: wv)
+        @characters.store(account_id, blob: body, trainer_id: tid, save_version: sv, wire_version: wv, position: last_pos)
         @log.call("server: saved account #{account_id} (#{body.bytesize}B)")
       end
     end
@@ -277,6 +292,15 @@ module PEMK
         status = @monsters.apply_party(account_id, mons, seq)
         @reactor.post { reply(conn, type: :mon_ack, seq: seq, flagged: status[1].any?) }
       end
+    end
+
+    # Detection-only interaction audit (M4 Layer A). Runs INLINE on the reactor
+    # thread like handle_presence — no mailbox, no DB, and crucially NO reply: it is
+    # pure telemetry. Compares the client's interaction claim against the read-only
+    # world model and logs a mismatch; it enforces nothing (enforcement is a later
+    # layer). Identity is the server-trusted account_id, never a client :id.
+    def handle_interact_claim(_conn, env, account_id)
+      @audit.check_interaction(account_id, env)
     end
 
     # Server-authoritative trade COMMIT (M3.2). The only authoritative trade frame
@@ -373,6 +397,17 @@ module PEMK
     def handle_presence(conn, env, account_id)
       map = env[:map]
       return unless map.is_a?(Integer)
+
+      # M4 Layer B: audit FIRST. In :on mode an enforceable violation stashes the
+      # last-good tile in conn.data[:correct_to] — send a :pos_correct and REJECT the
+      # frame: no zone change and no fan-out of the rejected position, so peers keep
+      # seeing the offender at its last accepted tile and it never joins the illegal
+      # map's zone. In :off/:shadow correct_to is never set, so the frame flows on.
+      @pos_audit.check(account_id, env, conn.data)
+      if (tgt = conn.data.delete(:correct_to))
+        reply(conn, type: :pos_correct, map: tgt[0], x: tgt[1], y: tgt[2])
+        return
+      end
 
       old = conn.data[:map_id]
       if old && old != map

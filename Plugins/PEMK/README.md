@@ -10,12 +10,23 @@ authoritative server** — a standalone Ruby + PostgreSQL process (see
 [`server/`](../../server/)) that owns accounts and all player data. The client
 never hosts: deploy the server once, point every client at it.
 
-> **Status (Milestone 1 — dedicated authoritative backend):**
-> - **Accounts & auth** — username/password login against the server; a session
+> **Status (Milestones 1–3 — dedicated authoritative backend):**
+> - **Accounts & auth** — **email + password** login against the server; a session
 >   token reconnects on later launches; the old impersonatable claimed-id is gone.
 > - **Durable saves** — your game state lives in **Postgres** on the server and is
 >   reloaded at login (the client's local save is only an offline fallback). The
 >   server stores the save as an opaque blob it never deserialises.
+> - **Server-authoritative economy / badges / bag** — money, coins, BP, soot,
+>   badges and the whole inventory are mirrored to the server, clamped, and
+>   **restored at login** — not trusted from the save file.
+> - **Dupe-proof Pokémon** — every owned Pokémon carries a **server-issued UID**;
+>   the server tracks ownership so a Pokémon can't be duplicated.
+> - **Server-authoritative trading** — trade Pokémon through an **atomic ownership
+>   swap** on the server (both sides move or neither does), safe against duplication
+>   and mid-trade disconnects.
+> - **Event-driven auto-save** — progress is checkpointed automatically at safe
+>   frames (no manual Save): urgent changes flush within a second, ambient state on
+>   a short timer, with a window-close backstop.
 > - **Presence** — same-map players see each other in real time (zone-scoped
 >   fan-out on the server).
 > - **PvP battles** — challenge a same-map player; a deterministic battle runs on
@@ -23,14 +34,18 @@ never hosts: deploy the server once, point every client at it.
 >   full teams with mid-round switches in sync — relayed through the server.
 >
 > Full design + roadmap in
-> [`docs/architecture/MMO_CONVERSION_AUDIT.md`](../../docs/architecture/MMO_CONVERSION_AUDIT.md)
-> and [`server/README.md`](../../server/README.md).
+> [`docs/architecture/MMO_CONVERSION_AUDIT.md`](../../docs/architecture/MMO_CONVERSION_AUDIT.md),
+> the security model in
+> [`docs/ARCHITECTURE-SECURITY.md`](../../docs/ARCHITECTURE-SECURITY.md), and
+> server ops in [`server/README.md`](../../server/README.md).
 
 ## Quick start (two players on one PC)
 
 1. **Start the server** — double-click **`PlayMMO-server.bat`** (runs the
-   dedicated Ruby + Postgres server in WSL) and leave the window open. For a real
-   deployment use `docker compose up` in [`server/`](../../server/) instead.
+   dedicated Ruby + Postgres server in WSL) and leave the window open. First time
+   on this machine, install the server once with
+   [`docs/INSTALL-WINDOWS.md`](../../docs/INSTALL-WINDOWS.md) (WSL + `bin/setup.sh`).
+   For a real deployment use `docker compose up` in [`server/`](../../server/) instead.
 2. Double-click **`PlayMMO-debug.bat`** — at the load screen pick **Create
    account**, enter an **email + password**, then play through the intro (that
    sets your character's name).
@@ -94,10 +109,17 @@ the plugin (pure vanilla).
              Presence          builds/emits the local player's position (step/turn/heartbeat)
              Dispatch          routes inbound messages
              Hooks             EventHandlers + the Graphics.update alias (the pump)
+             NetStatus         reconnect FSM + player-facing connection notices
 004_Persist/ Auth              token / email login handshake; hydrates server state
              AuthUI            in-game login / create-account screen (email + password)
              PersistHooks      Game.load/save aliases; server-authoritative load screen
              Economy/Badges/Inventory  observe local changes -> notify the server (M2)
+             Monsters          server-issued Pokémon UIDs: mint / find / evict / materialize (M3)
+             Checkpoint        event-driven auto-save: arms + flushes checkpoints at safe frames
+006_Sync/    Sync              coalescing dirty-set; mark_econ/badge/inv/mon -> arm a checkpoint
+                               + T2 blob projection (party/position), gated during a trade
+007_Trade/   Trade            player-to-player trade state machine (pause-menu option),
+                               escrow + untradeable gate; the swap is committed server-side
 005_Battle/  Challenge         the challenge / accept handshake (pause-menu option)
              BattleSetup       exchange parties on accept, then launch
              BattleLauncher    build the battle on Marshal copies (no save side effects)
@@ -132,11 +154,15 @@ money and the Pokédex are never touched.
 
 ## Known limits
 
-- **Gameplay is still client-computed (not yet anti-cheat).** The server owns
-  accounts + the durable save and relays presence/battles, but movement and battle
-  outcomes are computed on the clients. Server-authoritative economy (an
-  append-only ledger), inventory and battle verification are the Milestone 2+
-  roadmap; today it is a trusted-players model.
+- **Gameplay is still client-computed (not yet anti-cheat).** The server now owns
+  accounts, the durable save, and — genuinely server-authoritative — the **economy
+  ledger, badges, bag, and Pokémon identity/ownership + trading** (M2–M3). But
+  **movement, wild encounters and battle outcomes are still computed on the
+  clients** and only relayed, so gameplay itself remains a *trusted-players* model.
+  Interaction-distance checks, server-side world-object/spawn data, and
+  server-side battles are the Milestone 4 roadmap — see
+  [`docs/ARCHITECTURE-SECURITY.md`](../../docs/ARCHITECTURE-SECURITY.md) for
+  exactly what is and isn't secured today.
 - **`Marshal` on the wire — host closed, small client-side residual.** The host
   never `Marshal.load`s an untrusted frame: it routes on a self-contained
   primitive-codec envelope and rejects legacy whole-Marshal frames, while deep

@@ -13,6 +13,11 @@ module PEMK
         Remotes.apply_pos(msg)
       when :leave
         Remotes.remove(msg[:id])
+      when :pos_correct
+        # M4 Layer B snap-back: server rejected our position -> return to the last-good
+        # tile it sends. Applied on the next safe overworld frame. Only arrives when
+        # server enforcement is :on.
+        PosCorrect.request(msg[:map], msg[:x], msg[:y])
       when :econ_ack, :econ_rej
         # Server's canonical economy balance: :econ_ack is the accepted value,
         # :econ_rej the current balance an over-cap/invalid change rolled back to.
@@ -48,6 +53,7 @@ module PEMK
         BattleNet.on_message(msg)
       when NetClient::DISCONNECTED
         PEMK.log("disconnected from server")
+        PosCorrect.reset          # drop any un-applied snap-back from the dead session
         NetStatus.on_disconnect   # player notice + reconnect FSM (no-op pre-login)
       end
     end

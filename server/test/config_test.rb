@@ -25,4 +25,17 @@ class ConfigTest < Minitest::Test
     cfg = PEMK::Config.new
     assert_equal({ uid_req_max: 64, party_max: 6, level_max: 100, trade_max: 1 }, cfg.monster_caps)
   end
+
+  # M4 Layer B enforcement mode: opt-in via PEMK_POS_ENFORCE, default :off, unknown -> :off.
+  def test_position_enforcement_defaults_off
+    env = ENV.to_h
+    env.delete("PEMK_POS_ENFORCE")
+    assert_equal :off, PEMK::Config.new(env: env).position_enforcement
+  end
+
+  def test_position_enforcement_reads_env
+    assert_equal :shadow, PEMK::Config.new(env: ENV.to_h.merge("PEMK_POS_ENFORCE" => "shadow")).position_enforcement
+    assert_equal :on,     PEMK::Config.new(env: ENV.to_h.merge("PEMK_POS_ENFORCE" => "ON")).position_enforcement
+    assert_equal :off,    PEMK::Config.new(env: ENV.to_h.merge("PEMK_POS_ENFORCE" => "garbage")).position_enforcement
+  end
 end

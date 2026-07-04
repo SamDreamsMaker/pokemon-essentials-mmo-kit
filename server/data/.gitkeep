@@ -1,0 +1,5 @@
+# Holds world.json — the build-time world export produced by the in-engine
+# "PEMK: Export World" debug action (M4 Layer A). world.json itself is a generated
+# artifact; commit it once you have run the exporter so the server ships with a
+# world model. This .gitkeep just guarantees the directory exists for the exporter
+# to write into (mkxp-z writes the file, it does not create the folder).
