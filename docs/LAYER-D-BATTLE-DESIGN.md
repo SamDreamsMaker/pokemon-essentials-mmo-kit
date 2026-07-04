@@ -13,14 +13,20 @@
 > off/shadow/on) are live and logging illegal teams. There is no battle-entry gate
 > yet, so every mode only logs — enforcement waits on the ramp + a real gate.
 >
-> **Progress (2026-07-05): D2 part 1 shipped (shadow/detection).** The wild-encounter
-> roller (`pemk/encounter_mint.rb`: weighted slot pick + `{pid, iv[6], shiny}` mint via
-> SecureRandom) and encounter-legality audit are live: with
-> `PEMK_BATTLE_ENFORCE_ENCOUNTERS=shadow`, the client reports each locally-rolled
-> encounter (aliasing the one `pbGenerateWildPokemon` seam) and the server logs
-> species-not-in-table / wrong-map suspicion + what it would mint. Gameplay unchanged.
-> Next: D2 part 2 — `on` makes the client REQUEST a server mint and adopt it (client
-> becomes a pure observer of what appears).
+> **Progress (2026-07-05): D2 shipped (shadow + on).** The wild-encounter roller
+> (`pemk/encounter_mint.rb`: weighted slot pick + `{pid, iv[6], shiny}` mint via
+> SecureRandom) is live on the one `pbGenerateWildPokemon` seam. `shadow` reports each
+> locally-rolled encounter and the server logs species-not-in-table / wrong-map suspicion
+> + what it would mint. **`on` makes the client REQUEST the mint and BUILD the wild
+> Pokémon from the server's `{species, level, pid, iv[6], shiny}` — the client is a pure
+> observer of what appears, its level, shininess and IVs.** Fail-open (deny/timeout/offline
+> → local roll at vanilla odds). Off by default. Honest gaps (disclosed): maps flagged
+> `ScaleWildEncounterLevels` stay local (the server has no party levels); the claimed
+> enctype isn't validated against the tile's terrain (species still come from a legit
+> table with server identity); generation influences that are ability/item CODE
+> (Shiny Charm/chaining, Synchronize, Cute Charm, Static/Magnet-Pull) aren't folded in.
+> No persistence yet — D3 (catch) adds `encounter_rolls` when it must reference the mint.
+> Next: D3 (server-adjudicated catch minting the encounter's identity).
 
 This document answers the last open question in the anti-cheat ladder: **how does
 the server independently decide what a battle produced — the Pokémon that

@@ -138,6 +138,7 @@ module PEMK
       when :pickups_reset then handle_pickups_reset(conn, env, authed)
       when :team_check then handle_team_check(conn, env, authed)
       when :encounter_report then handle_encounter_report(conn, env, authed)
+      when :encounter_req then handle_encounter_req(conn, env, authed)
       when :trade_commit then handle_trade_commit(conn, env, authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
@@ -430,6 +431,38 @@ module PEMK
       wm = would ? "#{would['species']}@#{would['level']}#{would['shiny'] ? '/shiny' : ''}" : "-"
       @log.call("encounter: account #{account_id} #{tag} map #{map} #{enctype} " \
                 "client=#{species}@#{level} server_would=#{wm}")
+    end
+
+    # M4 Layer D D2 (on): server-authoritative wild-encounter MINT. The client requests an
+    # encounter for (map, enctype); the server rolls the slot (species+level) from the Layer
+    # A tables and mints the identity {personalID, iv[6], shiny} with SecureRandom, and the
+    # client builds the wild Pokémon from it — so the server owns what appears, its level,
+    # shininess and IVs (client = observer). Pure CPU (no DB), so it replies inline.
+    # Fail-OPEN: a wrong-map claim or a map with no table denies, and the client falls back
+    # to a local roll — wild encounters must never just stop happening.
+    def handle_encounter_req(conn, env, account_id)
+      seq     = env[:seq]
+      map     = env[:map]
+      enctype = env[:enctype].to_s
+      return reply(conn, type: :encounter_deny, seq: seq, reason: "bad_req") unless map.is_a?(Integer) && !enctype.empty?
+
+      pos = conn.data[:last_pos]
+      # No server-trusted position yet (a fresh char before its first :pos) -> can't vouch for
+      # the claimed map, so deny and let the client roll LOCALLY against its real map. Otherwise
+      # a client could mint from any map's table before ever sending a position.
+      return reply(conn, type: :encounter_deny, seq: seq, reason: "no_pos") unless pos.is_a?(Array)
+
+      if pos[0] != map
+        @log.call("encounter: account #{account_id} req wrong-map claim #{map} (on #{pos[0]}) -> deny")
+        return reply(conn, type: :encounter_deny, seq: seq, reason: "wrong_map")
+      end
+
+      mint = @encounter_mint.roll(map, enctype)
+      return reply(conn, type: :encounter_deny, seq: seq, reason: "no_table") unless mint   # unexported -> local
+
+      reply(conn, type: :encounter_grant, seq: seq,
+            species: mint["species"], level: mint["level"],
+            pid: mint["pid"], iv: mint["iv"], shiny: mint["shiny"])
     end
 
     # Server-authoritative trade COMMIT (M3.2). The only authoritative trade frame

@@ -25,6 +25,9 @@ module PEMK
       when :team_ack
         # M4 Layer D D1: the server's team-legality verdict (detection-only telemetry).
         TeamReport.on_ack(msg)
+      when :encounter_grant, :encounter_deny
+        # M4 Layer D D2 (on): reply to a blocking :encounter_req (keyed by seq).
+        Encounter.on_reply(msg)
       when :econ_ack, :econ_rej
         # Server's canonical economy balance: :econ_ack is the accepted value,
         # :econ_rej the current balance an over-cap/invalid change rolled back to.

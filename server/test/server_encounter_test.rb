@@ -128,4 +128,70 @@ class ServerEncounterTest < Minitest::Test
     assert_nil recv(c, 2)   # pre-auth -> dropped, connection closed
     c.close
   end
+
+  # --- D2 part 2: the server MINT (:encounter_req -> :encounter_grant) ------------------
+
+  def test_encounter_req_mints_a_valid_server_identity
+    start_server(encounter_mode: "on")
+    c, = authed_conn("ec5@t.co")
+    send_env(c, { type: :pos, map: 5, x: 3, y: 3 })
+    send_env(c, { type: :encounter_req, map: 5, enctype: :Land, seq: 1 })
+    r = recv(c)
+    assert_equal :encounter_grant, r[:type]
+    assert_equal 1, r[:seq]
+    assert_includes %w[PIDGEY RATTATA], r[:species].to_s        # a species from map 5's Land table
+    assert_kind_of Integer, r[:level]
+    assert_operator r[:level], :>=, 2
+    assert_operator r[:level], :<=, 5
+    assert_kind_of Integer, r[:pid]
+    assert_operator r[:pid], :>=, 0
+    assert_operator r[:pid], :<, 2**32
+    assert_kind_of Array, r[:iv]
+    assert_equal 6, r[:iv].length
+    assert(r[:iv].all? { |v| v.is_a?(Integer) && v >= 0 && v <= 31 })
+    assert_includes [true, false], r[:shiny]
+    c.close
+  end
+
+  def test_encounter_req_wrong_map_denies
+    start_server(encounter_mode: "on")
+    c, = authed_conn("ec6@t.co")
+    send_env(c, { type: :pos, map: 5, x: 3, y: 3 })            # server-known map is 5
+    send_env(c, { type: :encounter_req, map: 6, enctype: :Land, seq: 2 })   # claims map 6
+    r = recv(c)
+    assert_equal :encounter_deny, r[:type]
+    assert_equal "wrong_map", r[:reason]
+    c.close
+  end
+
+  def test_encounter_req_no_table_denies
+    start_server(encounter_mode: "on")
+    c, = authed_conn("ec7@t.co")
+    send_env(c, { type: :pos, map: 5, x: 3, y: 3 })
+    send_env(c, { type: :encounter_req, map: 5, enctype: :Cave, seq: 3 })   # map 5 has no Cave table
+    r = recv(c)
+    assert_equal :encounter_deny, r[:type]
+    assert_equal "no_table", r[:reason]
+    c.close
+  end
+
+  # No server-trusted position yet (fresh char, never sent :pos) -> deny, don't mint from a
+  # client-claimed map (else a client mints any table from anywhere before moving).
+  def test_encounter_req_without_position_denies
+    start_server(encounter_mode: "on")
+    c, = authed_conn("ec8@t.co")   # no :pos sent -> last_pos is nil
+    send_env(c, { type: :encounter_req, map: 5, enctype: :Land, seq: 1 })
+    r = recv(c)
+    assert_equal :encounter_deny, r[:type]
+    assert_equal "no_pos", r[:reason]
+    c.close
+  end
+
+  def test_encounter_req_requires_auth
+    start_server(encounter_mode: "on")
+    c = open_conn
+    send_env(c, { type: :encounter_req, map: 5, enctype: :Land, seq: 1 })
+    assert_nil recv(c, 2)   # pre-auth -> dropped
+    c.close
+  end
 end
