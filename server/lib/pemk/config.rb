@@ -7,7 +7,9 @@ module PEMK
   # economy cap (the audit flagged the old `rescue 999_999` silent default).
   class Config
     attr_reader :bind, :port, :database_url, :economy_caps, :badges_max, :inventory_caps,
-                :monster_caps, :world_path, :position_enforcement, :pickup_enforce
+                :monster_caps, :world_path, :position_enforcement, :pickup_enforce,
+                :pickup_reset_allowed, :battle_data_path, :battle_enforce_teams,
+                :battle_enforce_encounters
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -18,6 +20,12 @@ module PEMK
       # WorldData model loads. Just a PATH here — a missing file is tolerated at boot
       # (audit no-ops); only a present-but-invalid file is a boot error (in WorldData).
       @world_path   = env.fetch("PEMK_WORLD", File.join(root, "data", "world.json"))
+
+      # M4 Layer D: path to the build-time battle-data export (server/data/battle_data.json)
+      # the BattleData model loads (species/moves/items/types/natures/caps). Same policy as
+      # the world path — absent is tolerated (Layer D no-ops), present-but-invalid is a boot
+      # error (in BattleData).
+      @battle_data_path = env.fetch("PEMK_BATTLE_DATA", File.join(root, "data", "battle_data.json"))
 
       # M4 Layer B enforcement mode: :off (detect+log only), :shadow (also log what a
       # snap-back WOULD do, correcting nothing), :on (actually snap-back). Default
@@ -31,6 +39,27 @@ module PEMK
       # client adds it. Binary + opt-in (default off); the mode is advertised to the
       # client in reconcile_block so the server is the single source of truth.
       @pickup_enforce = env.fetch("PEMK_PICKUP_ENFORCE", "off").to_s.strip.downcase == "on"
+
+      # DEV/QA ONLY: allow a client-invoked pickup reset (forget this account's taken
+      # tiles so item balls can be re-tested). Default off, and it MUST stay off in
+      # production — with it on, any client could wipe its pickups and re-farm every
+      # item ball infinitely. Advertised to the client (reconcile_block) so the F9 dev
+      # tool only offers the reset when the server actually honors it.
+      @pickup_reset_allowed = env.fetch("PEMK_ALLOW_PICKUP_RESET", "off").to_s.strip.downcase == "on"
+
+      # M4 Layer D: team/set legality enforcement mode, same off/shadow/on tri-state as
+      # PEMK_POS_ENFORCE. Default off. D1 is detection-only (there is no battle-entry
+      # gate yet), so every mode logs the illegal team; the mode sets the log label and
+      # the future enforce hook. Unknown value -> off (never boot stricter than asked).
+      tmode = env.fetch("PEMK_BATTLE_ENFORCE_TEAMS", "off").to_s.strip.downcase
+      @battle_enforce_teams = %w[off shadow on].include?(tmode) ? tmode.to_sym : :off
+
+      # M4 Layer D D2: server-authoritative wild encounters, same off/shadow/on tri-state.
+      # off = local (no traffic); shadow = client reports its local encounter, server audits
+      # it vs the tables + logs what it would mint; on = client requests the mint and adopts
+      # it (server owns species/level/shiny/IVs). Default off. Unknown -> off.
+      emode = env.fetch("PEMK_BATTLE_ENFORCE_ENCOUNTERS", "off").to_s.strip.downcase
+      @battle_enforce_encounters = %w[off shadow on].include?(emode) ? emode.to_sym : :off
 
       caps = YAML.safe_load_file(File.join(root, "config", "economy_caps.yml"))
       @economy_caps = {

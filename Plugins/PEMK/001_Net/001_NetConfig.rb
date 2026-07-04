@@ -55,6 +55,11 @@ module PEMK
     # on LAN; a laggy link tops out here rather than hanging the pickup.
     PICKUP_GRANT_TIMEOUT = 2.5
 
+    # M4 Layer D D2: max seconds to block for a server wild-encounter mint before falling
+    # back to a local roll (encounters must keep happening on a laggy/dropped link). Short —
+    # this stalls entering every wild battle in `on` mode, so keep it tight.
+    ENCOUNTER_GRANT_TIMEOUT = 2.0
+
     # Wire framing: a big-endian uint32 length prefix precedes each payload.
     # Must stay in sync with the server. (Validated in Phase 0: sockets + this
     # framing round-trip correctly under mkxp-z / MRI 3.1.3.)

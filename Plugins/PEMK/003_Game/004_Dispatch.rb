@@ -18,9 +18,16 @@ module PEMK
         # tile it sends. Applied on the next safe overworld frame. Only arrives when
         # server enforcement is :on.
         PosCorrect.request(msg[:map], msg[:x], msg[:y])
-      when :pickup_grant, :pickup_deny
-        # M4 Layer C server-mint: the reply to a blocking :pickup_req (keyed by seq).
+      when :pickup_grant, :pickup_deny, :pickups_reset_ok, :pickups_reset_deny
+        # M4 Layer C: reply to a blocking :pickup_req or the dev-only :pickups_reset
+        # (both keyed by seq, delete-on-read).
         Pickup.on_reply(msg)
+      when :team_ack
+        # M4 Layer D D1: the server's team-legality verdict (detection-only telemetry).
+        TeamReport.on_ack(msg)
+      when :encounter_grant, :encounter_deny
+        # M4 Layer D D2 (on): reply to a blocking :encounter_req (keyed by seq).
+        Encounter.on_reply(msg)
       when :econ_ack, :econ_rej
         # Server's canonical economy balance: :econ_ack is the accepted value,
         # :econ_rej the current balance an over-cap/invalid change rolled back to.

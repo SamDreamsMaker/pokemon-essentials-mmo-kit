@@ -451,4 +451,33 @@ if defined?(MenuHandlers)
       next
     }
   })
+
+  # Dev/QA-only: ask the SERVER to forget this account's taken pickups (Layer C keeps a
+  # permanent one-shot per account, like the money ledger — so re-testing a taken ball
+  # needs a server-side wipe). Honored only when the server was booted with
+  # PEMK_ALLOW_PICKUP_RESET=on; production leaves it off, so this stays inert there.
+  # Pair it with "Reset facing event" (self-switches) to make the ball re-appear locally.
+  MenuHandlers.add(:debug_menu, :pemk_reset_pickups, {
+    "name"        => _INTL("PEMK: Reset my pickups (dev)"),
+    "parent"      => :main,
+    "description" => _INTL("Ask the server to forget this account's taken item balls so they can be picked up again (needs PEMK_ALLOW_PICKUP_RESET=on)."),
+    "always_show" => false,
+    "effect"      => proc {
+      if !(PEMK::Pickup.online? rescue false)
+        pbMessage(_INTL("Not connected — log in to an MMO server first."))
+      elsif !(PEMK::Pickup.reset_allowed? rescue false)
+        pbMessage(_INTL("The server does not allow pickup reset. Boot it with PEMK_ALLOW_PICKUP_RESET=on (dev only)."))
+      else
+        reply = (PEMK::Pickup.request_reset rescue nil)
+        if reply && reply[:type] == :pickups_reset_ok
+          pbMessage(_INTL("Server cleared {1} recorded pickup(s). Reset the balls' self-switches (or new game) and they can be picked up again.", reply[:cleared].to_i))
+        elsif reply && reply[:type] == :pickups_reset_deny
+          pbMessage(_INTL("Server refused the pickup reset ({1}).", reply[:reason].to_s))
+        else
+          pbMessage(_INTL("No response from the server (timeout)."))
+        end
+      end
+      next
+    }
+  })
 end

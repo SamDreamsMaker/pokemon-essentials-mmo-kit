@@ -38,4 +38,42 @@ class ConfigTest < Minitest::Test
     assert_equal :on,     PEMK::Config.new(env: ENV.to_h.merge("PEMK_POS_ENFORCE" => "ON")).position_enforcement
     assert_equal :off,    PEMK::Config.new(env: ENV.to_h.merge("PEMK_POS_ENFORCE" => "garbage")).position_enforcement
   end
+
+  # M4 Layer C: the DEV-ONLY pickup reset gate. Default off (prod-safe), only "on" enables it.
+  def test_pickup_reset_allowed_defaults_off
+    env = ENV.to_h
+    env.delete("PEMK_ALLOW_PICKUP_RESET")
+    refute PEMK::Config.new(env: env).pickup_reset_allowed
+  end
+
+  def test_pickup_reset_allowed_reads_env
+    assert_equal true,  PEMK::Config.new(env: ENV.to_h.merge("PEMK_ALLOW_PICKUP_RESET" => "ON")).pickup_reset_allowed
+    assert_equal false, PEMK::Config.new(env: ENV.to_h.merge("PEMK_ALLOW_PICKUP_RESET" => "garbage")).pickup_reset_allowed
+  end
+
+  # M4 Layer D D1: team-legality enforcement mode, off/shadow/on tri-state, default off.
+  def test_battle_enforce_teams_defaults_off
+    env = ENV.to_h
+    env.delete("PEMK_BATTLE_ENFORCE_TEAMS")
+    assert_equal :off, PEMK::Config.new(env: env).battle_enforce_teams
+  end
+
+  def test_battle_enforce_teams_reads_env
+    assert_equal :shadow, PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_TEAMS" => "shadow")).battle_enforce_teams
+    assert_equal :on,     PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_TEAMS" => "ON")).battle_enforce_teams
+    assert_equal :off,    PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_TEAMS" => "garbage")).battle_enforce_teams
+  end
+
+  # M4 Layer D D2: encounter enforcement mode, off/shadow/on tri-state, default off.
+  def test_battle_enforce_encounters_defaults_off
+    env = ENV.to_h
+    env.delete("PEMK_BATTLE_ENFORCE_ENCOUNTERS")
+    assert_equal :off, PEMK::Config.new(env: env).battle_enforce_encounters
+  end
+
+  def test_battle_enforce_encounters_reads_env
+    assert_equal :shadow, PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_ENCOUNTERS" => "shadow")).battle_enforce_encounters
+    assert_equal :on,     PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_ENCOUNTERS" => "ON")).battle_enforce_encounters
+    assert_equal :off,    PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_ENCOUNTERS" => "nope")).battle_enforce_encounters
+  end
 end

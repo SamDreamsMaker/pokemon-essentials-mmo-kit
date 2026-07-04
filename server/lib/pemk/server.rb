@@ -45,6 +45,10 @@ module PEMK
       # M4 Layer A: read-only world model + detection-only interaction audit. Both are
       # in-memory and DB-free; a missing export just makes the audit a no-op.
       @world      = WorldData.new(@config.world_path, logger: @log)
+      @battle     = BattleData.new(@config.battle_data_path, logger: @log)   # M4 Layer D read model
+      @team_audit = TeamAudit.new(@battle, mode: @config.battle_enforce_teams,
+                                  party_max: @config.monster_caps[:party_max], logger: @log)   # M4 Layer D D1
+      @encounter_mint = EncounterMint.new(@world, logger: @log)   # M4 Layer D D2 wild-encounter roller
       @audit      = Audit.new(@world, logger: @log)
       @pos_audit  = PositionAudit.new(@world, logger: @log, mode: @config.position_enforcement)   # M4 Layer B
       @pickups    = Pickups.new(@db)   # M4 Layer C one-shot ledger
@@ -72,8 +76,12 @@ module PEMK
       @log.call("server: inventory caps #{@config.inventory_caps} (detection-only, flag-not-reject)")
       @log.call("server: monster caps #{@config.monster_caps} (uid registry, flag-not-reject)")
       @log.call("server: world data #{@world.summary} (M4 Layer A, audit-only)")
+      @log.call("server: battle data #{@battle.summary} (M4 Layer D)")
+      @log.call("server: team legality enforcement = #{@config.battle_enforce_teams} (M4 Layer D D1, detection-only)")
+      @log.call("server: encounter enforcement = #{@config.battle_enforce_encounters} (M4 Layer D D2)")
       @log.call("server: position enforcement = #{@config.position_enforcement} (M4 Layer B)")
       @log.call("server: pickup enforcement = #{@config.pickup_enforce ? 'on' : 'off'} (M4 Layer C server-mint)")
+      @log.call("server: WARNING pickup reset ALLOWED (PEMK_ALLOW_PICKUP_RESET=on) — DEV ONLY, disable in production") if @config.pickup_reset_allowed
       @pool.start
       @reactor.start
       @thread = Thread.new { @reactor.run_loop }
@@ -127,6 +135,10 @@ module PEMK
       when :mon_party then handle_mon_party(conn, env, authed)
       when :interact_claim then handle_interact_claim(conn, env, authed)
       when :pickup_req then handle_pickup_req(conn, env, authed)
+      when :pickups_reset then handle_pickups_reset(conn, env, authed)
+      when :team_check then handle_team_check(conn, env, authed)
+      when :encounter_report then handle_encounter_report(conn, env, authed)
+      when :encounter_req then handle_encounter_req(conn, env, authed)
       when :trade_commit then handle_trade_commit(conn, env, authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
@@ -360,6 +372,101 @@ module PEMK
       end
     end
 
+    # DEV/QA-ONLY pickup reset (M4 Layer C polish). Forgets this account's taken tiles
+    # so its item balls can be re-tested. Fail-CLOSED: honored ONLY when the server was
+    # booted with PEMK_ALLOW_PICKUP_RESET=on. In production that flag is off, so this
+    # always denies — a client could otherwise wipe its pickups and re-farm every item
+    # ball infinitely. The client's F9 tool only offers the reset when reconcile_block
+    # advertised it, but we re-check the server flag here (never trust the client).
+    def handle_pickups_reset(conn, env, account_id)
+      seq = env[:seq]
+      unless @config.pickup_reset_allowed
+        @log.call("pickup-reset: account #{account_id} DENIED (PEMK_ALLOW_PICKUP_RESET off)")
+        return reply(conn, type: :pickups_reset_deny, seq: seq, reason: "not_allowed")
+      end
+
+      @mailbox.submit(account_id) do
+        n = @pickups.clear(account_id)
+        @reactor.post do
+          next unless @reactor.alive?(conn)
+
+          @log.call("pickup-reset: account #{account_id} cleared #{n} tile(s) (DEV)")
+          reply(conn, type: :pickups_reset_ok, seq: seq, cleared: n)
+        end
+      end
+    end
+
+    # M4 Layer D D1: team/set legality audit. The client reports its FULL-STAT team as
+    # primitives in the envelope (never a Marshal blob); the audit validates every mon
+    # against the exported battle data and logs illegal teams (detection-only — there is
+    # no battle-entry gate to block yet). Always acks so the client can correlate; the
+    # legality result rides the ack for future client-side UX.
+    def handle_team_check(conn, env, account_id)
+      verdict = @team_audit.check(account_id, env[:team])
+      reply(conn, type: :team_ack, seq: env[:seq], legal: (verdict[:legal] != false))
+    end
+
+    # M4 Layer D D2 (shadow): the client reports the wild encounter it rolled LOCALLY;
+    # the server audits it against the Layer A encounter tables (a species absent from the
+    # table = a fabricated encounter) and logs what it WOULD mint, so the roller can be
+    # validated against real play before the mint is enforced (on). Fire-and-forget — no
+    # reply, no gameplay effect. Cross-checks the reported map against the player's
+    # server-tracked position (Layer B).
+    def handle_encounter_report(conn, env, account_id)
+      map     = env[:map]
+      enctype = env[:enctype].to_s
+      species = env[:species].to_s
+      level   = env[:level]
+      return unless map.is_a?(Integer) && !enctype.empty? && !species.empty?
+
+      legal     = @encounter_mint.legal?(map, enctype, species)   # nil (no table) | true | false
+      pos       = conn.data[:last_pos]
+      wrong_map = pos.is_a?(Array) && pos[0] != map
+      would     = @encounter_mint.roll(map, enctype)
+
+      tag = if legal == false then "SUSPECT species-not-in-table"
+            elsif wrong_map    then "SUSPECT wrong-map(on #{pos[0]})"
+            else "ok"
+            end
+      wm = would ? "#{would['species']}@#{would['level']}#{would['shiny'] ? '/shiny' : ''}" : "-"
+      @log.call("encounter: account #{account_id} #{tag} map #{map} #{enctype} " \
+                "client=#{species}@#{level} server_would=#{wm}")
+    end
+
+    # M4 Layer D D2 (on): server-authoritative wild-encounter MINT. The client requests an
+    # encounter for (map, enctype); the server rolls the slot (species+level) from the Layer
+    # A tables and mints the identity {personalID, iv[6], shiny} with SecureRandom, and the
+    # client builds the wild Pokémon from it — so the server owns what appears, its level,
+    # shininess and IVs (client = observer). Pure CPU (no DB), so it replies inline.
+    # Fail-OPEN: a wrong-map claim or a map with no table denies, and the client falls back
+    # to a local roll — wild encounters must never just stop happening.
+    def handle_encounter_req(conn, env, account_id)
+      seq     = env[:seq]
+      map     = env[:map]
+      enctype = env[:enctype].to_s
+      return reply(conn, type: :encounter_deny, seq: seq, reason: "bad_req") unless map.is_a?(Integer) && !enctype.empty?
+
+      pos = conn.data[:last_pos]
+      # No server-trusted position yet (a fresh char before its first :pos) -> can't vouch for
+      # the claimed map, so deny and let the client roll LOCALLY against its real map. Otherwise
+      # a client could mint from any map's table before ever sending a position.
+      return reply(conn, type: :encounter_deny, seq: seq, reason: "no_pos") unless pos.is_a?(Array)
+
+      if pos[0] != map
+        @log.call("encounter: account #{account_id} req wrong-map claim #{map} (on #{pos[0]}) -> deny")
+        return reply(conn, type: :encounter_deny, seq: seq, reason: "wrong_map")
+      end
+
+      mint = @encounter_mint.roll(map, enctype)
+      return reply(conn, type: :encounter_deny, seq: seq, reason: "no_table") unless mint   # unexported -> local
+
+      @log.call("encounter: account #{account_id} MINT map #{map} #{enctype} -> " \
+                "#{mint['species']}@#{mint['level']}#{mint['shiny'] ? ' /SHINY' : ''}")
+      reply(conn, type: :encounter_grant, seq: seq,
+            species: mint["species"], level: mint["level"],
+            pid: mint["pid"], iv: mint["iv"], shiny: mint["shiny"])
+    end
+
     # Server-authoritative trade COMMIT (M3.2). The only authoritative trade frame
     # (invite/accept/offer/lock/cancel are pure peer relay via ADDRESSED). Each side
     # commits ONLY after it holds the partner's uid-validated object; the server
@@ -445,7 +552,10 @@ module PEMK
         inv: inv[:bag], inv_seq: inv[:last_seq],
         mon_seq: @monsters.mon_seq(account_id),
         mon_evict: @monsters.evictions(account_id),
-        pickup_enforce: @config.pickup_enforce }   # M4 Layer C: client gates pickups only when on
+        pickup_enforce: @config.pickup_enforce,     # M4 Layer C: client gates pickups only when on
+        pickup_reset_allowed: @config.pickup_reset_allowed,    # dev-only F9 reset offered only when on
+        battle_enforce_teams: @config.battle_enforce_teams.to_s,   # M4 Layer D D1 team-legality mode
+        battle_enforce_encounters: @config.battle_enforce_encounters.to_s }   # M4 Layer D D2 encounter mode
     end
 
     # Zone-scoped presence: track each player's current map and fan a position

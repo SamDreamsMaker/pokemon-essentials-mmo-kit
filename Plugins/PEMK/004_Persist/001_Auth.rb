@@ -162,6 +162,8 @@ module PEMK
       (PEMK::Sync.adopt_inv_seq(reply[:inv_seq]) rescue nil)  # ... same for the independent :inv channel
       (PEMK::Sync.adopt_mon_seq(reply[:mon_seq]) rescue nil)  # ... and the :mon_party projection channel
       (PEMK::Pickup.adopt_enforce(reply[:pickup_enforce]) rescue nil)  # M4-C: gate pickups only if server says on
+      (PEMK::Pickup.adopt_reset_allowed(reply[:pickup_reset_allowed]) rescue nil)  # M4-C: dev-only F9 reset
+      (PEMK::Encounter.adopt_mode(reply[:battle_enforce_encounters]) rescue nil)   # M4-D2: encounter mode
       save_token(reply[:token]) if reply[:token]
       save_local_account(@account_id)
       PEMK.log("auth: #{reply[:type]} account=#{@account_id} state=#{@pending_state ? 'received' : 'new'} econ=#{@pending_econ ? @pending_econ.size : 0}")
@@ -186,6 +188,8 @@ module PEMK
       (PEMK::Sync.adopt_inv_seq(reply[:inv_seq]) rescue nil)
       (PEMK::Sync.adopt_mon_seq(reply[:mon_seq]) rescue nil)
       (PEMK::Pickup.adopt_enforce(reply[:pickup_enforce]) rescue nil)  # M4-C
+      (PEMK::Pickup.adopt_reset_allowed(reply[:pickup_reset_allowed]) rescue nil)  # M4-C: dev-only F9 reset
+      (PEMK::Encounter.adopt_mode(reply[:battle_enforce_encounters]) rescue nil)   # M4-D2: encounter mode
       :ok
     end
 

@@ -24,6 +24,7 @@ module PEMK
     @inv_dirty   = false        # bag changed since the last flush -> re-read the WHOLE bag once at flush
     @mon_dirty   = false        # monsters may need uids / the party projection may have changed
     @mon_last    = nil          # hash of the last-sent party projection (send only on change)
+    @team_last   = nil          # hash of the last-sent full-stat team (M4 Layer D legality; send on change)
     @seq         = Hash.new(0)  # channel => monotonic seq (adopted from the server on login)
     @dirty_since = nil
     @last_change = nil
@@ -39,9 +40,11 @@ module PEMK
       @inv_dirty = false
       @mon_dirty = false
       @mon_last = nil
+      @team_last = nil
       (PEMK::Monsters.reset rescue nil)
       (PEMK::Trade.reset rescue nil)   # a fresh socket must abandon any in-flight trade
       (PEMK::Pickup.reset rescue nil)  # ... and any pending pickup grant + advertised flag
+      (PEMK::Encounter.reset rescue nil)  # ... and the advertised encounter mode (M4-D2)
       @seq = Hash.new(0)
       @dirty_since = nil
       @last_change = nil
@@ -158,6 +161,12 @@ module PEMK
           if proj && proj.hash != @mon_last
             c.send_message({ :type => :mon_party, :mons => proj, :seq => (@seq[:mon] += 1) })
             @mon_last = proj.hash
+          end
+          # M4 Layer D D1: the full-stat team for server legality audit, on change only.
+          team = (PEMK::TeamReport.build rescue nil)
+          if team && team.hash != @team_last
+            c.send_message({ :type => :team_check, :team => team, :seq => (@seq[:team] += 1) })
+            @team_last = team.hash
           end
         end
         @mon_dirty = more ? true : false   # stay dirty while mints remain pending
