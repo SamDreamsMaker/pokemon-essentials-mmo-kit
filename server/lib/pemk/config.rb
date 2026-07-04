@@ -7,7 +7,7 @@ module PEMK
   # economy cap (the audit flagged the old `rescue 999_999` silent default).
   class Config
     attr_reader :bind, :port, :database_url, :economy_caps, :badges_max, :inventory_caps,
-                :monster_caps, :world_path, :position_enforcement
+                :monster_caps, :world_path, :position_enforcement, :pickup_enforce
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -25,6 +25,12 @@ module PEMK
       # unknown value falls back to :off rather than booting into a stricter mode.
       mode = env.fetch("PEMK_POS_ENFORCE", "off").to_s.strip.downcase
       @position_enforcement = %w[off shadow on].include?(mode) ? mode.to_sym : :off
+
+      # M4 Layer C: server-minted item pickups. When on, an item-ball pickup must be
+      # GRANTED by the server (validated existence + distance + one-shot) before the
+      # client adds it. Binary + opt-in (default off); the mode is advertised to the
+      # client in reconcile_block so the server is the single source of truth.
+      @pickup_enforce = env.fetch("PEMK_PICKUP_ENFORCE", "off").to_s.strip.downcase == "on"
 
       caps = YAML.safe_load_file(File.join(root, "config", "economy_caps.yml"))
       @economy_caps = {

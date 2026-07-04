@@ -41,6 +41,7 @@ module PEMK
       @mon_last = nil
       (PEMK::Monsters.reset rescue nil)
       (PEMK::Trade.reset rescue nil)   # a fresh socket must abandon any in-flight trade
+      (PEMK::Pickup.reset rescue nil)  # ... and any pending pickup grant + advertised flag
       @seq = Hash.new(0)
       @dirty_since = nil
       @last_change = nil

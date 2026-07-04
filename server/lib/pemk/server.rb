@@ -47,6 +47,7 @@ module PEMK
       @world      = WorldData.new(@config.world_path, logger: @log)
       @audit      = Audit.new(@world, logger: @log)
       @pos_audit  = PositionAudit.new(@world, logger: @log, mode: @config.position_enforcement)   # M4 Layer B
+      @pickups    = Pickups.new(@db)   # M4 Layer C one-shot ledger
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
       @zones    = Hash.new { |h, k| h[k] = Set.new }   # map_id => Set(conn); reactor-thread only
@@ -72,6 +73,7 @@ module PEMK
       @log.call("server: monster caps #{@config.monster_caps} (uid registry, flag-not-reject)")
       @log.call("server: world data #{@world.summary} (M4 Layer A, audit-only)")
       @log.call("server: position enforcement = #{@config.position_enforcement} (M4 Layer B)")
+      @log.call("server: pickup enforcement = #{@config.pickup_enforce ? 'on' : 'off'} (M4 Layer C server-mint)")
       @pool.start
       @reactor.start
       @thread = Thread.new { @reactor.run_loop }
@@ -124,6 +126,7 @@ module PEMK
       when :uid_req  then handle_uid_req(conn, env, authed)
       when :mon_party then handle_mon_party(conn, env, authed)
       when :interact_claim then handle_interact_claim(conn, env, authed)
+      when :pickup_req then handle_pickup_req(conn, env, authed)
       when :trade_commit then handle_trade_commit(conn, env, authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
@@ -299,8 +302,62 @@ module PEMK
     # pure telemetry. Compares the client's interaction claim against the read-only
     # world model and logs a mismatch; it enforces nothing (enforcement is a later
     # layer). Identity is the server-trusted account_id, never a client :id.
-    def handle_interact_claim(_conn, env, account_id)
-      @audit.check_interaction(account_id, env)
+    def handle_interact_claim(conn, env, account_id)
+      # Layer C: judge the pickup against the player's SERVER-tracked tile (Layer B),
+      # not the client-claimed px/py — so a remote pickup is caught. Inline + cheap.
+      verdict = @audit.check_interaction(account_id, env, conn.data[:last_pos])
+
+      # Layer C one-shot: a VALID item-ball pickup is recorded per account; a repeat
+      # claim for the same tile is a dupe. The DB write goes on the per-account mailbox
+      # so it never blocks the reactor. (Gifts have no fixed tile — skip them.)
+      return unless verdict == :match && env[:kind] == :item
+
+      map = env[:map]; x = env[:x]; y = env[:y]
+      return unless map.is_a?(Integer) && x.is_a?(Integer) && y.is_a?(Integer)
+
+      item = env[:item]
+      @mailbox.submit(account_id) do
+        if @pickups.record(account_id, map, x, y) == :dup
+          @log.call("audit: account #{account_id} already_taken item=#{item.to_s[0, 32]} at (#{map},#{x},#{y})")
+        end
+      end
+    end
+
+    # Server-minted pickup (M4 Layer C): the client asks permission BEFORE adding an
+    # item ball; we validate and reply :pickup_grant / :pickup_deny. Existence + item
+    # + distance are judged INLINE against the world model and the player's SERVER-
+    # tracked tile (never client px/py); the one-shot is then done ATOMICALLY on the
+    # per-account mailbox (record -> :new grants, :dup denies), so two rapid requests
+    # for one tile can never both grant. Fail-OPEN when no world is exported (an
+    # operator misconfig must not brick every pickup); fail-CLOSED on any real reject.
+    def handle_pickup_req(conn, env, account_id)
+      seq = env[:seq]
+      map = env[:map]; x = env[:x]; y = env[:y]
+
+      verdict = @audit.check_interaction(account_id, env, conn.data[:last_pos])
+
+      if verdict == :unchecked
+        @log.call("pickup: account #{account_id} GRANT (world unexported — fail-open) seq=#{seq.inspect}")
+        return reply(conn, type: :pickup_grant, seq: seq, item: env[:item], map: map, x: x, y: y)
+      end
+      unless verdict == :match
+        return reply(conn, type: :pickup_deny, seq: seq, reason: verdict.to_s)
+      end
+
+      obj  = @world.object_at(map, x, y)
+      item = (obj && obj["item"]) || env[:item]   # server-authoritative item id
+      @mailbox.submit(account_id) do
+        status = @pickups.record(account_id, map, x, y)
+        @reactor.post do
+          next unless @reactor.alive?(conn)
+
+          if status == :new
+            reply(conn, type: :pickup_grant, seq: seq, item: item, map: map, x: x, y: y)
+          else
+            reply(conn, type: :pickup_deny, seq: seq, reason: "already_taken")
+          end
+        end
+      end
     end
 
     # Server-authoritative trade COMMIT (M3.2). The only authoritative trade frame
@@ -387,7 +444,8 @@ module PEMK
       { econ: snap[:balances], econ_seq: snap[:last_seq],
         inv: inv[:bag], inv_seq: inv[:last_seq],
         mon_seq: @monsters.mon_seq(account_id),
-        mon_evict: @monsters.evictions(account_id) }
+        mon_evict: @monsters.evictions(account_id),
+        pickup_enforce: @config.pickup_enforce }   # M4 Layer C: client gates pickups only when on
     end
 
     # Zone-scoped presence: track each player's current map and fan a position

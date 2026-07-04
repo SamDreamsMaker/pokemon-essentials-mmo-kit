@@ -259,7 +259,11 @@ module PEMK
       [2, 1, 0].each do |z|
         tid = data[x, y, z]
         next if tid.nil? || tid == 0
-        next if terrain_ignores_passability?(terrain_tags, tid)
+
+        tt = terrain_of(terrain_tags, tid)
+        next if tt && tt.ignore_passability   # e.g. :Neutral — the tile's passage bits don't apply
+        return 0 if tt && tt.bridge           # a BRIDGE tile is walkable: the engine's bridge logic
+                                              # overrides the impassable water/tile passage below it
 
         p = passages[tid] & 0x0f
         if p == 0x0f
@@ -272,13 +276,6 @@ module PEMK
         end
       end
       nib
-    end
-
-    def terrain_ignores_passability?(terrain_tags, tid)
-      tt = terrain_of(terrain_tags, tid)
-      tt ? tt.ignore_passability : false
-    rescue
-      false
     end
 
     # === spawns / connections / encounters =====================================
@@ -422,6 +419,35 @@ if defined?(MenuHandlers)
     "always_show" => false,
     "effect"      => proc {
       PEMK::WorldExport.run_with_feedback
+      next
+    }
+  })
+
+  # Dev/test helper: reset the self-switches of the event you're FACING, so a taken
+  # item ball reappears — lets you re-test pickups (Layer C server-mint: the re-pickup
+  # gets denied "already_taken"). Also handy for re-running any one-shot event.
+  MenuHandlers.add(:debug_menu, :pemk_reset_facing_event, {
+    "name"        => _INTL("PEMK: Reset facing event (self-switches)"),
+    "parent"      => :main,
+    "description" => _INTL("Turn off self-switches A-D of the event directly in front of the player (re-arm a taken item ball to re-test Layer C)."),
+    "always_show" => false,
+    "effect"      => proc {
+      px = $game_player.x; py = $game_player.y
+      d  = $game_player.direction
+      fx = px + (d == 6 ? 1 : (d == 4 ? -1 : 0))   # tile in front
+      fy = py + (d == 2 ? 1 : (d == 8 ? -1 : 0))
+      hit = []
+      ($game_map.events.each_value do |ev|
+        next unless (ev.x == px && ev.y == py) || (ev.x == fx && ev.y == fy)   # on OR in front
+        %w[A B C D].each { |s| $game_self_switches[[$game_map.map_id, ev.id, s]] = false }
+        hit << ev.id
+      end rescue nil)
+      if hit.empty?
+        pbMessage(_INTL("No event on or in front of you. Stand ON (item balls you walk onto) or FACE the ball, then use this."))
+      else
+        $game_map.need_refresh = true
+        pbMessage(_INTL("Reset event(s) {1}. Step off & back on (or face + press A) to re-trigger.", hit.join(", ")))
+      end
       next
     }
   })
