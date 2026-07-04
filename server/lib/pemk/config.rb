@@ -8,7 +8,7 @@ module PEMK
   class Config
     attr_reader :bind, :port, :database_url, :economy_caps, :badges_max, :inventory_caps,
                 :monster_caps, :world_path, :position_enforcement, :pickup_enforce,
-                :pickup_reset_allowed, :battle_data_path
+                :pickup_reset_allowed, :battle_data_path, :battle_enforce_teams
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -45,6 +45,13 @@ module PEMK
       # item ball infinitely. Advertised to the client (reconcile_block) so the F9 dev
       # tool only offers the reset when the server actually honors it.
       @pickup_reset_allowed = env.fetch("PEMK_ALLOW_PICKUP_RESET", "off").to_s.strip.downcase == "on"
+
+      # M4 Layer D: team/set legality enforcement mode, same off/shadow/on tri-state as
+      # PEMK_POS_ENFORCE. Default off. D1 is detection-only (there is no battle-entry
+      # gate yet), so every mode logs the illegal team; the mode sets the log label and
+      # the future enforce hook. Unknown value -> off (never boot stricter than asked).
+      tmode = env.fetch("PEMK_BATTLE_ENFORCE_TEAMS", "off").to_s.strip.downcase
+      @battle_enforce_teams = %w[off shadow on].include?(tmode) ? tmode.to_sym : :off
 
       caps = YAML.safe_load_file(File.join(root, "config", "economy_caps.yml"))
       @economy_caps = {

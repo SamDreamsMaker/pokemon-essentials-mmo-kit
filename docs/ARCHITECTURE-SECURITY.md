@@ -205,7 +205,8 @@ produced. It is **staged** so the cheap, high-value kills land first with **no
 battle engine**, and the expensive re-simulation lands last, parity-gated.
 
 - **Tier 1 (no engine)** — server-authored outcomes: **D1** team/set legality
-  (over an exported `battle_data.json`, like Layer A's `world.json`), **D2**
+  *(shipped, detection-only)* — over an exported `battle_data.json`, like Layer A's
+  `world.json`; **D2**
   server-minted wild encounters (species/level/shininess/IVs server-rolled, not
   client-claimed), **D3** server-adjudicated catches minting the encounter's own
   identity, **D4** closed-form PvE reward bounds (EXP/money/drops), **D5**

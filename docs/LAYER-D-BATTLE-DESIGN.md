@@ -6,6 +6,13 @@
 > ships first with no engine; the engine (D7–D9) is deferred and parity-gated,
 > and can be abandoned for the closed-form/detection tier without losing the
 > earlier wins. First build step: **D1** (§7).
+>
+> **Progress (2026-07-04): D1 shipped, detection-only.** The battle-data export +
+> server read model (`battle_data.json` / `pemk/battle_data.rb`) and the team/set
+> legality audit (`pemk/team_audit.rb`, client `TeamReport`, `PEMK_BATTLE_ENFORCE_TEAMS`
+> off/shadow/on) are live and logging illegal teams. There is no battle-entry gate
+> yet, so every mode only logs — enforcement waits on the ramp + a real gate. Next:
+> D2 (server-minted encounters).
 
 This document answers the last open question in the anti-cheat ladder: **how does
 the server independently decide what a battle produced — the Pokémon that

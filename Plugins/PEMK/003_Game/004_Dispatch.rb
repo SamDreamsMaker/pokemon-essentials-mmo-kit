@@ -22,6 +22,9 @@ module PEMK
         # M4 Layer C: reply to a blocking :pickup_req or the dev-only :pickups_reset
         # (both keyed by seq, delete-on-read).
         Pickup.on_reply(msg)
+      when :team_ack
+        # M4 Layer D D1: the server's team-legality verdict (detection-only telemetry).
+        TeamReport.on_ack(msg)
       when :econ_ack, :econ_rej
         # Server's canonical economy balance: :econ_ack is the accepted value,
         # :econ_rej the current balance an over-cap/invalid change rolled back to.
