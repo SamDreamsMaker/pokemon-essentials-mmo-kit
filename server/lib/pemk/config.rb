@@ -8,7 +8,7 @@ module PEMK
   class Config
     attr_reader :bind, :port, :database_url, :economy_caps, :badges_max, :inventory_caps,
                 :monster_caps, :world_path, :position_enforcement, :pickup_enforce,
-                :pickup_reset_allowed
+                :pickup_reset_allowed, :battle_data_path
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -19,6 +19,12 @@ module PEMK
       # WorldData model loads. Just a PATH here — a missing file is tolerated at boot
       # (audit no-ops); only a present-but-invalid file is a boot error (in WorldData).
       @world_path   = env.fetch("PEMK_WORLD", File.join(root, "data", "world.json"))
+
+      # M4 Layer D: path to the build-time battle-data export (server/data/battle_data.json)
+      # the BattleData model loads (species/moves/items/types/natures/caps). Same policy as
+      # the world path — absent is tolerated (Layer D no-ops), present-but-invalid is a boot
+      # error (in BattleData).
+      @battle_data_path = env.fetch("PEMK_BATTLE_DATA", File.join(root, "data", "battle_data.json"))
 
       # M4 Layer B enforcement mode: :off (detect+log only), :shadow (also log what a
       # snap-back WOULD do, correcting nothing), :on (actually snap-back). Default

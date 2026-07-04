@@ -45,6 +45,7 @@ module PEMK
       # M4 Layer A: read-only world model + detection-only interaction audit. Both are
       # in-memory and DB-free; a missing export just makes the audit a no-op.
       @world      = WorldData.new(@config.world_path, logger: @log)
+      @battle     = BattleData.new(@config.battle_data_path, logger: @log)   # M4 Layer D read model
       @audit      = Audit.new(@world, logger: @log)
       @pos_audit  = PositionAudit.new(@world, logger: @log, mode: @config.position_enforcement)   # M4 Layer B
       @pickups    = Pickups.new(@db)   # M4 Layer C one-shot ledger
@@ -72,6 +73,7 @@ module PEMK
       @log.call("server: inventory caps #{@config.inventory_caps} (detection-only, flag-not-reject)")
       @log.call("server: monster caps #{@config.monster_caps} (uid registry, flag-not-reject)")
       @log.call("server: world data #{@world.summary} (M4 Layer A, audit-only)")
+      @log.call("server: battle data #{@battle.summary} (M4 Layer D)")
       @log.call("server: position enforcement = #{@config.position_enforcement} (M4 Layer B)")
       @log.call("server: pickup enforcement = #{@config.pickup_enforce ? 'on' : 'off'} (M4 Layer C server-mint)")
       @log.call("server: WARNING pickup reset ALLOWED (PEMK_ALLOW_PICKUP_RESET=on) — DEV ONLY, disable in production") if @config.pickup_reset_allowed
