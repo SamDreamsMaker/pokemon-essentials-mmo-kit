@@ -198,21 +198,37 @@ server-authoritative-bag milestone.
 *Result:* fabricated pickups, remote grabs, and duplicate item balls all fail
 (opt-in). Gift/event/NPC-spam gating remains future work.
 
-### Layer D — Battle authority
+### Layer D — Battle authority — *scoped; see [`LAYER-D-BATTLE-DESIGN.md`](LAYER-D-BATTLE-DESIGN.md)*
 
-The last and largest layer: the server independently determines battle outcomes.
+The last and largest layer: the server independently determines what a battle
+produced. It is **staged** so the cheap, high-value kills land first with **no
+battle engine**, and the expensive re-simulation lands last, parity-gated.
 
-- **Wild encounters** — the server rolls the encounter (from Layer A's tables) so
-  species/level/shininess/IVs are server-decided, not client-claimed.
-- **NPC/trainer battles** — outcomes, EXP and rewards computed or verified
-  server-side.
-- **PvP** — move to **server-side re-simulation** (the server runs the battle from
-  both players' inputs and its own RNG), replacing today's "challenger is
-  authoritative" relay. This is the hard requirement for **ranked PvP** integrity.
+- **Tier 1 (no engine)** — server-authored outcomes: **D1** team/set legality
+  (over an exported `battle_data.json`, like Layer A's `world.json`), **D2**
+  server-minted wild encounters (species/level/shininess/IVs server-rolled, not
+  client-claimed), **D3** server-adjudicated catches minting the encounter's own
+  identity, **D4** closed-form PvE reward bounds (EXP/money/drops), **D5**
+  cross-battle statistical anomaly detection.
+- **Tier 2** — **D6** per-mon EXP/level authority (migrating stats off the opaque
+  party blob).
+- **Tier 3 (deferred, parity-gated)** — the engine: **D7** a cross-engine seeded
+  PRNG + a **headless re-run of Essentials' own battle code on the MRI server**
+  (reused, never reimplemented — the mechanics core has zero Graphics refs and a
+  `Battle::DebugSceneNoVisuals` null scene already exists), validated offline
+  against a parity corpus; **D8** per-turn checkpoint re-sim; **D9**
+  **server-authoritative ranked PvP** + ladder, replacing today's
+  "challenger-authoritative" relay.
 
-*Result:* forced shinies, fake catches, fabricated battle rewards, and PvP cheating
-all fail. This layer is the most work (a second battle engine, or a headless reuse
-of Essentials' own) and is best done last, on top of A–C.
+Enforcement ramps on four independent facets (`PEMK_BATTLE_ENFORCE_{teams,
+encounters,catches,rewards,pvp}`, `off/shadow/on`), advertised via
+`reconcile_block` — same audit-first pattern as B and C.
+
+*Result:* illegal teams, forced shinies, fake catches, fabricated rewards, and PvP
+cheating all fail. **Ranked end-state ratified: reuse the Essentials engine
+headless.** Honest limit: until D8 the server bounds and clamps but doesn't
+re-derive battle context; the version-coupling tax of the reused engine is
+permanent.
 
 ---
 
@@ -223,7 +239,7 @@ of Essentials' own) and is best done last, on top of A–C.
 | **A. World data** *(shipped)* | (foundation) | in-engine map exporter + audit logging | medium |
 | **B. Position** *(shipped, opt-in)* | teleport, no-clip, spawn/warp-anywhere | Layer A + movement checks | medium |
 | **C. Interaction** *(shipped, opt-in — item pickups)* | fake/remote/duplicate pickups | Layers A–B + distance gate + server grant | medium |
-| **D. Battle** | forced encounters, fake catches/rewards, PvP cheats | Layers A–C + server battle engine | large |
+| **D. Battle** *(scoped — staged D1–D9)* | illegal teams, forced encounters/shinies, fake catches/rewards, PvP cheats | Tier 1 (D1–D5) closed-form, no engine → Tier 2 EXP authority → Tier 3 (D7–D9) headless engine reuse + ranked | large |
 
 Recommended order is A → B → C → D, and within it **audit before enforce**: ship
 each check in log-only mode first so real players surface false positives before
