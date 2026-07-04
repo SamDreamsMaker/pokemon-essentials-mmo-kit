@@ -11,8 +11,16 @@
 > server read model (`battle_data.json` / `pemk/battle_data.rb`) and the team/set
 > legality audit (`pemk/team_audit.rb`, client `TeamReport`, `PEMK_BATTLE_ENFORCE_TEAMS`
 > off/shadow/on) are live and logging illegal teams. There is no battle-entry gate
-> yet, so every mode only logs — enforcement waits on the ramp + a real gate. Next:
-> D2 (server-minted encounters).
+> yet, so every mode only logs — enforcement waits on the ramp + a real gate.
+>
+> **Progress (2026-07-05): D2 part 1 shipped (shadow/detection).** The wild-encounter
+> roller (`pemk/encounter_mint.rb`: weighted slot pick + `{pid, iv[6], shiny}` mint via
+> SecureRandom) and encounter-legality audit are live: with
+> `PEMK_BATTLE_ENFORCE_ENCOUNTERS=shadow`, the client reports each locally-rolled
+> encounter (aliasing the one `pbGenerateWildPokemon` seam) and the server logs
+> species-not-in-table / wrong-map suspicion + what it would mint. Gameplay unchanged.
+> Next: D2 part 2 — `on` makes the client REQUEST a server mint and adopt it (client
+> becomes a pure observer of what appears).
 
 This document answers the last open question in the anti-cheat ladder: **how does
 the server independently decide what a battle produced — the Pokémon that

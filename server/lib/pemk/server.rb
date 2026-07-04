@@ -48,6 +48,7 @@ module PEMK
       @battle     = BattleData.new(@config.battle_data_path, logger: @log)   # M4 Layer D read model
       @team_audit = TeamAudit.new(@battle, mode: @config.battle_enforce_teams,
                                   party_max: @config.monster_caps[:party_max], logger: @log)   # M4 Layer D D1
+      @encounter_mint = EncounterMint.new(@world, logger: @log)   # M4 Layer D D2 wild-encounter roller
       @audit      = Audit.new(@world, logger: @log)
       @pos_audit  = PositionAudit.new(@world, logger: @log, mode: @config.position_enforcement)   # M4 Layer B
       @pickups    = Pickups.new(@db)   # M4 Layer C one-shot ledger
@@ -77,6 +78,7 @@ module PEMK
       @log.call("server: world data #{@world.summary} (M4 Layer A, audit-only)")
       @log.call("server: battle data #{@battle.summary} (M4 Layer D)")
       @log.call("server: team legality enforcement = #{@config.battle_enforce_teams} (M4 Layer D D1, detection-only)")
+      @log.call("server: encounter enforcement = #{@config.battle_enforce_encounters} (M4 Layer D D2)")
       @log.call("server: position enforcement = #{@config.position_enforcement} (M4 Layer B)")
       @log.call("server: pickup enforcement = #{@config.pickup_enforce ? 'on' : 'off'} (M4 Layer C server-mint)")
       @log.call("server: WARNING pickup reset ALLOWED (PEMK_ALLOW_PICKUP_RESET=on) — DEV ONLY, disable in production") if @config.pickup_reset_allowed
@@ -135,6 +137,7 @@ module PEMK
       when :pickup_req then handle_pickup_req(conn, env, authed)
       when :pickups_reset then handle_pickups_reset(conn, env, authed)
       when :team_check then handle_team_check(conn, env, authed)
+      when :encounter_report then handle_encounter_report(conn, env, authed)
       when :trade_commit then handle_trade_commit(conn, env, authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
@@ -402,6 +405,33 @@ module PEMK
       reply(conn, type: :team_ack, seq: env[:seq], legal: (verdict[:legal] != false))
     end
 
+    # M4 Layer D D2 (shadow): the client reports the wild encounter it rolled LOCALLY;
+    # the server audits it against the Layer A encounter tables (a species absent from the
+    # table = a fabricated encounter) and logs what it WOULD mint, so the roller can be
+    # validated against real play before the mint is enforced (on). Fire-and-forget — no
+    # reply, no gameplay effect. Cross-checks the reported map against the player's
+    # server-tracked position (Layer B).
+    def handle_encounter_report(conn, env, account_id)
+      map     = env[:map]
+      enctype = env[:enctype].to_s
+      species = env[:species].to_s
+      level   = env[:level]
+      return unless map.is_a?(Integer) && !enctype.empty? && !species.empty?
+
+      legal     = @encounter_mint.legal?(map, enctype, species)   # nil (no table) | true | false
+      pos       = conn.data[:last_pos]
+      wrong_map = pos.is_a?(Array) && pos[0] != map
+      would     = @encounter_mint.roll(map, enctype)
+
+      tag = if legal == false then "SUSPECT species-not-in-table"
+            elsif wrong_map    then "SUSPECT wrong-map(on #{pos[0]})"
+            else "ok"
+            end
+      wm = would ? "#{would['species']}@#{would['level']}#{would['shiny'] ? '/shiny' : ''}" : "-"
+      @log.call("encounter: account #{account_id} #{tag} map #{map} #{enctype} " \
+                "client=#{species}@#{level} server_would=#{wm}")
+    end
+
     # Server-authoritative trade COMMIT (M3.2). The only authoritative trade frame
     # (invite/accept/offer/lock/cancel are pure peer relay via ADDRESSED). Each side
     # commits ONLY after it holds the partner's uid-validated object; the server
@@ -489,7 +519,8 @@ module PEMK
         mon_evict: @monsters.evictions(account_id),
         pickup_enforce: @config.pickup_enforce,     # M4 Layer C: client gates pickups only when on
         pickup_reset_allowed: @config.pickup_reset_allowed,    # dev-only F9 reset offered only when on
-        battle_enforce_teams: @config.battle_enforce_teams.to_s }   # M4 Layer D D1 team-legality mode
+        battle_enforce_teams: @config.battle_enforce_teams.to_s,   # M4 Layer D D1 team-legality mode
+        battle_enforce_encounters: @config.battle_enforce_encounters.to_s }   # M4 Layer D D2 encounter mode
     end
 
     # Zone-scoped presence: track each player's current map and fan a position

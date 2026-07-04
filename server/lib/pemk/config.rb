@@ -8,7 +8,8 @@ module PEMK
   class Config
     attr_reader :bind, :port, :database_url, :economy_caps, :badges_max, :inventory_caps,
                 :monster_caps, :world_path, :position_enforcement, :pickup_enforce,
-                :pickup_reset_allowed, :battle_data_path, :battle_enforce_teams
+                :pickup_reset_allowed, :battle_data_path, :battle_enforce_teams,
+                :battle_enforce_encounters
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -52,6 +53,13 @@ module PEMK
       # the future enforce hook. Unknown value -> off (never boot stricter than asked).
       tmode = env.fetch("PEMK_BATTLE_ENFORCE_TEAMS", "off").to_s.strip.downcase
       @battle_enforce_teams = %w[off shadow on].include?(tmode) ? tmode.to_sym : :off
+
+      # M4 Layer D D2: server-authoritative wild encounters, same off/shadow/on tri-state.
+      # off = local (no traffic); shadow = client reports its local encounter, server audits
+      # it vs the tables + logs what it would mint; on = client requests the mint and adopts
+      # it (server owns species/level/shiny/IVs). Default off. Unknown -> off.
+      emode = env.fetch("PEMK_BATTLE_ENFORCE_ENCOUNTERS", "off").to_s.strip.downcase
+      @battle_enforce_encounters = %w[off shadow on].include?(emode) ? emode.to_sym : :off
 
       caps = YAML.safe_load_file(File.join(root, "config", "economy_caps.yml"))
       @economy_caps = {
