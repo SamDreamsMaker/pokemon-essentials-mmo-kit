@@ -73,6 +73,7 @@ module PEMK
       @log.call("server: monster caps #{@config.monster_caps} (uid registry, flag-not-reject)")
       @log.call("server: world data #{@world.summary} (M4 Layer A, audit-only)")
       @log.call("server: position enforcement = #{@config.position_enforcement} (M4 Layer B)")
+      @log.call("server: pickup enforcement = #{@config.pickup_enforce ? 'on' : 'off'} (M4 Layer C server-mint)")
       @pool.start
       @reactor.start
       @thread = Thread.new { @reactor.run_loop }

@@ -87,8 +87,15 @@ end
 unless defined?(pemk_orig_pbItemBall)
   alias pemk_orig_pbItemBall pbItemBall
   def pbItemBall(item, quantity = 1)
-    got = pemk_orig_pbItemBall(item, quantity)
-    (PEMK::InteractAudit.on_item_pickup(item, quantity) if got) rescue nil
-    got
+    # M4 Layer C: when the server enforces pickups, ASK before taking (server-mint).
+    # Otherwise (offline / solo / pre-login / flag-off) keep the local pickup and the
+    # detection-only claim. Exactly one of {grant request, claim} fires per pickup.
+    if (PEMK::Pickup.enforce? rescue false)
+      PEMK::Pickup.gated_pickup(item, quantity) { |i, q| pemk_orig_pbItemBall(i, q) }
+    else
+      got = pemk_orig_pbItemBall(item, quantity)
+      (PEMK::InteractAudit.on_item_pickup(item, quantity) if got) rescue nil
+      got
+    end
   end
 end

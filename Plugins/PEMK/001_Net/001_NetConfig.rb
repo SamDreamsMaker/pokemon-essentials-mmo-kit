@@ -50,6 +50,11 @@ module PEMK
     # Seconds to wait for the server's login response before proceeding offline.
     LOGIN_TIMEOUT = 15.0
 
+    # M4 Layer C: seconds the client blocks for a server pickup grant before giving
+    # up (leaves the item ball, retries later). Short — a normal grant is a few frames
+    # on LAN; a laggy link tops out here rather than hanging the pickup.
+    PICKUP_GRANT_TIMEOUT = 2.5
+
     # Wire framing: a big-endian uint32 length prefix precedes each payload.
     # Must stay in sync with the server. (Validated in Phase 0: sockets + this
     # framing round-trip correctly under mkxp-z / MRI 3.1.3.)
