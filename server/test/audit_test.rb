@@ -42,6 +42,44 @@ class AuditTest < Minitest::Test
     assert_empty @logs, "a legitimate pickup must not log"
   end
 
+  # --- M4 Layer C: interaction distance (server-tracked position) --------------
+
+  def test_pickup_while_standing_on_the_item_is_match
+    v = audit(world_with_potion).check_interaction(42, claim(map: 5, x: 12, y: 8, item: :POTION), [5, 12, 8])
+    assert_equal :match, v
+    assert_empty @logs
+  end
+
+  def test_pickup_adjacent_to_the_player_is_match
+    v = audit(world_with_potion).check_interaction(42, claim(map: 5, x: 12, y: 8, item: :POTION), [5, 12, 7])
+    assert_equal :match, v
+    assert_empty @logs
+  end
+
+  def test_pickup_far_from_the_player_is_too_far
+    v = audit(world_with_potion).check_interaction(42, claim(map: 5, x: 12, y: 8, item: :POTION), [5, 1, 1])
+    assert_equal :too_far, v
+    assert(@logs.any? { |m| m.include?("too_far") && m.include?("server_pos=(5,1,1)") })
+  end
+
+  def test_pickup_on_a_different_map_than_the_player_is_too_far
+    v = audit(world_with_potion).check_interaction(42, claim(map: 5, x: 12, y: 8, item: :POTION), [9, 12, 8])
+    assert_equal :too_far, v
+  end
+
+  def test_distance_check_skipped_without_server_position
+    # No server position (nil) -> distance not judged -> falls back to the L-A verdict.
+    v = audit(world_with_potion).check_interaction(42, claim(map: 5, x: 12, y: 8, item: :POTION), nil)
+    assert_equal :match, v
+    assert_empty @logs
+  end
+
+  def test_wrong_item_takes_priority_over_distance
+    # A non-matching item is a mismatch regardless of reach (distance only gates a match).
+    v = audit(world_with_potion).check_interaction(42, claim(map: 5, x: 12, y: 8, item: :MASTER_BALL), [5, 1, 1])
+    assert_equal :item_mismatch, v
+  end
+
   def test_wrong_item_is_a_logged_mismatch
     v = audit(world_with_potion).check_interaction(42, claim(map: 5, x: 12, y: 8, item: :MASTER_BALL))
     assert_equal :item_mismatch, v

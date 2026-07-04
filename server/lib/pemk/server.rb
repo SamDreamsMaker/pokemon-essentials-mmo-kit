@@ -299,8 +299,10 @@ module PEMK
     # pure telemetry. Compares the client's interaction claim against the read-only
     # world model and logs a mismatch; it enforces nothing (enforcement is a later
     # layer). Identity is the server-trusted account_id, never a client :id.
-    def handle_interact_claim(_conn, env, account_id)
-      @audit.check_interaction(account_id, env)
+    def handle_interact_claim(conn, env, account_id)
+      # Layer C: judge the pickup against the player's SERVER-tracked tile (Layer B),
+      # not the client-claimed px/py — so a remote pickup is caught.
+      @audit.check_interaction(account_id, env, conn.data[:last_pos])
     end
 
     # Server-authoritative trade COMMIT (M3.2). The only authoritative trade frame
