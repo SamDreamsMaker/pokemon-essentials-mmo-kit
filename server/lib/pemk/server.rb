@@ -42,6 +42,11 @@ module PEMK
       @inventory  = Inventory.new(@db, @config.inventory_caps, logger: @log)
       @monsters   = Monsters.new(@db, @config.monster_caps, logger: @log)
       @trades     = Trades.new(@db)
+      # M4 Layer A: read-only world model + detection-only interaction audit. Both are
+      # in-memory and DB-free; a missing export just makes the audit a no-op.
+      @world      = WorldData.new(@config.world_path, logger: @log)
+      @audit      = Audit.new(@world, logger: @log)
+      @pos_audit  = PositionAudit.new(@world, logger: @log, mode: @config.position_enforcement)   # M4 Layer B
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
       @zones    = Hash.new { |h, k| h[k] = Set.new }   # map_id => Set(conn); reactor-thread only
@@ -65,6 +70,8 @@ module PEMK
       @log.call("server: economy caps #{@config.economy_caps}, badges<#{@config.badges_max}")
       @log.call("server: inventory caps #{@config.inventory_caps} (detection-only, flag-not-reject)")
       @log.call("server: monster caps #{@config.monster_caps} (uid registry, flag-not-reject)")
+      @log.call("server: world data #{@world.summary} (M4 Layer A, audit-only)")
+      @log.call("server: position enforcement = #{@config.position_enforcement} (M4 Layer B)")
       @pool.start
       @reactor.start
       @thread = Thread.new { @reactor.run_loop }
@@ -116,6 +123,7 @@ module PEMK
       when :inv      then handle_inv(conn, env, authed)
       when :uid_req  then handle_uid_req(conn, env, authed)
       when :mon_party then handle_mon_party(conn, env, authed)
+      when :interact_claim then handle_interact_claim(conn, env, authed)
       when :trade_commit then handle_trade_commit(conn, env, authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
@@ -279,6 +287,15 @@ module PEMK
       end
     end
 
+    # Detection-only interaction audit (M4 Layer A). Runs INLINE on the reactor
+    # thread like handle_presence — no mailbox, no DB, and crucially NO reply: it is
+    # pure telemetry. Compares the client's interaction claim against the read-only
+    # world model and logs a mismatch; it enforces nothing (enforcement is a later
+    # layer). Identity is the server-trusted account_id, never a client :id.
+    def handle_interact_claim(_conn, env, account_id)
+      @audit.check_interaction(account_id, env)
+    end
+
     # Server-authoritative trade COMMIT (M3.2). The only authoritative trade frame
     # (invite/accept/offer/lock/cancel are pure peer relay via ADDRESSED). Each side
     # commits ONLY after it holds the partner's uid-validated object; the server
@@ -381,6 +398,15 @@ module PEMK
       end
       @zones[map].add(conn)
       conn.data[:map_id] = map
+
+      # M4 Layer B position audit: check this tile against the world model + log. In
+      # enforcement mode :on it may flag a snap-back — the audit stashes the last-good
+      # tile in conn.data[:correct_to]; send it as a :pos_correct so the client returns
+      # there. Inline + cheap (hash/string reads); no reply in :off/:shadow.
+      @pos_audit.check(account_id, env, conn.data)
+      if (tgt = conn.data.delete(:correct_to))
+        reply(conn, type: :pos_correct, map: tgt[0], x: tgt[1], y: tgt[2])
+      end
 
       broadcast_zone(map, conn, Wire.encode_split(env.merge(id: account_id)))
     end

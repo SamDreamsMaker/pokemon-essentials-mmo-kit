@@ -1,0 +1,3271 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-07-04T00:17:42",
+  "maps": {
+    "1": {
+      "name": "Intro",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 0, "src_y": 0, "dest_map": 3, "dest_x": 25, "dest_y": 6, "dir": 2, "event_id": 1},
+        {"src_x": 0, "src_y": 14, "dest_map": 3, "dest_x": 25, "dest_y": 6, "dir": 2, "event_id": 2}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "2": {
+      "name": "Lappet Town",
+      "width": 32,
+      "height": 21,
+      "objects": [],
+      "warps": [
+        {"src_x": 8, "src_y": 7, "dest_map": 3, "dest_x": 3, "dest_y": 8, "dir": 8, "event_id": 1},
+        {"src_x": 18, "src_y": 13, "dest_map": 4, "dest_x": 6, "dest_y": 12, "dir": 8, "event_id": 2},
+        {"src_x": 17, "src_y": 7, "dest_map": 8, "dest_x": 3, "dest_y": 8, "dir": 8, "event_id": 4}
+      ],
+      "passability": [
+        "ffffffffffffff00ffffffffffffffff",
+        "ffffffffffffff00ffffffffffffffff",
+        "ffff00000000000000000000ffffffff",
+        "ffff00000000000000000000ffffffff",
+        "ffff000fffff0000fffff000ffffffff",
+        "ffff000fffff0000fffff000ffffffff",
+        "ffff000fffff0000fffff000ffffffff",
+        "ffff00ff0fff000ff0fff000ffffffff",
+        "000000000000000000000000ffffffff",
+        "000000000000000000000000ffffffff",
+        "000000000000000fffffff00ffffffff",
+        "0000000fffff000fffffff00ffffffff",
+        "ffff00000000000fffffff00ffffffff",
+        "ffff00000000000fff0fff00ffffffff",
+        "ffff00000000000000000000ffffffff",
+        "ffff00000000000000000000ffffffff",
+        "ffff00000000000ffffff000ffffffff",
+        "ffff00000000000000000000ffffffff",
+        "ffff00000fff000000000000ffffffff",
+        "ffff00000ffff00000000000ffffffff",
+        "fffffffffffff0000fffffffffffffff"
+      ],
+      "encounters": {
+        "0": {
+          "Water": {
+            "step_chance": 2,
+            "slots": [
+              [60, "TENTACOOL", 14, 19],
+              [30, "MANTYKE", 15, 16],
+              [10, "REMORAID", 14, 16]
+            ]
+          },
+          "OldRod": {
+            "step_chance": 0,
+            "slots": [
+              [100, "MAGIKARP", 16, 19]
+            ]
+          },
+          "GoodRod": {
+            "step_chance": 0,
+            "slots": [
+              [60, "BARBOACH", 17, 18],
+              [20, "KRABBY", 15, 16],
+              [20, "SHELLDER", 16, 19]
+            ]
+          },
+          "SuperRod": {
+            "step_chance": 0,
+            "slots": [
+              [40, "CHINCHOU", 17, 19],
+              [40, "QWILFISH", 16, 19],
+              [15, "CORSOLA", 15, 18],
+              [5, "STARYU", 15, 17]
+            ]
+          }
+        }
+      }
+    },
+    "3": {
+      "name": "Player's house",
+      "width": 31,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 2, "src_y": 3, "dest_map": 13, "dest_x": 9, "dest_y": 13, "dir": 8, "event_id": 11},
+        {"src_x": 2, "src_y": 3, "dest_map": 31, "dest_x": 10, "dest_y": 18, "dir": 8, "event_id": 11},
+        {"src_x": 2, "src_y": 3, "dest_map": 47, "dest_x": 16, "dest_y": 21, "dir": 2, "event_id": 11},
+        {"src_x": 2, "src_y": 3, "dest_map": 21, "dest_x": 16, "dest_y": 26, "dir": 2, "event_id": 11},
+        {"src_x": 2, "src_y": 3, "dest_map": 69, "dest_x": 28, "dest_y": 12, "dir": 2, "event_id": 11},
+        {"src_x": 2, "src_y": 3, "dest_map": 71, "dest_x": 8, "dest_y": 3, "dir": 2, "event_id": 11},
+        {"src_x": 2, "src_y": 3, "dest_map": 46, "dest_x": 11, "dest_y": 6, "dir": 4, "event_id": 11},
+        {"src_x": 3, "src_y": 9, "dest_map": 2, "dest_x": 8, "dest_y": 7, "dir": 0, "event_id": 1},
+        {"src_x": 10, "src_y": 2, "dest_map": 3, "dest_x": 29, "dest_y": 2, "dir": 0, "event_id": 2},
+        {"src_x": 28, "src_y": 2, "dest_map": 3, "dest_x": 9, "dest_y": 2, "dir": 0, "event_id": 3},
+        {"src_x": 1, "src_y": 3, "dest_map": 9, "dest_x": 7, "dest_y": 8, "dir": 8, "event_id": 10},
+        {"src_x": 1, "src_y": 3, "dest_map": 25, "dest_x": 4, "dest_y": 7, "dir": 8, "event_id": 10},
+        {"src_x": 1, "src_y": 3, "dest_map": 10, "dest_x": 6, "dest_y": 14, "dir": 8, "event_id": 10},
+        {"src_x": 1, "src_y": 3, "dest_map": 27, "dest_x": 4, "dest_y": 7, "dir": 8, "event_id": 10},
+        {"src_x": 1, "src_y": 3, "dest_map": 49, "dest_x": 12, "dest_y": 14, "dir": 8, "event_id": 10},
+        {"src_x": 1, "src_y": 3, "dest_map": 67, "dest_x": 4, "dest_y": 7, "dir": 8, "event_id": 10},
+        {"src_x": 1, "src_y": 3, "dest_map": 29, "dest_x": 1, "dest_y": 5, "dir": 6, "event_id": 10},
+        {"src_x": 1, "src_y": 3, "dest_map": 52, "dest_x": 18, "dest_y": 16, "dir": 2, "event_id": 10}
+      ],
+      "passability": [
+        "fffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffff",
+        "0000000000ffffffffff0000000ff00",
+        "0000000000ffffffffff0000000ff00",
+        "00000ff00000ffffffff00000f00000",
+        "00000ff00000ffffffff0f000f00000",
+        "000000000000ffffffff0f000000000",
+        "f0000000000fffffffff00000000000",
+        "000000000000ffffffff00000000000",
+        "fffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffff"
+      ],
+      "heal": [
+        2,
+        8,
+        8
+      ]
+    },
+    "4": {
+      "name": "Pokémon Lab",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 6, "src_y": 13, "dest_map": 2, "dest_x": 18, "dest_y": 13, "dir": 0, "event_id": 7}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "0000000000000fffffff",
+        "f000000000000fffffff",
+        "fff00000fff00fffffff",
+        "0ff0000000000fffffff",
+        "0000000000000fffffff",
+        "0000000000000fffffff",
+        "fffff000ffffffffffff",
+        "0000000000000fffffff",
+        "0000000000000fffffff",
+        "0000000000000fffffff",
+        "f00000000000ffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "5": {
+      "name": "Route 1",
+      "width": 36,
+      "height": 24,
+      "objects": [
+        {"kind": "item", "item": "GREATBALL", "x": 26, "y": 14, "event_id": 11}
+      ],
+      "warps": [
+        {"src_x": 11, "src_y": 6, "dest_map": 6, "dest_x": 6, "dest_y": 7, "dir": 8, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffff0000ffffffffffffff",
+        "ffffffffffffffffff0000ffffffffffffff",
+        "ffffffffffffffffff0000ffffffffffffff",
+        "ffffffffffffffffff0000ffffffffffffff",
+        "ffffffffffffffff000000000000ffffffff",
+        "ffffffffffffffff000000000000ffffffff",
+        "ffffffff00f0ffff000000000000ffffffff",
+        "ffffffff0000000f000000000000ffffffff",
+        "ffffffff0000000f000000000000ffffffff",
+        "fffffffffff00fff000000000000ffffffff",
+        "ffffffffff000000000ffff777ffffffffff",
+        "ffffffffff000000000ffff000ffffffffff",
+        "ffffffffff000000000000000000ffffffff",
+        "ffffffffff000000000000000000ffffffff",
+        "fffffffffff000fff00000000000ffffffff",
+        "fffffffff0000000f00000000000ffffffff",
+        "fffffffffff000fff00000000000ffffffff",
+        "fffffffff0000000f00000000000ffffffff",
+        "fffffffffff000fff00000000000ffffffff",
+        "fffffffff0000000f00000000000ffffffff",
+        "ffffffffffffffffff00ffffffffffffffff",
+        "ffffffff000000000f00f0000000ffffffff",
+        "ffffffffffffffffff00ffffffffffffffff",
+        "ffffffffffffffffff00ffffffffffffffff"
+      ],
+      "ledges": [
+        [23, 10],
+        [24, 10],
+        [25, 10]
+      ],
+      "encounters": {
+        "0": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [40, "PIDGEY", 11, 14],
+              [40, "RATTATA", 11, 14],
+              [9, "PIDGEY", 11, 13],
+              [9, "RATTATA", 11, 13],
+              [1, "PIDGEY", 14, 14],
+              [1, "RATTATA", 14, 14]
+            ]
+          },
+          "LandNight": {
+            "step_chance": 21,
+            "slots": [
+              [39, "RATTATA", 10, 14],
+              [30, "HOOTHOOT", 10, 13],
+              [20, "SPINARAK", 8, 12],
+              [9, "HOOTHOOT", 10, 14],
+              [1, "HOOTHOOT", 14, 14],
+              [1, "RATTATA", 15, 15]
+            ]
+          },
+          "PokeRadar": {
+            "step_chance": 20,
+            "slots": [
+              [100, "STARLY", 12, 15]
+            ]
+          }
+        },
+        "1": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [40, "PIDGEY", 15, 18],
+              [40, "RATTATA", 14, 18],
+              [10, "SENTRET", 13, 17],
+              [5, "PIDGEY", 14, 16],
+              [5, "RATTATA", 13, 16]
+            ]
+          },
+          "LandNight": {
+            "step_chance": 21,
+            "slots": [
+              [40, "RATTATA", 14, 18],
+              [30, "HOOTHOOT", 14, 17],
+              [20, "SPINARAK", 12, 16],
+              [10, "CLEFAIRY", 11, 15]
+            ]
+          }
+        }
+      }
+    },
+    "6": {
+      "name": "Kurt's house",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 6, "src_y": 8, "dest_map": 5, "dest_x": 11, "dest_y": 6, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "000000f00fffffffffff",
+        "000000000fffffffffff",
+        "000ff0000fffffffffff",
+        "000ff00000ffffffffff",
+        "0000000000ffffffffff",
+        "f00000000fffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "7": {
+      "name": "Cedolan City",
+      "width": 60,
+      "height": 43,
+      "objects": [],
+      "warps": [
+        {"src_x": 39, "src_y": 19, "dest_map": 13, "dest_x": 4, "dest_y": 29, "dir": 8, "event_id": 12},
+        {"src_x": 11, "src_y": 13, "dest_map": 14, "dest_x": 2, "dest_y": 14, "dir": 8, "event_id": 1},
+        {"src_x": 47, "src_y": 10, "dest_map": 9, "dest_x": 7, "dest_y": 8, "dir": 8, "event_id": 7},
+        {"src_x": 15, "src_y": 13, "dest_map": 14, "dest_x": 10, "dest_y": 14, "dir": 8, "event_id": 2},
+        {"src_x": 34, "src_y": 20, "dest_map": 13, "dest_x": 9, "dest_y": 13, "dir": 8, "event_id": 8},
+        {"src_x": 11, "src_y": 29, "dest_map": 10, "dest_x": 6, "dest_y": 14, "dir": 8, "event_id": 3},
+        {"src_x": 35, "src_y": 28, "dest_map": 11, "dest_x": 7, "dest_y": 9, "dir": 8, "event_id": 9},
+        {"src_x": 22, "src_y": 28, "dest_map": 12, "dest_x": 6, "dest_y": 9, "dir": 8, "event_id": 4}
+      ],
+      "passability": [
+        "ffffffffffffffffffffffffffffffffffffffff0000ffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffff0000ffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffff0000ffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffff0000ffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffff0000ffffffffffffffff",
+        "fffffffffffffffffffffffff0ffffff000000000000ffffffffffffffff",
+        "fffffffffffffffffffffffff0ffffff000000000000ffffffffffffffff",
+        "fffffffffffffffffffffffff0fffffffffffff000000fffffffffffffff",
+        "fffffffffffffffffffffffff0fffffffffffff000000fffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffff000000fffffffffffffff",
+        "fffffffffffffffffffffffff0fffffffffffff000000ff0ffffffffffff",
+        "ffff00000fffffffff000000000000000000000000000000000000000000",
+        "ffff00000fffffffff000000000000000000000000000000000000000000",
+        "ffff00000ff0fff0ff000000000000000000000000000000000000000000",
+        "ffff00000000000000000000000000000000000000000000000000000000",
+        "ffff000000000000000000000000000000000000000000000000ffffffff",
+        "ffff0000000000000000000ffffffffffffffffff00000000000ffffffff",
+        "ffff0000000000000000000ffffffffffffffffff000ffffffffffffffff",
+        "ffff00000000fff00000000f000000fffffffffff000ffffffffffffffff",
+        "ffff00000000fff00000000f000000fffffffff0f000ffffffffff00ffff",
+        "ffff0000000000000000000fffffffffff0ffff0f000ffffffffff00ffff",
+        "00000000000000000000000ffffffff0000000000000000000000000ffff",
+        "00000000000000000000000ffffffffff000fffff000ffffffffff00ffff",
+        "0000000000000000000000000000000000000000000000000000ff00ffff",
+        "ffffffff00000000000000000000000000000000000000000000ff00ffff",
+        "ffffffff000000000000fffff000000000000000ffffffffffffff00ffff",
+        "fffffffffffffff00000fffff0000000fffffff0ffffffffffffff00ffff",
+        "fffffffffffffff00000fffff0000000fffffff0ffffffffffffff00ffff",
+        "fffffffffffffff00000ff0ff0000000fff0fff0ffffffffffffff00ffff",
+        "ffff0000fff0fff00000f00000000000000000000000000000000000ffff",
+        "ffff000000000f000000000000000000000000000000000000000000ffff",
+        "ffff0000000000000000000000000000000000000000000000000000ffff",
+        "ffff7777700000000000000000000000000000000000000000000000ffff",
+        "ffff000000000000000000ffffffffffffffffff0ffffffffff00000ffff",
+        "ffff000000000000000000ffffffffffffffffff0ffffffffff00000ffff",
+        "ffff00000000000000000000000000000000000000ff0000000000ffffff",
+        "ffff00000000000000000000000000000000000000ffffffffffffffffff",
+        "ffffffffffffffff0000ffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffff0000ffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffff0000ffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffff0000ffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffff0000ffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffff0000ffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "ledges": [
+        [4, 32],
+        [5, 32],
+        [6, 32],
+        [7, 32],
+        [8, 32]
+      ]
+    },
+    "8": {
+      "name": "Daisy's house",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 3, "src_y": 9, "dest_map": 2, "dest_x": 17, "dest_y": 7, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "0000000000000fffffff",
+        "0000000000000fffffff",
+        "000000ff00000fffffff",
+        "000000ff00000fffffff",
+        "0000000000000fffffff",
+        "0000000000000fffffff",
+        "f00000000000ffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "9": {
+      "name": "Cedolan City Poké Center",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 7, "src_y": 9, "dest_map": 7, "dest_x": 47, "dest_y": 10, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ff00fff00ff000ffffff",
+        "0000fffffff0000fffff",
+        "000000000000000fffff",
+        "000000000000000fffff",
+        "00ff0000000ff00fffff",
+        "00ff0000000ff00fffff",
+        "000000000000000fffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ],
+      "heal": [
+        8,
+        17,
+        11
+      ]
+    },
+    "10": {
+      "name": "Cedolan Gym",
+      "width": 20,
+      "height": 17,
+      "objects": [
+        {"kind": "gift", "item": "TM80", "x": 6, "y": 5, "event_id": 3}
+      ],
+      "warps": [
+        {"src_x": 6, "src_y": 15, "dest_map": 7, "dest_x": 11, "dest_y": 29, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "f0000f0f0000ffffffff",
+        "f00000000000ffffffff",
+        "f000ff0ff000ffffffff",
+        "f00000000000ffffffff",
+        "f00f0f0f0f00ffffffff",
+        "ff000000000fffffffff",
+        "f000f000f000ffffffff",
+        "ff000000000fffffffff",
+        "f00000000000ffffffff",
+        "f000f000f000ffffffff",
+        "f00000000000ffffffff",
+        "f00000000000ffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "11": {
+      "name": "Pokémon Institute",
+      "width": 20,
+      "height": 15,
+      "objects": [
+        {"kind": "item", "item": "OLDAMBER", "x": 11, "y": 6, "event_id": 5}
+      ],
+      "warps": [
+        {"src_x": 7, "src_y": 10, "dest_map": 7, "dest_x": 35, "dest_y": 28, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "000000000000ff0fffff",
+        "f000000000000fffffff",
+        "f0fff00ff000000fffff",
+        "0000000ff00fff0fffff",
+        "0000000ff00fff0fffff",
+        "00fff000000fff0fffff",
+        "000000000000000fffff",
+        "000000000000000fffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "12": {
+      "name": "Cedolan City Condo",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 6, "src_y": 10, "dest_map": 7, "dest_x": 22, "dest_y": 28, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "f0000ffff000ffffffff",
+        "00000fff00000fffffff",
+        "0fff0fff0fff0fffffff",
+        "0fff0fff0fff0fffffff",
+        "0fff0fff0fff0fffffff",
+        "0000000000000fffffff",
+        "0000000000000fffffff",
+        "f00000000000ffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "13": {
+      "name": "Game Corner",
+      "width": 20,
+      "height": 32,
+      "objects": [
+        {"kind": "gift", "item": "MASTERBALL", "x": 9, "y": 2, "event_id": 17},
+        {"kind": "gift", "item": "COINCASE", "x": 3, "y": 2, "event_id": 21}
+      ],
+      "warps": [
+        {"src_x": 4, "src_y": 30, "dest_map": 7, "dest_x": 39, "dest_y": 19, "dir": 0, "event_id": 31},
+        {"src_x": 9, "src_y": 14, "dest_map": 7, "dest_x": 34, "dest_y": 20, "dir": 0, "event_id": 20}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ff0000f0f0f0f000ffff",
+        "0ffffff0fff0fffff0ff",
+        "000000000000000000ff",
+        "00000000000000000fff",
+        "f0000ff0000000000fff",
+        "f0000ff0000000000fff",
+        "f0000ff000fff0000fff",
+        "f0000ff000fff0000fff",
+        "f0000ff000fff0000fff",
+        "000000000000000000ff",
+        "000000000000000000ff",
+        "f0000000000000000fff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "f0000000ffffffffffff",
+        "ffffffffffffffffffff",
+        "000000000fffffffffff",
+        "000000000fffffffffff",
+        "ff00000fffffffffffff",
+        "000000000fffffffffff",
+        "000000000fffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "14": {
+      "name": "Cedolan Dept. 1F",
+      "width": 20,
+      "height": 17,
+      "objects": [],
+      "warps": [
+        {"src_x": 2, "src_y": 15, "dest_map": 7, "dest_x": 11, "dest_y": 13, "dir": 0, "event_id": 1},
+        {"src_x": 10, "src_y": 15, "dest_map": 7, "dest_x": 15, "dest_y": 13, "dir": 0, "event_id": 2},
+        {"src_x": 6, "src_y": 1, "dest_map": 20, "dest_x": 2, "dest_y": 5, "dir": 8, "event_id": 3},
+        {"src_x": 3, "src_y": 2, "dest_map": 15, "dest_x": 3, "dest_y": 2, "dir": 6, "event_id": 4}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffff0fffffffffffff",
+        "ffff000000ffffffffff",
+        "ffff000000ffffffffff",
+        "ffff000000ffffffffff",
+        "00000000000fffffffff",
+        "0000000000000fffffff",
+        "f000000000000fffffff",
+        "000fffffff000fffffff",
+        "f00f00000f00ffffffff",
+        "f00f00000f00ffffffff",
+        "000fffffff000fffffff",
+        "0000000000000fffffff",
+        "f00000000000ffffffff",
+        "0000000000000fffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "15": {
+      "name": "Cedolan Dept. 2F",
+      "width": 20,
+      "height": 17,
+      "objects": [],
+      "warps": [
+        {"src_x": 6, "src_y": 1, "dest_map": 20, "dest_x": 2, "dest_y": 5, "dir": 8, "event_id": 1},
+        {"src_x": 2, "src_y": 2, "dest_map": 14, "dest_x": 4, "dest_y": 2, "dir": 6, "event_id": 2},
+        {"src_x": 10, "src_y": 2, "dest_map": 16, "dest_x": 9, "dest_y": 2, "dir": 4, "event_id": 3}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffff0fffffffffffff",
+        "fff0000000ffffffffff",
+        "fff0000000ffffffffff",
+        "fff0000000ffffffffff",
+        "00f0000000ffffffffff",
+        "00f0000000000fffffff",
+        "00f0000000000fffffff",
+        "00f0000ff0ff0fffffff",
+        "fff0000ff0ff0fffffff",
+        "0000000ff0ff0fffffff",
+        "0fff000000000fffffff",
+        "0000000ff0ff0fffffff",
+        "0fff000ff0ff0fffffff",
+        "0000000ff0ff0fffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "16": {
+      "name": "Cedolan Dept. 3F",
+      "width": 20,
+      "height": 17,
+      "objects": [],
+      "warps": [
+        {"src_x": 6, "src_y": 1, "dest_map": 20, "dest_x": 2, "dest_y": 5, "dir": 8, "event_id": 1},
+        {"src_x": 10, "src_y": 2, "dest_map": 15, "dest_x": 9, "dest_y": 2, "dir": 4, "event_id": 2},
+        {"src_x": 2, "src_y": 2, "dest_map": 17, "dest_x": 3, "dest_y": 2, "dir": 6, "event_id": 3}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffff0fffffffffffff",
+        "fff0000000ffffffffff",
+        "fff0000000ffffffffff",
+        "fff0000000ffffffffff",
+        "00000000000fffffffff",
+        "0000000000000fffffff",
+        "0000000000000fffffff",
+        "fffffff0ffffffffffff",
+        "00000000f000ffffffff",
+        "00000000f000ffffffff",
+        "fffffff0ffffffffffff",
+        "0000000000000fffffff",
+        "0000000000000fffffff",
+        "f00000000000ffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "17": {
+      "name": "Cedolan Dept. 4F",
+      "width": 20,
+      "height": 17,
+      "objects": [],
+      "warps": [
+        {"src_x": 6, "src_y": 1, "dest_map": 20, "dest_x": 2, "dest_y": 5, "dir": 8, "event_id": 1},
+        {"src_x": 2, "src_y": 2, "dest_map": 16, "dest_x": 3, "dest_y": 2, "dir": 6, "event_id": 2},
+        {"src_x": 10, "src_y": 2, "dest_map": 18, "dest_x": 9, "dest_y": 2, "dir": 4, "event_id": 3}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffff0fffffffffffff",
+        "fff0000000ffffffffff",
+        "fff0000000ffffffffff",
+        "fff0000000ffffffffff",
+        "0000000000ffffffffff",
+        "0000000000000fffffff",
+        "0ff00fff0fff0fffffff",
+        "0ff0000000000fffffff",
+        "0ff00fff0fff0fffffff",
+        "0000000000000fffffff",
+        "0000000000000fffffff",
+        "ffffffff0000ffffffff",
+        "0000000f0000ffffffff",
+        "0000000f0ff00fffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "18": {
+      "name": "Cedolan Dept. 5F",
+      "width": 20,
+      "height": 17,
+      "objects": [],
+      "warps": [
+        {"src_x": 6, "src_y": 1, "dest_map": 20, "dest_x": 2, "dest_y": 5, "dir": 8, "event_id": 1},
+        {"src_x": 10, "src_y": 2, "dest_map": 17, "dest_x": 9, "dest_y": 2, "dir": 4, "event_id": 2},
+        {"src_x": 2, "src_y": 2, "dest_map": 19, "dest_x": 22, "dest_y": 10, "dir": 0, "event_id": 3}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffff0fffffffffffff",
+        "fff0000000ffffffffff",
+        "fff0000000ffffffffff",
+        "fff0000000ffffffffff",
+        "00f0000000ffffffffff",
+        "00f0000000000fffffff",
+        "00f0000000000fffffff",
+        "fff0000ff0ff0fffffff",
+        "0000000ff0ff0fffffff",
+        "0000000000000fffffff",
+        "0ff0ff0000000fffffff",
+        "0ff0ff0ff0ff0fffffff",
+        "0ff0ff0ff0ff0fffffff",
+        "f00000000000ffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "19": {
+      "name": "Cedolan Dept. Rooftop",
+      "width": 32,
+      "height": 20,
+      "objects": [],
+      "warps": [
+        {"src_x": 23, "src_y": 10, "dest_map": 18, "dest_x": 3, "dest_y": 2, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "00000000000000000000000000000000",
+        "00000000000000000000000000000000",
+        "00000000000000000000000000000000",
+        "00000000000000000000000000000000",
+        "00000000000000000000fffff0000000",
+        "0000000fffffffffffffffffff000000",
+        "0000000fffffffffffffffffff000000",
+        "0000000f00000000ffffffffff000000",
+        "0000000f000000000000000fff000000",
+        "0000000f000ff0000000000fff000000",
+        "0000000f000ff0000000000fff000000",
+        "0000000f000000000000000fff000000",
+        "0000000f000000000000000fff000000",
+        "0000000fffffffffffffffffff000000",
+        "0000000fffffffffffffffffff000000",
+        "0000000fffffffffffffffffff000000",
+        "0000000fffffffffffffffffff000000",
+        "0000000fffffffffffffffffff000000",
+        "0000000fffffffffffffffffff000000",
+        "0000000fffffffffffffffffff000000"
+      ]
+    },
+    "20": {
+      "name": "Cedolan Dept. Elevator",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 2, "src_y": 6, "dest_map": 18, "dest_x": 6, "dest_y": 1, "dir": 0, "event_id": 1},
+        {"src_x": 2, "src_y": 6, "dest_map": 17, "dest_x": 6, "dest_y": 1, "dir": 0, "event_id": 1},
+        {"src_x": 2, "src_y": 6, "dest_map": 16, "dest_x": 6, "dest_y": 1, "dir": 0, "event_id": 1},
+        {"src_x": 2, "src_y": 6, "dest_map": 15, "dest_x": 6, "dest_y": 1, "dir": 0, "event_id": 1},
+        {"src_x": 2, "src_y": 6, "dest_map": 14, "dest_x": 6, "dest_y": 1, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "00000fffffffffffffff",
+        "00000fffffffffffffff",
+        "00000fffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "21": {
+      "name": "Route 2",
+      "width": 39,
+      "height": 77,
+      "objects": [
+        {"kind": "item", "item": "GREATBALL", "x": 24, "y": 6, "event_id": 16},
+        {"kind": "item", "item": "RARECANDY", "x": 29, "y": 62, "event_id": 27},
+        {"kind": "item", "item": "RARECANDY", "x": 14, "y": 11, "event_id": 17},
+        {"kind": "item", "item": "POTION", "x": 25, "y": 12, "event_id": 18},
+        {"kind": "item", "item": "LEFTOVERS", "x": 27, "y": 36, "event_id": 15}
+      ],
+      "passability": [
+        "0000000fffff0f0000ffff0000f0000f000ffff",
+        "000000000000000000000000000f000f000ffff",
+        "000000000000000000000000000000ff000ffff",
+        "000fffffff0000000000fffffffffff0000ffff",
+        "000f00000f00fffff000f0ffffffff0f0ffffff",
+        "00ff00000fffff00ff00fffffffffff00ffffff",
+        "00ff0000000000000fffffff0000fff00ffffff",
+        "00f000ffffffffff00000ff000000ff00ffffff",
+        "0ff000fffffffffffffffff000000ff00ffffff",
+        "0f0000ff000000fffffffff000000ff00ffffff",
+        "0f0000ff000000000000000000000ffffffffff",
+        "0f0000ff000000000000000000000ffffffffff",
+        "0f0000ff0000000000000000000000000000000",
+        "08f00088f000000000000000000000000000000",
+        "00f00000ff00000f8888f000000000000000000",
+        "008f0000ffffffff0000f00000000000000ffff",
+        "000ff000fffffffff888888f0000f8888f0ffff",
+        "000f0f00fffffffff000000ff00ff0000ffffff",
+        "000f0000fffffffff000000ff00ff0000ffffff",
+        "000888f0fffffffff000000f800ff0000ffffff",
+        "000000f0fffffffffff0000f0000fffffffffff",
+        "000f00f0fffffffffff0000f0000fffffffffff",
+        "000000f0fffffffffff0000f0000fffffffffff",
+        "0000ffffffffffffffffffff0000fffffffffff",
+        "0000ffff0fff00000ffffffff00ffffffffffff",
+        "0000ffffffff00000000000000000ffffffffff",
+        "000ffffffff000000000000000000ffffffffff",
+        "0fff0ffffff000000000000000000ffffffffff",
+        "0f000ffffff00000000ffffff00ffffff0ff0ff",
+        "ff000ffffff0000000fffffff00fffffffff0ff",
+        "000ffffffff000000fffffff0000fffffffffff",
+        "00fffffffffff0000ffffffffffffffffffffff",
+        "fff0fffffffff0000ffffffffffffffffffffff",
+        "00fffffffff000000ffffffffffffffffffffff",
+        "fffffffffff000000ffffffffffffffffffffff",
+        "fffffffffff000000fffffffff000ffffffffff",
+        "fffffffffff000000fffffffff0000ffffff0ff",
+        "fffffffffff000000fffffffff0000ffffff0ff",
+        "ffffffffffffffffffffffffffffffffff0ffff",
+        "fffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffff",
+        "fffffffffff0000fffffffffff000ffffffffff",
+        "fffffffffff0000ffffffff00000000ffffffff",
+        "fffffffffff00000000000000000000ffffffff",
+        "fffffffffff00000000000000000000ffffffff",
+        "fffffffffff00000000000000000000ffffffff",
+        "fffffffffff00000000000000000fffffffffff",
+        "fffffffffff0000000fffffffffffffff000000",
+        "ffffffffffffff204fffffffffffff000000f88",
+        "ffffffffffffff204fff0000000000000f88800",
+        "fffffffffffff0204000ffffffffffffff0f888",
+        "fffff00000000020400ff00000000fffffff000",
+        "00000000000fff000ff8f00000000ffffff8000",
+        "00ffffffffff000000f0f00000000ffffff0000",
+        "0ffffffffff0000000ffff00fff0000ffff0f8f",
+        "fffffffffff00000000fff00fff0000ffff0f08",
+        "fffffffffff00000000000000ff000ff8880ff0",
+        "ffffffff0ff00000000000000ff000ff000ffff",
+        "fffffffffff00000000000000ff000fff000000",
+        "fffffffffffffffffff0000ffff000f0fffffff",
+        "fffffffffffff00000ff00ff000000fffffffff",
+        "ffffffffffff000000ff00ff000000fffffffff",
+        "ffffffffffff000000ff00ff000000fffffffff",
+        "ffffffffffff000000ff00ff0000fffffffffff",
+        "ffffffffffff000000ff00ff0000fffffffffff",
+        "ffffffffffffff00ffff00fffffffffffffffff",
+        "ffffffffffffff00ffff00fffffffffffffffff",
+        "fffffffffff0000000000000fffffffffffffff",
+        "fffffffffff0000000000000fffffffffffffff",
+        "fffffffffff0000000000000fffffffffffffff",
+        "fffffffffff0000000000000fffffffffffffff",
+        "fffffffffffffffffff0000ffffffffffffffff",
+        "fffffffffffffffffff0000ffffffffffffffff",
+        "fffffffffffffffffff0000ffffffffffffffff"
+      ],
+      "encounters": {
+        "0": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [50, "RATTATA", 12, 15],
+              [30, "POOCHYENA", 11, 15],
+              [10, "SHINX", 10, 11],
+              [10, "SHINX", 10, 12]
+            ]
+          },
+          "Water": {
+            "step_chance": 2,
+            "slots": [
+              [60, "MAGIKARP", 7, 10],
+              [30, "GOLDEEN", 11, 14],
+              [10, "STARYU", 12, 15]
+            ]
+          },
+          "OldRod": {
+            "step_chance": 0,
+            "slots": [
+              [70, "MAGIKARP", 7, 10],
+              [30, "MAGIKARP", 9, 15]
+            ]
+          },
+          "GoodRod": {
+            "step_chance": 0,
+            "slots": [
+              [60, "GOLDEEN", 12, 14],
+              [20, "FINNEON", 12, 15],
+              [20, "MAGIKARP", 12, 17]
+            ]
+          },
+          "SuperRod": {
+            "step_chance": 0,
+            "slots": [
+              [40, "FINNEON", 12, 15],
+              [40, "GOLDEEN", 12, 14],
+              [15, "STARYU", 12, 15],
+              [5, "STARYU", 14, 17]
+            ]
+          },
+          "HeadbuttLow": {
+            "step_chance": 0,
+            "slots": [
+              [50, "PINECO", 11, 13],
+              [30, "LEDYBA", 6, 8],
+              [19, "SPINARAK", 9, 12],
+              [1, "MUNCHLAX", 11, 14]
+            ]
+          },
+          "HeadbuttHigh": {
+            "step_chance": 0,
+            "slots": [
+              [50, "PINECO", 11, 13],
+              [30, "WURMPLE", 6, 8],
+              [20, "SPINARAK", 9, 12]
+            ]
+          },
+          "PokeRadar": {
+            "step_chance": 10,
+            "slots": [
+              [100, "STANTLER", 14, 14]
+            ]
+          }
+        }
+      }
+    },
+    "23": {
+      "name": "Lerucean Town",
+      "width": 41,
+      "height": 41,
+      "objects": [
+        {"kind": "gift", "item": "BICYCLE", "x": 13, "y": 27, "event_id": 9}
+      ],
+      "warps": [
+        {"src_x": 33, "src_y": 21, "dest_map": 29, "dest_x": 1, "dest_y": 5, "dir": 0, "event_id": 5},
+        {"src_x": 11, "src_y": 14, "dest_map": 24, "dest_x": 7, "dest_y": 8, "dir": 8, "event_id": 1},
+        {"src_x": 16, "src_y": 14, "dest_map": 25, "dest_x": 4, "dest_y": 7, "dir": 8, "event_id": 2},
+        {"src_x": 24, "src_y": 18, "dest_map": 26, "dest_x": 5, "dest_y": 10, "dir": 8, "event_id": 3},
+        {"src_x": 28, "src_y": 10, "dest_map": 27, "dest_x": 4, "dest_y": 7, "dir": 8, "event_id": 4}
+      ],
+      "passability": [
+        "ffffffffffffffffff0000fffffffffffffffffff",
+        "ffffffffffffffffff0000fffffffffffffffffff",
+        "ffffffffffffffffff0000fffffffffffffffffff",
+        "ffffffffffffffffff0000fffffffffffffffffff",
+        "fffff000000000000f0000fff00000fffffffffff",
+        "ffffffffffffffffff0000fff00000fffffffffff",
+        "ffffffffffffffffff0000fff000008ffffffffff",
+        "ffffffffffffffffff0000fff000000ffffffffff",
+        "fffff00000000000000000fffffffffffffffffff",
+        "fffff00000000000000000fffffffffffffffffff",
+        "fffff00000000000000000ffffff0ffffffffffff",
+        "fffff0000fffff0000000000000000000ffffffff",
+        "fffff0000fffffffff000000000000000ffffffff",
+        "000000000fffffffff000000000000000ffffffff",
+        "000000000ff0ffff0f000000000000000ffffffff",
+        "000000000000000000000000000000000ffffffff",
+        "fffff000000000000000000fffff00000ffffffff",
+        "fffff000000000000000000fffff00000ffffffff",
+        "fffff00000000000000000ff0fff00000ffffff00",
+        "fffff00000ff00ff00000000000000000ffffff00",
+        "fffff00000ff00fff0000000000000000ffffff00",
+        "fffff00000ff00ff00000000000000000ffffff00",
+        "fffff0000000000000000000000000000ffffff00",
+        "fffff0000000000000000000000000000ffffff00",
+        "fffff0000000000000000000000000000ffffffff",
+        "fffff00000ff00ff000ffffff0ffffff0ffffffff",
+        "fffff00000ffffff000ffffff0ffffff0ffffffff",
+        "fffff00000f0000f000ffffff0ffffff0ffffffff",
+        "fffff0000000000000000000000000000ffffffff",
+        "fffff0000000000000000000000000000ffffffff",
+        "fffff0000000000000000000000000000ffffffff",
+        "ffffffffffffffff000000fffffffffffffffffff",
+        "fffff0000000000000000000000000000ffffffff",
+        "fffff0000000000000000000000000000ffffffff",
+        "fffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffff"
+      ]
+    },
+    "24": {
+      "name": "Lerucean Town Poké Center",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 7, "src_y": 9, "dest_map": 23, "dest_x": 11, "dest_y": 14, "dir": 0, "event_id": 2}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ff00fff00ff000ffffff",
+        "0000fffffff0000fffff",
+        "000000000000000fffff",
+        "000000000000000fffff",
+        "00ff0000000ff00fffff",
+        "00ff0000000ff00fffff",
+        "000000000000000fffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ],
+      "heal": [
+        23,
+        11,
+        15
+      ]
+    },
+    "25": {
+      "name": "Lerucean Town Mart",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 4, "src_y": 8, "dest_map": 23, "dest_x": 16, "dest_y": 14, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ff0f000000ffffffffff",
+        "f00f0000000fffffffff",
+        "ffff000ff0ffffffffff",
+        "0000000ff0ffffffffff",
+        "0ff0000ff0ffffffffff",
+        "00000000000fffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "26": {
+      "name": "Pokémon Fan Club",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 5, "src_y": 11, "dest_map": 23, "dest_x": 24, "dest_y": 18, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "000000000000ffffffff",
+        "000000000000ffffffff",
+        "f0000ff0000fffffffff",
+        "f000ffff000fffffffff",
+        "f000ffff000fffffffff",
+        "f0000000000fffffffff",
+        "f0000000000fffffffff",
+        "000000000000ffffffff",
+        "f0000000000fffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "27": {
+      "name": "Pokémon Day Care",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 4, "src_y": 8, "dest_map": 23, "dest_x": 28, "dest_y": 10, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ff0fffffffffffffffff",
+        "0000f0000000ffffffff",
+        "fffff0000000ffffffff",
+        "f000000ff000ffffffff",
+        "f000000ff000ffffffff",
+        "f0000000000fffffffff",
+        "f0000000000fffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "28": {
+      "name": "Natural Park",
+      "width": 50,
+      "height": 45,
+      "objects": [],
+      "warps": [
+        {"src_x": 26, "src_y": 6, "dest_map": 30, "dest_x": 5, "dest_y": 8, "dir": 8, "event_id": 1},
+        {"src_x": 27, "src_y": 6, "dest_map": 30, "dest_x": 5, "dest_y": 8, "dir": 8, "event_id": 2},
+        {"src_x": 7, "src_y": 24, "dest_map": 29, "dest_x": 11, "dest_y": 5, "dir": 0, "event_id": 3}
+      ],
+      "passability": [
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffff00ffffffffffffffffffffff",
+        "ffffffffffffffffffffff000f00f000ffffffffffffffffff",
+        "ffffffffffffffffffffff0000000000ffffffffffffffffff",
+        "ffffffffffffffffffffff0000000000ffffffffffffffffff",
+        "ffffffffffffffffffffff0000000000ffffffffffffffffff",
+        "ffffffffffffffffff000000000000000000ffffffffffffff",
+        "ffffffffffffffffff000000000000000000ffffffffffffff",
+        "ffffffffffffffff0000000000000000000000ffffffffffff",
+        "00ffffffffffffff0000000000000000000000ffffffffffff",
+        "00ffffffffffff00000000000000000000000000ffffffffff",
+        "00ffffffffffff00000000000000000000000000ffffffffff",
+        "00ffffffffff000000000000000000000000000000ffffffff",
+        "00ffffffffff0000000000000ffff0000000000000ffffffff",
+        "00ffffffffff0000000000000ffff0000000000000ffffffff",
+        "00ffffffffff00000000000ffffffff00000000000ffffffff",
+        "00ffffff000000000000000ffffffff00000000000ffffffff",
+        "00ffffff0000000000000ffffffffffff000000000ffffffff",
+        "00ffffff0000000000000ffffffffffff000000000ffffffff",
+        "00ffffff0000000000000ffffffffffff000000000ffffffff",
+        "00ffffff0000000000000ffffffffffff000000000ffffffff",
+        "00ffffff000000000000000ffffffff00000000000ffffffff",
+        "00ffffffffff00000000000ffffffff00000000000ffffffff",
+        "f0ffffffffff0000000000000ffff0000000000000ffffffff",
+        "f0ffffffffff0000000000000ffff0000000000000ffffffff",
+        "f0ffffffffff000000000000000000000000000000ffffffff",
+        "00ffffffffffff00000000000000000000000000ffffffffff",
+        "00ffffffffffff00000000000000000000000000ffffffffff",
+        "00ffffffffffffff0000000000000000000000ffffffffffff",
+        "ffffffffffffffff0000000000000000000000ffffffffffff",
+        "00ffffffffffffffff000000000000000000ffffffffffffff",
+        "00ffffffffffffffff000000000000000000ffffffffffffff",
+        "ffffffffffffffffffffff0000000000ffffffffffffffffff",
+        "ffffffffffffffffffffff0000000000ffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "encounters": {
+        "0": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [20, "CATERPIE", 10, 10],
+              [20, "SUNKERN", 12, 12],
+              [20, "WEEDLE", 10, 10],
+              [15, "PIDGEY", 12, 14],
+              [15, "PIDGEY", 10, 14],
+              [5, "KAKUNA", 10, 10],
+              [5, "METAPOD", 10, 10]
+            ]
+          },
+          "LandNight": {
+            "step_chance": 21,
+            "slots": [
+              [30, "HOOTHOOT", 10, 14],
+              [30, "SPINARAK", 10, 15],
+              [20, "PINECO", 9, 13],
+              [10, "DROWZEE", 9, 15],
+              [10, "NATU", 12, 14]
+            ]
+          },
+          "LandMorning": {
+            "step_chance": 21,
+            "slots": [
+              [25, "CATERPIE", 10, 12],
+              [25, "WEEDLE", 10, 12],
+              [20, "PIDGEY", 10, 14],
+              [15, "KAKUNA", 10, 10],
+              [15, "METAPOD", 10, 10]
+            ]
+          },
+          "BugContest": {
+            "step_chance": 21,
+            "slots": [
+              [20, "CATERPIE", 7, 18],
+              [20, "WEEDLE", 7, 18],
+              [10, "KAKUNA", 9, 18],
+              [10, "METAPOD", 9, 18],
+              [10, "PARAS", 10, 17],
+              [10, "VENONAT", 10, 16],
+              [5, "BEEDRILL", 12, 15],
+              [5, "BUTTERFREE", 12, 15],
+              [5, "PINSIR", 13, 14],
+              [5, "SCYTHER", 13, 14]
+            ]
+          },
+          "PokeRadar": {
+            "step_chance": 40,
+            "slots": [
+              [50, "BEEDRILL", 15, 18],
+              [50, "BUTTERFREE", 15, 18]
+            ]
+          }
+        }
+      }
+    },
+    "29": {
+      "name": "Natural Park Entrance",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 0, "src_y": 5, "dest_map": 23, "dest_x": 32, "dest_y": 21, "dir": 0, "event_id": 1},
+        {"src_x": 12, "src_y": 5, "dest_map": 28, "dest_x": 8, "dest_y": 24, "dir": 0, "event_id": 2},
+        {"src_x": 6, "src_y": 2, "dest_map": 28, "dest_x": 8, "dest_y": 24, "dir": 0, "event_id": 4}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ff0f00000f0fffffffff",
+        "f00fffffff00ffffffff",
+        "f00000000000ffffffff",
+        "f00000000000ffffffff",
+        "f00000000000ffffffff",
+        "f0fffffffff0ffffffff",
+        "ff000000000fffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "30": {
+      "name": "Natural Park Pavillion",
+      "width": 20,
+      "height": 15,
+      "objects": [
+        {"kind": "gift", "item": "SUNSTONE", "x": 5, "y": 4, "event_id": 2}
+      ],
+      "warps": [
+        {"src_x": 5, "src_y": 9, "dest_map": 28, "dest_x": 26, "dest_y": 6, "dir": 0, "event_id": 1},
+        {"src_x": 5, "src_y": 4, "dest_map": 28, "dest_x": 26, "dest_y": 6, "dir": 0, "event_id": 2}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "f0f00000f0ffffffffff",
+        "00fffffff00fffffffff",
+        "00000000000fffffffff",
+        "00000000000fffffffff",
+        "00000000000fffffffff",
+        "00000000000fffffffff",
+        "f000000000ffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "31": {
+      "name": "Route 3",
+      "width": 70,
+      "height": 69,
+      "objects": [],
+      "warps": [
+        {"src_x": 55, "src_y": 8, "dest_map": 34, "dest_x": 23, "dest_y": 17, "dir": 8, "event_id": 17}
+      ],
+      "passability": [
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff0f00f000f000000ffff",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff0ff0f00000fffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff0ff0f00000f00000f0f",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff00f0ff000ffffffff00",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffff0ffffff0f0000000",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffff00000000ffffffff",
+        "ffffffffffffffffffffff00ffffffffffffffffffffffff00ffff000fffffffffffff",
+        "ffffffffffffffffffffff00ffffffffffffffffffffffff0000ffffffffffffffffff",
+        "ffffffffffffffffffffff00ffffffffffffffffffffffff0000fff0fff0ffffffffff",
+        "ffffffffffffffffffffff00ffffffffffffffffffffffff000000000000ffffffffff",
+        "ffffffffffffffffffffff00ffffffffffff000000000000000000000000ffffffffff",
+        "ffffffffffffffffffffff00ffffffffffff000000000000000000000000ffffffffff",
+        "ffff000000000000ffffff00ffffffff00000000000000000000000000ffffffffffff",
+        "ffff000000000000ffffff00ffffffff00000000000000000000000000ffffffffffff",
+        "00000000000000000000000000ffffff00000000ffff0ffffffff00000ffffffffffff",
+        "00000000000000000d00000000ffffff00000000ffff0ffffffff00000ffffffffffff",
+        "00000000000000000d000000000000000000ffffffff000ffffff00000ffffffffffff",
+        "00000000000000000d000000000000000000ffffffff000ffffff00000ffffffffffff",
+        "ffff0000000000000dff0000000000000000ffffffff000000000000ffffffffffffff",
+        "ffff7777007777777fff0000000000000000ffffffff000000000000ffffffffffffff",
+        "ffff000000000000ffffff00000000000000ffffffff000000ffffffffffffffffffff",
+        "ffff000000000000ffffff00000000000000ffffffff000000ffffffffffffffffffff",
+        "ffffff000000000000ffff7770077777ffffffffffff0000ffffffffffffffffffffff",
+        "ffffff000000000000ffff0000000000ffffffffffff0000ffffffffffffffffffffff",
+        "ffffffffff0000000000000000000000ffffffffffff0000ffff0000ffffffffffffff",
+        "ffffffffff0000000000000000000000ffffffffffff7700ffff0000ffffffffffffff",
+        "ffffffffffffff000000000000000000ffffffffffff0000ff00000000ffffffffffff",
+        "ffffffffffffff000000000000000000ffffffffffff0000ff00000000ffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffff00000000ff0000000000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffff00000000ffff00000000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffff0000000000ff00000000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffff00000000000000000000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffff0000000ffff00000000000ffffffff",
+        "ffffffffffffffffffffffffffffffffffffffff0077777ffffff00ff00000ffffffff",
+        "ffffffffffffffffffffffffffffffffffffffff0000000ffffff00ff00000ffffffff",
+        "ffffffffffffffffffffffffffffffffffffffff0000000ffff0000ff00000ffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff000000ff00000ffff000ffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff007777ff000ffffff000ffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff000000ff000ffff00000ffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff000000ff000ff0000000ffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff00000ffff00ff00000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff00000ffff000000000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff0000ffff0000000000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff0000ffff0000000000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff7770ffffffff000000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff0000ffffffffff0000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff000000ffffffff0000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff000000ffffffff0000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff00000000ffffff0000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff00000000ffff000000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff000000000000000000ffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff000000000000000000ffffffffff",
+        "ffffffff0000ff0000ffffffffffffffffffffffff000000000000000000ffffffffff",
+        "ffffffff0000ff0000ffffffffffffffffffffffff000000000000000000ffffffffff",
+        "ffffffff0000000000ffffffffffffffffffffffff000000000000000000ffffffffff",
+        "ffffffff0000000000ffffffffffffffffffffffff000ffff000000000ffffffffffff",
+        "ffffffff00ff00ff00ffffffffffffffffffffffff000ffff000000000ffffffffffff",
+        "ffffffff00ff00ff00ffffffffffffffffffffffff000ffffffff00000ffffffffffff",
+        "ffffffff00ff00ff00ffffffffffffffffffffffff000ffffffff00000ffffffffffff",
+        "ffffffff00ff00ff00ffffffffffffffffffffffff777ffffffff000ffffffffffffff",
+        "ffffffff00ffffff00ffffffffffffffffffffffff000ffffffff000ffffffffffffff",
+        "ffffffff00ffffff00ffffffffffffffffffffffff000000000ff000ffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff000000000ff000ffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff00000000000000ffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff00000000000000ffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff00000000000000ffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff0000ffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff0000ffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffffffff0000ffffffffffffffff"
+      ],
+      "ledges": [
+        [17, 15],
+        [17, 16],
+        [17, 17],
+        [17, 18],
+        [4, 19],
+        [5, 19],
+        [6, 19],
+        [7, 19],
+        [10, 19],
+        [11, 19],
+        [12, 19],
+        [13, 19],
+        [14, 19],
+        [15, 19],
+        [16, 19],
+        [22, 22],
+        [23, 22],
+        [24, 22],
+        [27, 22],
+        [28, 22],
+        [29, 22],
+        [30, 22],
+        [31, 22],
+        [44, 25],
+        [45, 25],
+        [42, 33],
+        [43, 33],
+        [44, 33],
+        [45, 33],
+        [46, 33],
+        [44, 37],
+        [45, 37],
+        [46, 37],
+        [47, 37],
+        [42, 44],
+        [43, 44],
+        [44, 44],
+        [42, 59],
+        [43, 59],
+        [44, 59]
+      ],
+      "encounters": {
+        "0": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [30, "NIDORANfE", 12, 15],
+              [30, "NIDORANmA", 12, 15],
+              [20, "PIKACHU", 14, 17],
+              [10, "EEVEE", 15, 15],
+              [10, "PONYTA", 13, 15]
+            ]
+          },
+          "Water": {
+            "step_chance": 2,
+            "slots": [
+              [60, "SURSKIT", 13, 14],
+              [35, "LOTAD", 14, 14],
+              [5, "LOTAD", 15, 15]
+            ]
+          },
+          "OldRod": {
+            "step_chance": 0,
+            "slots": [
+              [70, "MAGIKARP", 6, 11],
+              [30, "MAGIKARP", 10, 17]
+            ]
+          },
+          "GoodRod": {
+            "step_chance": 0,
+            "slots": [
+              [60, "POLIWAG", 12, 15],
+              [20, "PSYDUCK", 11, 14],
+              [20, "WOOPER", 13, 17]
+            ]
+          },
+          "SuperRod": {
+            "step_chance": 0,
+            "slots": [
+              [40, "CHINCHOU", 11, 12],
+              [40, "REMORAID", 12, 14],
+              [20, "LUVDISC", 10, 16]
+            ]
+          },
+          "RockSmash": {
+            "step_chance": 50,
+            "slots": [
+              [60, "NOSEPASS", 13, 14],
+              [40, "GEODUDE", 12, 15]
+            ]
+          },
+          "HeadbuttLow": {
+            "step_chance": 0,
+            "slots": [
+              [30, "PINECO", 14, 17],
+              [25, "COMBEE", 15, 17],
+              [20, "PINECO", 14, 16],
+              [10, "HERACROSS", 16, 18],
+              [9, "HERACROSS", 16, 17],
+              [5, "COMBEE", 15, 16],
+              [1, "MUNCHLAX", 13, 18]
+            ]
+          },
+          "HeadbuttHigh": {
+            "step_chance": 0,
+            "slots": [
+              [50, "SEEDOT", 14, 17],
+              [30, "SHROOMISH", 14, 17],
+              [20, "BURMY", 12, 15]
+            ]
+          }
+        }
+      }
+    },
+    "34": {
+      "name": "Ice Cave",
+      "width": 42,
+      "height": 41,
+      "objects": [],
+      "warps": [
+        {"src_x": 22, "src_y": 14, "dest_map": 34, "dest_x": 16, "dest_y": 30, "dir": 0, "event_id": 6},
+        {"src_x": 23, "src_y": 18, "dest_map": 31, "dest_x": 55, "dest_y": 8, "dir": 0, "event_id": 1},
+        {"src_x": 16, "src_y": 16, "dest_map": 34, "dest_x": 11, "dest_y": 32, "dir": 6, "event_id": 7},
+        {"src_x": 26, "src_y": 16, "dest_map": 34, "dest_x": 20, "dest_y": 32, "dir": 0, "event_id": 2},
+        {"src_x": 10, "src_y": 32, "dest_map": 34, "dest_x": 17, "dest_y": 16, "dir": 6, "event_id": 8}
+      ],
+      "passability": [
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffff00000f00000fffffffffffffffffffffff",
+        "ffffffff00000000f00fffffffffffffffffffffff",
+        "fffffffff00000000f0fffff00000f00ffffffffff",
+        "ffffffff00000000000fffff000000000fffffffff",
+        "ffffffff00f0000000000000f0000000ffffffffff",
+        "ffffffff0000000f00000000000f000fffffffffff",
+        "ffffffff000f0000000fffffffffffffffffffffff",
+        "ffffffff000000f000ffffffffffffffffffffffff",
+        "ffffffff00000000000f000fffffffffffffffffff",
+        "fffffffffffffffff00000000f00ffffffffffffff",
+        "ffffffffffffffff000000000000ffffffffffffff",
+        "ffffffffffffffffffff00000000ffffffffffffff",
+        "fffffffffffffffffffffff0ffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffff0000f0ffffffffffffffffffffff",
+        "ffffffffffffff0000000fffffffffffffffffffff",
+        "ffffffffffff00000000ffffffffffffffffffffff",
+        "fffffffffff00000000000ffffffffffffffffffff",
+        "ffffffffff00000000f0000fffffffffffffffffff",
+        "ffffffffff0000000000000fffffffffffffffffff",
+        "ffffffffffffffff000000ffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "encounters": {
+        "0": {
+          "Cave": {
+            "step_chance": 5,
+            "slots": [
+              [40, "SWINUB", 16, 18],
+              [20, "SNEASEL", 14, 16],
+              [20, "SNORUNT", 12, 15],
+              [10, "SMOOCHUM", 11, 14],
+              [10, "SNOVER", 14, 14]
+            ]
+          }
+        }
+      }
+    },
+    "35": {
+      "name": "Ingido Plateau outside",
+      "width": 35,
+      "height": 40,
+      "objects": [],
+      "warps": [
+        {"src_x": 17, "src_y": 6, "dest_map": 36, "dest_x": 11, "dest_y": 16, "dir": 8, "event_id": 1}
+      ],
+      "passability": [
+        "fffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffff0fffffffffffffffff",
+        "ffffffffffff0ff00000ff0ffffffffffff",
+        "fffffffffffff000000000fffffffffffff",
+        "fffffffffffff000000000fffffffffffff",
+        "ffffffffff00f0f00000f0f00ffffffffff",
+        "ffffffffff00f000000000f00ffffffffff",
+        "ffffffffffff0f0000000f0ffffffffffff",
+        "fffff000000f00ff000ff00f000000fffff",
+        "fffff000000fffff000fffff000000fffff",
+        "fffffffffff0000f000f0000fffffffffff",
+        "ffff000000ffffff000ffffff000000ffff",
+        "ffffffffff00000f000f00000ffffffffff",
+        "fff000000fffffff000fffffff000000fff",
+        "fffffffff000000f000f000000fffffffff",
+        "ffffffffffffffff000ffffffffffffffff",
+        "ffffffff0f0f0f0f000f0f0f0f0ffffffff",
+        "fffffffff0f0f0f00000f0f0f0fffffffff",
+        "ffffffff0f0f0f0000000f0f0f0ffffffff",
+        "00000000000000000000000000000000000",
+        "00000000000000000000000000000000000",
+        "00000000000000000000000000000000000",
+        "00000000000000000000000000000000000",
+        "fffffffff0f0f0f0f0f0f0f0f0fffffffff",
+        "ffffffff0f0f0f0f0f0f0f0f0f0ffffffff",
+        "ffffffffffff00000000000ffffffffffff",
+        "fffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffff",
+        "fffffffffffff00f000f00fffffffffffff",
+        "ffffffffffff00000000000ffffffffffff",
+        "ffffffffffff00000000000ffffffffffff",
+        "ffffffffffff00000000000ffffffffffff"
+      ]
+    },
+    "36": {
+      "name": "Pokémon League entrance",
+      "width": 25,
+      "height": 19,
+      "objects": [],
+      "warps": [
+        {"src_x": 11, "src_y": 17, "dest_map": 35, "dest_x": 17, "dest_y": 6, "dir": 0, "event_id": 2},
+        {"src_x": 4, "src_y": 1, "dest_map": 37, "dest_x": 6, "dest_y": 12, "dir": 8, "event_id": 9}
+      ],
+      "passability": [
+        "fffffffffffffffffffffffff",
+        "ffff0ffffffffffffffffffff",
+        "f0f000f0fffffffffffffffff",
+        "000000000ffffffffffffffff",
+        "00000000fffffffffffffffff",
+        "ff0000000ffffffffffffffff",
+        "0f000000fffffffffffffffff",
+        "0f0000000ffffffffffffffff",
+        "ff000000fffffffffffffffff",
+        "000000000ffffffffffffffff",
+        "0ff0000000fff00ff0000000f",
+        "0ff0000000fffffff00000000",
+        "0000000000000000000000000",
+        "0ff000000000000000ff0ff00",
+        "0ff000000000000000ff0ff00",
+        "0000000000000000000000000",
+        "0000000000000000000000000",
+        "fffffffffffffffffffffffff",
+        "fffffffffffffffffffffffff"
+      ],
+      "heal": [
+        35,
+        17,
+        7
+      ]
+    },
+    "37": {
+      "name": "Pokémon League room 1",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 6, "src_y": 2, "dest_map": 38, "dest_x": 5, "dest_y": 12, "dir": 8, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffff0fffffffffffff",
+        "f0f0000000f0ffffffff",
+        "f00000000000ffffffff",
+        "f0f0000000f0ffffffff",
+        "f0f0000000f0ffffffff",
+        "f00000000000ffffffff",
+        "f0f0000000f0ffffffff",
+        "f0f0000000f0ffffffff",
+        "0000000000000fffffff",
+        "ffffffffffffffffffff",
+        "ffffff0fffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "38": {
+      "name": "Hall of Fame",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 2, "src_y": 13, "dest_map": 36, "dest_x": 13, "dest_y": 12, "dir": 2, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "f0f00f00f0ffffffffff",
+        "f0f00000f0ffffffffff",
+        "f000000000ffffffffff",
+        "f0f00000f0ffffffffff",
+        "f0f00000f0ffffffffff",
+        "f000000000ffffffffff",
+        "f0f00000f0ffffffffff",
+        "f0f00000f0ffffffffff",
+        "f000000000ffffffffff",
+        "fffff0ffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "39": {
+      "name": "Route 4",
+      "width": 44,
+      "height": 23,
+      "objects": [],
+      "warps": [
+        {"src_x": 30, "src_y": 14, "dest_map": 46, "dest_x": 11, "dest_y": 6, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffff8ffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffff0000fffff0000000000000000000000fffff",
+        "ffffffff0000000000000000000000000000000fffff",
+        "ffffffff0000000000000000000000000000000fffff",
+        "ffffffff0000000000000000000000000000000fffff",
+        "ffffffff0000000000000000000000000000000fffff",
+        "ffffffffffffffffffffffffffffffffffff000fffff",
+        "ffffffff00000000000000000fffffffffff000fffff",
+        "ffffffff00000000000000000ffffff0000000000000",
+        "ffffffff00000000000000000ffffff0000000000000",
+        "ffffffff00000000000000000ffffff0000000000000",
+        "ffffffff0000000000000fffffffffffffffffff0000",
+        "ffffffff0000000000000fffffffffffffffffffffff",
+        "ffffffff0000000000000fffffffffffffffffffffff",
+        "ffffffff0000000000000fffffffffffffffffffffff",
+        "ffffffff0000000000000fffffffffffffffffffffff",
+        "ffffffff0000000000000fffffffffffffffffffffff",
+        "ffffffff0000000000000fffffffffffffffffffffff"
+      ],
+      "encounters": {
+        "0": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [50, "SHELLOS_1", 12, 15],
+              [40, "GRIMER", 13, 15],
+              [10, "MURKROW", 12, 14]
+            ]
+          }
+        }
+      }
+    },
+    "40": {
+      "name": "Route 4 Cycling Road",
+      "width": 33,
+      "height": 21,
+      "objects": [],
+      "warps": [
+        {"src_x": 25, "src_y": 14, "dest_map": 46, "dest_x": 1, "dest_y": 6, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "fffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffff",
+        "fffffff8fffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffff",
+        "ffffffff0000fffff0000000000000000",
+        "ffffffff0000000000000000000000000",
+        "ffffffff0000000000000000000000000",
+        "ffffffff0000000000000000000000000",
+        "ffffffff0000000000000000000000000",
+        "fffffffffffffffffffffffffffffffff",
+        "ffffffff00000000000000000ffffffff",
+        "ffffffff00000000000000000ffffff00",
+        "ffffffff00000000000000000ffffff00",
+        "ffffffff00000000000000000ffffff00",
+        "ffffffff0000000000000ffffffffffff",
+        "ffffffff0000000000000ffffffffffff",
+        "ffffffff0000000000000ffffffffffff",
+        "ffffffff0000000000000ffffffffffff",
+        "ffffffff0000000000000ffffffffffff"
+      ]
+    },
+    "41": {
+      "name": "Route 5",
+      "width": 36,
+      "height": 138,
+      "objects": [],
+      "passability": [
+        "ffffffff0000000000000fffffffffffffff",
+        "ffffffff0000000000000fffffffffffffff",
+        "ffffffff0000000000000f0fffffffffffff",
+        "ffffffff0000000000000f0fffffffffffff",
+        "ffffffff0000000000000f0fffffffffffff",
+        "ffffffff0000000000000f0fffffffffffff",
+        "ffffffff0000000000000f0fffffffffffff",
+        "ffffffff0000000000000f0fffffffffffff",
+        "ffffffff0000000000000f0888888fffffff",
+        "ffffffff0000000000000fffffffffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff0000ffff000ffff00000ffffffff",
+        "ffffffff00008888000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff00000000000ffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff00000088888888800000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff000000fffffffff00000ffffffff",
+        "ffffffff00000088888888800000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffff00000000000000000000ffffffff",
+        "ffffffffffffff000fff000fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff",
+        "ffffffffffffff777707777fffffffffffff",
+        "ffffffffffffff000000000fffffffffffff"
+      ],
+      "ledges": [
+        [14, 136],
+        [15, 136],
+        [16, 136],
+        [17, 136],
+        [19, 136],
+        [20, 136],
+        [21, 136],
+        [22, 136]
+      ],
+      "encounters": {
+        "0": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [50, "GRIMER", 13, 15],
+              [40, "SPEAROW", 13, 16],
+              [10, "SLUGMA", 13, 14]
+            ]
+          }
+        }
+      }
+    },
+    "44": {
+      "name": "Route 6",
+      "width": 45,
+      "height": 38,
+      "objects": [],
+      "warps": [
+        {"src_x": 36, "src_y": 17, "dest_map": 74, "dest_x": 11, "dest_y": 6, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffff000000000ffffffffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffffffffff",
+        "ffffffff777707777ffffffffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffff000000ffffffff",
+        "ffffffff000000000f888888888ffffffffffffffffff",
+        "ffffffff00000000000000000000000ffffff00000000",
+        "ffffffff00000000000000000000000ffffff00000000",
+        "ffffffff00000000000000000000000ffffff00000000",
+        "fffffffffffffffffffffffffffffffffffff00ffffff",
+        "ffffffffffffffffffffffffffff00000000000ffffff",
+        "ffffffffffffffffffffffffffff00000000000ffffff",
+        "ffffffffffffffffffffffffffff00000000fffffffff",
+        "ffffffffffffffffffffffffffff00000000fffffffff",
+        "ffffffffffffffffffffffffffff00000000fffffffff",
+        "ffffffffffffffffffffffffffff00000000fffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "ledges": [
+        [8, 6],
+        [9, 6],
+        [10, 6],
+        [11, 6],
+        [13, 6],
+        [14, 6],
+        [15, 6],
+        [16, 6]
+      ],
+      "encounters": {
+        "0": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [50, "SHELLOS_1", 12, 15],
+              [40, "GRIMER", 13, 15],
+              [10, "MURKROW", 12, 14]
+            ]
+          }
+        }
+      }
+    },
+    "45": {
+      "name": "Route 6 Cycling Road",
+      "width": 39,
+      "height": 24,
+      "objects": [],
+      "warps": [
+        {"src_x": 31, "src_y": 9, "dest_map": 74, "dest_x": 1, "dest_y": 6, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffff000000000ffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffffffffffff",
+        "ffffffff000000000ffffffffffffff000000ff",
+        "ffffffff000000000f888888888ffffffffffff",
+        "ffffffff00000000000000000000000ffffff00",
+        "ffffffff00000000000000000000000ffffff00",
+        "ffffffff00000000000000000000000ffffff00",
+        "fffffffffffffffffffffffffffffffffffff00",
+        "ffffffffffffffffffffffffffff00000000000",
+        "ffffffffffffffffffffffffffff00000000000",
+        "ffffffffffffffffffffffffffff00000000fff",
+        "ffffffffffffffffffffffffffff00000000fff",
+        "ffffffffffffffffffffffffffff00000000fff",
+        "ffffffffffffffffffffffffffff00000000fff",
+        "fffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffff"
+      ]
+    },
+    "46": {
+      "name": "Route 4 Cycling Road gate",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 0, "src_y": 6, "dest_map": 40, "dest_x": 24, "dest_y": 14, "dir": 0, "event_id": 3},
+        {"src_x": 12, "src_y": 6, "dest_map": 39, "dest_x": 31, "dest_y": 14, "dir": 0, "event_id": 4}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ff000000000fffffffff",
+        "f0fffffffff0ffffffff",
+        "f00000000000ffffffff",
+        "f00000000000ffffffff",
+        "f00000000000ffffffff",
+        "f00000000000ffffffff",
+        "f00000000000ffffffff",
+        "f0fffffffff0ffffffff",
+        "ff000000000fffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "47": {
+      "name": "Route 7",
+      "width": 70,
+      "height": 43,
+      "objects": [],
+      "warps": [
+        {"src_x": 46, "src_y": 11, "dest_map": 49, "dest_x": 12, "dest_y": 14, "dir": 0, "event_id": 1},
+        {"src_x": 55, "src_y": 16, "dest_map": 49, "dest_x": 19, "dest_y": 20, "dir": 0, "event_id": 2}
+      ],
+      "passability": [
+        "fffffffffff0f0000000000000000000000000f00000f0000000000000000f00888f00",
+        "fffffffffff0f0000000000000000000000000fff000ffffffff000ffff00f00000f00",
+        "fffffffffff0f00000fffffffffffffff0000000f0000000000ff00f00f008888f0f00",
+        "fffffffffff0f00ffff0ffffffffffffffffff00f00000000000f00f00f000000f0f00",
+        "fffffffff880ffff0000ffffffffffff0000fff0f00f88888f00f00ff88000000f0f00",
+        "fffffffff000000fffffffffffffffffffff00f0f00f00000f00f00ff000000fff0f00",
+        "fffffffff00fffff0000000000000000000ffff0f00f00000f00f0088000000f000f00",
+        "fffffffff00fff00000000000000000000000ff0f00fffffff00f00000ffffff000f00",
+        "fffffffff00fff00000000000000000000000ff0ff0000000000f0000ff000ff0fff00",
+        "fffffffff00fff0000000ff0000000ff00000ff0ff0000000000ffffff0000000f0000",
+        "ffffffffffffff0077777ff7777777ff77700ff00f0fffffff000ff0000000000f000f",
+        "000000000000000000000ff0000000ff00000fffffffff0ffff00000ffffff000f000f",
+        "000000000000000000000ff0000000ff00000f00f000ff00f0f000fff000ff000888ff",
+        "000000000000000000000ff0000000ff00000ffffffff000fff000f00fffff000000ff",
+        "0000000f88f0000000000ff0000000ff0000000fffffff0ffff000ffff0fff000000ff",
+        "ffffffff00ffff7770077ff7777777ff000000000000000fffff00ff000f8ff00fffff",
+        "ffffffff00ffff0000000ff0000000ff0000000000000000ff0ff0f0000f00ffff0fff",
+        "ffffffff00ffff0000000000000000ff0000000000000000ff00f0ff000ff000000ff0",
+        "ffffffffffffff0000000000000000ff000000000ff77700fffffffff000ffff000f00",
+        "fffffff0ffffff0000000fffff88888f000000000ff00000fffff00fff0ff00fffff00",
+        "fffffff00fffff0000000fffff00000f000000000ff0000000f0fffff000f000ff0000",
+        "fffff8800fff0000000fffff8800000f0000000ffff0000000fffffff000ffffffffff",
+        "ffffff8f0fff0000000ffffff888ffff000ffffffffff0000000000000000000000000",
+        "ffffff08ffff000f00000ffff000ff00000ffffffffff0000000000000000000000000",
+        "ffffff00ff00000000000ffff000f8f0000ffffffffff0000000000000000000000000",
+        "ffffff00ff00000000000ffff0008f8f000fffffffffff8888888f0000000000000000",
+        "ffffff0fff00000000000ffff00008f888ffffffff8888000000088888f00f888ff888",
+        "ffffffff08f0000000000f88f00000888fffffff8800f888888888f000888800088000",
+        "fffff000008f000000000f00f00000000f888888f88880000000008888888f00000f88",
+        "fffff00000088888888888f880f8888f08f0000ff00000000000000000000888888800",
+        "fffffff00000000f8888fff000f0000f00888888800000ffffff00000f88888f000000",
+        "fffffff00000000f0000ffff00ffff08f000000000000fff000ff000f800000888f000",
+        "fffffffffffff00f000088ff0000fffff00000000000ff000000f000f000000000f000",
+        "fffffffffffff00f000000ff00000000000f8888f000f0000000f00f80f8888f00f000",
+        "fffffffffffffffff00000ff00000000000f0000f000f0000000ff0f00f00008f0f000",
+        "fffffffffffffff0fffffffffffff000000f00008f00f00000000f0f0f800000f0f000",
+        "fffffffffffffffffffffffffff0ff0000f800000f008f000000ff0f0f000ffff088f0",
+        "fffffffffffffffffffffffffff00f0000f000000f0008888888880f0fffff000000f0",
+        "fffffffffffffffffffffffffff00f0000ffff000888f0000000000ff88f00000000f0",
+        "fffffffffffffffffffffffffff00ffff0000f000000f000000000f8f008888f000088",
+        "fffffffffffffffffffffffffffff000f0000f000000f000000f8880f000000f000000",
+        "fffffffffffffffffffffffffffff000f0000ff000008f00000f000f8000000f000000",
+        "fffffffffffffffffffffffffffff000f00000f000000f00f888000f000000088f0000"
+      ],
+      "ledges": [
+        [16, 10],
+        [17, 10],
+        [18, 10],
+        [19, 10],
+        [20, 10],
+        [23, 10],
+        [24, 10],
+        [25, 10],
+        [26, 10],
+        [27, 10],
+        [28, 10],
+        [29, 10],
+        [32, 10],
+        [33, 10],
+        [34, 10],
+        [14, 15],
+        [15, 15],
+        [16, 15],
+        [19, 15],
+        [20, 15],
+        [23, 15],
+        [24, 15],
+        [25, 15],
+        [26, 15],
+        [27, 15],
+        [28, 15],
+        [29, 15],
+        [43, 18],
+        [44, 18],
+        [45, 18]
+      ],
+      "encounters": {
+        "0": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [50, "SHELLOS", 12, 15],
+              [30, "BIDOOF", 14, 17],
+              [10, "MURKROW", 12, 14],
+              [10, "WURMPLE", 9, 12]
+            ]
+          },
+          "RockSmash": {
+            "step_chance": 50,
+            "slots": [
+              [90, "NOSEPASS", 13, 14],
+              [10, "GEODUDE", 12, 15]
+            ]
+          }
+        }
+      }
+    },
+    "49": {
+      "name": "Rock Cave 1F",
+      "width": 34,
+      "height": 29,
+      "objects": [],
+      "warps": [
+        {"src_x": 12, "src_y": 15, "dest_map": 47, "dest_x": 46, "dest_y": 11, "dir": 0, "event_id": 1},
+        {"src_x": 20, "src_y": 20, "dest_map": 47, "dest_x": 56, "dest_y": 16, "dir": 0, "event_id": 2},
+        {"src_x": 24, "src_y": 14, "dest_map": 51, "dest_x": 0, "dest_y": 0, "dir": 6, "event_id": 13},
+        {"src_x": 10, "src_y": 12, "dest_map": 50, "dest_x": 11, "dest_y": 12, "dir": 6, "event_id": 3},
+        {"src_x": 12, "src_y": 7, "dest_map": 50, "dest_x": 12, "dest_y": 7, "dir": 0, "event_id": 4}
+      ],
+      "passability": [
+        "ffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffff",
+        "ffffffffffff00ff888888ffffffffffff",
+        "fffffffffff0000f000000ffffffffffff",
+        "fffffffffff0000f000000ffffffffffff",
+        "fffffffffff0000f000000f888ffffffff",
+        "fffffffff00000ffff0ffff000ffffffff",
+        "ffffffff000000000000000000ffffffff",
+        "ffffffff000000000000000000ffffffff",
+        "ffffffff0000000000000000f0ffffffff",
+        "fffffffff00000000000000000ffffffff",
+        "ffffffffffff0fff00ff000000ffffffff",
+        "ffffffffffffffff000fffffffffffffff",
+        "ffffffffffffffff0000ffffffffffffff",
+        "ffffffffffffffff0000ffffffffffffff",
+        "fffffffffffffffff000ffffffffffffff",
+        "fffffffffffffffff000ffffffffffffff",
+        "fffffffffffffffff000ffffffffffffff",
+        "fffffffffffffffff000ffffffffffffff",
+        "ffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffff"
+      ],
+      "encounters": {
+        "0": {
+          "Cave": {
+            "step_chance": 5,
+            "slots": [
+              [20, "MAGNETON", 14, 17],
+              [20, "MAGNETON", 14, 16],
+              [20, "NOSEPASS", 13, 14],
+              [20, "NOSEPASS", 14, 15],
+              [10, "GEODUDE", 13, 15],
+              [10, "MAWILE", 14, 16]
+            ]
+          }
+        }
+      }
+    },
+    "50": {
+      "name": "Rock Cave B1F",
+      "width": 30,
+      "height": 26,
+      "objects": [],
+      "warps": [
+        {"src_x": 10, "src_y": 12, "dest_map": 49, "dest_x": 10, "dest_y": 13, "dir": 2, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffff",
+        "0fffffffffffffffffffffffffffff",
+        "0fffff0ff00000000fffffffffffff",
+        "0ffff00ff00000f00f0000ffffffff",
+        "ffff000ff00000000f0000ffffffff",
+        "0fff000fffff00ffff000fffffffff",
+        "00ff000f0000000000000fffffffff",
+        "00ff000f00f00000000000ffffffff",
+        "8fff000f0f000000000000ffffffff",
+        "0fff000f00000000000000ffffffff",
+        "0fff000f00000000000000ffffffff",
+        "0fff0f0f00000000000000ffffffff",
+        "0ffffffffffff000ffffffffffffff",
+        "0ffffffffffff000ffffffffffffff",
+        "0ffffffffffff0f0ffffffffffffff",
+        "fffffffffffff000ffffffffffffff",
+        "ffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffff"
+      ],
+      "encounters": {
+        "0": {
+          "Cave": {
+            "step_chance": 5,
+            "slots": [
+              [20, "MAGNETON", 14, 17],
+              [20, "MAGNETON", 14, 16],
+              [20, "NOSEPASS", 13, 14],
+              [20, "NOSEPASS", 14, 15],
+              [10, "BURMY", 14, 16],
+              [10, "GEODUDE", 13, 15]
+            ]
+          }
+        }
+      }
+    },
+    "51": {
+      "name": "Dungeon",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 1, "src_y": 1, "dest_map": 49, "dest_x": 23, "dest_y": 14, "dir": 4, "event_id": 1}
+      ],
+      "passability": [
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000",
+        "00000000000000000000"
+      ],
+      "encounters": {
+        "0": {
+          "Cave": {
+            "step_chance": 5,
+            "slots": [
+              [20, "CHINGLING", 1, 1],
+              [20, "CLEFFA", 1, 1],
+              [20, "IGGLYBUFF", 1, 1],
+              [20, "PICHU", 1, 1],
+              [10, "RIOLU", 1, 1],
+              [10, "TYROGUE", 1, 1]
+            ]
+          }
+        }
+      }
+    },
+    "52": {
+      "name": "Battle Frontier",
+      "width": 44,
+      "height": 36,
+      "objects": [],
+      "warps": [
+        {"src_x": 9, "src_y": 23, "dest_map": 60, "dest_x": 5, "dest_y": 7, "dir": 8, "event_id": 5},
+        {"src_x": 28, "src_y": 24, "dest_map": 62, "dest_x": 6, "dest_y": 8, "dir": 8, "event_id": 6},
+        {"src_x": 17, "src_y": 13, "dest_map": 53, "dest_x": 7, "dest_y": 8, "dir": 8, "event_id": 1},
+        {"src_x": 22, "src_y": 13, "dest_map": 54, "dest_x": 4, "dest_y": 7, "dir": 8, "event_id": 2},
+        {"src_x": 29, "src_y": 9, "dest_map": 55, "dest_x": 9, "dest_y": 12, "dir": 8, "event_id": 3},
+        {"src_x": 8, "src_y": 9, "dest_map": 58, "dest_x": 7, "dest_y": 7, "dir": 8, "event_id": 4}
+      ],
+      "passability": [
+        "0000ffffffff00000f0000000ffffffffff00fff00ff",
+        "0ffff000000fffff0fff0ffffffffffff0ffff0ff00f",
+        "ff0000000000000f000f0f0000fffffff0000f00f000",
+        "000fffffffffff0fff0fff00fffffffffff00f00f000",
+        "000fffffffffff000f00ff0ff0fffffff0ff0f00f000",
+        "0fffffffffffffff0f00000f0fffffffff0f0f00fff0",
+        "0f00fffffffff00f0ff0000f0fffffffff0f0fff00f0",
+        "0f00fffffffff00f00ffffff0fffffffff0f000f00f0",
+        "0f00fffffffff00f0000000000fffffff00ff00f00ff",
+        "0f00000f0f00000ffffff000fffff0fffff0ff0f000f",
+        "0f0000000000000ffffffffff000000000ff0f0f000f",
+        "0f0000000000000fffffffff00000000000f0f0ff00f",
+        "0f0000000000000fffffffff00000000000f0f00f00f",
+        "ff0000000000000ff0ffff0f00000000000f0ff0f00f",
+        "00000000000000000000000000000000000f00f0f000",
+        "00000000000000000000000000000000000f00f0f000",
+        "00000000000000000000000000000000000f00f0f000",
+        "00000000000000000000000000000000000ff0f0ff00",
+        "8f0000000000000000000000000000000000f0ff0f00",
+        "0f000fffffffff0000000000fffffffff000f00f0f00",
+        "ff000fffffffff000000000fffffffffff00f00f0ff0",
+        "ff000fffffffff0000000000fffffffff000f00f00f0",
+        "ff000fffffffff000000000fffffffffff00f00f0f80",
+        "ff000ffff0ffff0000000000ffff0ffff00f800f0f00",
+        "f8f00fff000fff000000000000ff0ff0000f00f80f00",
+        "f0f00000000000000000000000000000000f00f00f00",
+        "f0f00000000000000000000000000000000f0f80f800",
+        "f08f00000000000000000000000000000f880f00f00f",
+        "8f08f0000000000000000000000000000f00f80f800f",
+        "08f08888888888f0000000f888888888880f80f800f8",
+        "00f00000000000888888888000000000f88800f00f80",
+        "f0888888f00f8f0000000000f888888880000f80f800",
+        "888888f08888088f00000f888000000000000f00f000",
+        "0f88f08888888f088888880000000000f888880f8000",
+        "0f00888f00000f000000000f8888f000f000000f0000",
+        "f800000888f0088888f0f888000088888000f8880000"
+      ]
+    },
+    "53": {
+      "name": "Battle Frontier Poké Center",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 7, "src_y": 9, "dest_map": 52, "dest_x": 17, "dest_y": 13, "dir": 0, "event_id": 2}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ff00fff00ff000ffffff",
+        "0000fffffff0000fffff",
+        "000000000000000fffff",
+        "000000000000000fffff",
+        "00ff0000000ff00fffff",
+        "00ff0000000ff00fffff",
+        "000000000000000fffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ],
+      "heal": [
+        52,
+        17,
+        14
+      ]
+    },
+    "54": {
+      "name": "Battle Frontier Mart",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 4, "src_y": 8, "dest_map": 52, "dest_x": 22, "dest_y": 13, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ff0f000000ffffffffff",
+        "f00f0000000fffffffff",
+        "ffff000fffffffffffff",
+        "0000000f000fffffffff",
+        "0ff0000f00ffffffffff",
+        "0000000f000fffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "55": {
+      "name": "Battle Tower",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 9, "src_y": 13, "dest_map": 52, "dest_x": 29, "dest_y": 9, "dir": 2, "event_id": 1},
+        {"src_x": 17, "src_y": 11, "dest_map": 57, "dest_x": 16, "dest_y": 11, "dir": 4, "event_id": 13},
+        {"src_x": 2, "src_y": 3, "dest_map": 56, "dest_x": 0, "dest_y": 6, "dir": 6, "event_id": 3},
+        {"src_x": 16, "src_y": 3, "dest_map": 56, "dest_x": 0, "dest_y": 6, "dir": 6, "event_id": 4}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ff0fffffffffffff0fff",
+        "00000fffffffff00000f",
+        "ff0fffffffffffff0fff",
+        "00000fffffffff00000f",
+        "00000fffffffff00000f",
+        "00000fffffffff00000f",
+        "00000ffff00fff00000f",
+        "00000fffffffff00000f",
+        "0000000000000000000f",
+        "00000000000000000fff",
+        "00000000000000000fff",
+        "f0f00000000000000fff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ],
+      "heal": [
+        52,
+        30,
+        10
+      ]
+    },
+    "56": {
+      "name": "Battle Tower arena",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "0fffffffff0fffffffff",
+        "00000f00000fffffffff",
+        "f00f000f00ffffffffff",
+        "00000000000fffffffff",
+        "00000000000fffffffff",
+        "00000000000fffffffff",
+        "f00f000f00ffffffffff",
+        "00000f00000fffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "57": {
+      "name": "Stadium Cup lobby",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 17, "src_y": 11, "dest_map": 55, "dest_x": 16, "dest_y": 11, "dir": 4, "event_id": 1},
+        {"src_x": 2, "src_y": 3, "dest_map": 56, "dest_x": 0, "dest_y": 6, "dir": 6, "event_id": 3},
+        {"src_x": 16, "src_y": 3, "dest_map": 56, "dest_x": 0, "dest_y": 6, "dir": 6, "event_id": 4}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ff0fffffffffffff0fff",
+        "00000fffffffff00000f",
+        "ff0fffffffffffff0fff",
+        "00000fffffffff00000f",
+        "00000fffffffff00000f",
+        "00000fffffffff00000f",
+        "00000ffff00fff00000f",
+        "00000fffffffff00000f",
+        "0000000000000000000f",
+        "00000000000000000fff",
+        "00000000000000000fff",
+        "f0f00000000000000fff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "58": {
+      "name": "Battle Palace",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 7, "src_y": 8, "dest_map": 52, "dest_x": 8, "dest_y": 9, "dir": 2, "event_id": 1},
+        {"src_x": 3, "src_y": 3, "dest_map": 59, "dest_x": 2, "dest_y": 8, "dir": 0, "event_id": 3},
+        {"src_x": 11, "src_y": 3, "dest_map": 59, "dest_x": 2, "dest_y": 8, "dir": 0, "event_id": 4}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "fff0fffffff0ffffffff",
+        "0f000f0f0f000f0fffff",
+        "0ff0ff0ffff0ff0fffff",
+        "000000000000000fffff",
+        "000000000000000fffff",
+        "000000000000000fffff",
+        "000000000000000fffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "59": {
+      "name": "Battle Palace arena",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffff0fffffffff",
+        "0000000000000fffffff",
+        "0000000000000fffffff",
+        "0000000000000fffffff",
+        "0000000000000fffffff",
+        "0000000000000fffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "60": {
+      "name": "Battle Arena",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 5, "src_y": 8, "dest_map": 52, "dest_x": 9, "dest_y": 23, "dir": 2, "event_id": 1},
+        {"src_x": 5, "src_y": 3, "dest_map": 61, "dest_x": 0, "dest_y": 5, "dir": 6, "event_id": 3}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "fffff0ffffffffffffff",
+        "00f00000f00fffffffff",
+        "fffff0ffffffffffffff",
+        "00000000000fffffffff",
+        "00000000000fffffffff",
+        "00000000000fffffffff",
+        "f000000000ffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "61": {
+      "name": "Battle Arena arena",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "f0f00000f0ffffffffff",
+        "f000000000ffffffffff",
+        "00000000000fffffffff",
+        "00000000000fffffffff",
+        "00000000000fffffffff",
+        "f000000000ffffffffff",
+        "f0f00000f0ffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "62": {
+      "name": "Battle Factory",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 10, "src_y": 3, "dest_map": 63, "dest_x": 4, "dest_y": 9, "dir": 0, "event_id": 5},
+        {"src_x": 6, "src_y": 9, "dest_map": 52, "dest_x": 28, "dest_y": 24, "dir": 2, "event_id": 1},
+        {"src_x": 7, "src_y": 9, "dest_map": 52, "dest_x": 28, "dest_y": 24, "dir": 2, "event_id": 2},
+        {"src_x": 3, "src_y": 3, "dest_map": 63, "dest_x": 4, "dest_y": 9, "dir": 0, "event_id": 4}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "fff0ffffff0fffffffff",
+        "0f000ffff000f0ffffff",
+        "0ff0ffffff0ff0ffffff",
+        "00000000000000ffffff",
+        "00000000000000ffffff",
+        "ff0000000000ffffffff",
+        "ff0000000000ffffffff",
+        "ffff000000ffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "63": {
+      "name": "Battle Factory intro corridor",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 4, "src_y": 8, "dest_map": 64, "dest_x": 2, "dest_y": 9, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffff0fffffffffffffff",
+        "000000000fffffffffff",
+        "000000000fffffffffff",
+        "fff0000fffffffffffff",
+        "fff000000fffffffffff",
+        "000000000fffffffffff",
+        "ff00000fffffffffffff",
+        "ff00000fffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "64": {
+      "name": "Battle Factory arena",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 2, "src_y": 8, "dest_map": 65, "dest_x": 4, "dest_y": 5, "dir": 8, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffff0fffffff",
+        "000000000000000fffff",
+        "0000fffffff0000fffff",
+        "0000f00000f0000fffff",
+        "000000000000000fffff",
+        "0000f00000f0000fffff",
+        "0000fffffff00fffffff",
+        "0000000000000fffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "65": {
+      "name": "Battle Factory corridor",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 4, "src_y": 4, "dest_map": 64, "dest_x": 2, "dest_y": 9, "dir": 0, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffff0fffffffffffffff",
+        "000000000fffffffffff",
+        "000000000fffffffffff",
+        "fff0000fffffffffffff",
+        "fff000000fffffffffff",
+        "000000000fffffffffff",
+        "ff00000fffffffffffff",
+        "ff00000fffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "66": {
+      "name": "Safari Zone outside",
+      "width": 22,
+      "height": 21,
+      "objects": [],
+      "warps": [
+        {"src_x": 12, "src_y": 7, "dest_map": 67, "dest_x": 4, "dest_y": 7, "dir": 8, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffffff",
+        "ffffffffffffffffffffff",
+        "ffffffffffffffffffffff",
+        "ffffffffffffffffffffff",
+        "ffffffffffffffffffffff",
+        "ffffffffffffffffffffff",
+        "ffffffffffffffffffffff",
+        "ffffffff00ff0fff00ffff",
+        "ffffffff00000000000000",
+        "ffffffff0ff000fff00000",
+        "ffffffff00000000000000",
+        "ffffffff00000000000000",
+        "ffffffff0000000000ffff",
+        "ffffffff0000000000ffff",
+        "ffffffffffffffffffffff",
+        "ffffffffffffffffffffff",
+        "ffffffffffffffffffffff",
+        "ffffffffffffffffffffff",
+        "ffffffffffffffffffffff",
+        "ffffffffffffffffffffff",
+        "ffffffffffffffffffffff"
+      ],
+      "encounters": {
+        "0": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [20, "ABRA", 12, 15],
+              [20, "DODUO", 13, 15],
+              [20, "NIDORANfE", 15, 16],
+              [20, "NIDORANmA", 15, 16],
+              [10, "HOPPIP", 13, 17],
+              [10, "TANGELA", 14, 16]
+            ]
+          }
+        }
+      }
+    },
+    "67": {
+      "name": "Safari Zone gate",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 4, "src_y": 8, "dest_map": 66, "dest_x": 12, "dest_y": 7, "dir": 0, "event_id": 1},
+        {"src_x": 7, "src_y": 3, "dest_map": 68, "dest_x": 25, "dest_y": 27, "dir": 0, "event_id": 2}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffff0fffffffffffffff",
+        "fff000ffffffffffffff",
+        "f0f000f0ffffffffffff",
+        "f0f000f0ffffffffffff",
+        "f0f000f00fffffffffff",
+        "f0f000f0ffffffffffff",
+        "f0f000f0ffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "68": {
+      "name": "Safari Zone",
+      "width": 51,
+      "height": 34,
+      "objects": [],
+      "warps": [
+        {"src_x": 24, "src_y": 28, "dest_map": 67, "dest_x": 4, "dest_y": 1, "dir": 0, "event_id": 1},
+        {"src_x": 25, "src_y": 28, "dest_map": 67, "dest_x": 4, "dest_y": 1, "dir": 0, "event_id": 2},
+        {"src_x": 26, "src_y": 28, "dest_map": 67, "dest_x": 4, "dest_y": 1, "dir": 0, "event_id": 3}
+      ],
+      "passability": [
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffff0000000000000f0000000000000000000fffffffff",
+        "fffffffff0000000000000f0000000000000000000fffffffff",
+        "fffffffff0000000000000f0000000000000000000fffffffff",
+        "fffffffff000000000000000000000000000000000fffffffff",
+        "fffffffff000000000000000000000000000000000fffffffff",
+        "fffffffff0000000000000f0000000000000000000fffffffff",
+        "fffffffff0000000000000f0000000000000000000fffffffff",
+        "fffffffff000000000fffffffffffffff000000000fffffffff",
+        "fffffffff000000000fffffffffffffff0000ffffffffffffff",
+        "fffffffff000000000ffff0000000ffff000000000fffffffff",
+        "fffffffff000000000ffff0000000ffff000000000fffffffff",
+        "fffffffff000000000fffffffffffffff000000000fffffffff",
+        "fffffffff000000000fffffffffffffff000000000fffffffff",
+        "fffffffffffffff0000000000000ff000000000000fffffffff",
+        "fffffffff0000000000000000000ff000000000000fffffffff",
+        "fffffffff00000000000000000000f000000000000fffffffff",
+        "fffffffff00000000000000000000f000000000000fffffffff",
+        "fffffffff000000000000000000000000000000000fffffffff",
+        "fffffffff000000000000000000000000000000000fffffffff",
+        "fffffffff000000000000000000000000000000000fffffffff",
+        "fffffffff000000000000000000000000000000000fffffffff",
+        "ffffffffffffffffffffffff000ffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "encounters": {
+        "0": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [20, "EXEGGCUTE", 15, 18],
+              [20, "RHYHORN", 16, 18],
+              [10, "AIPOM", 14, 17],
+              [10, "GIRAFARIG", 16, 17],
+              [10, "VENONAT", 15, 18],
+              [10, "VENONAT", 15, 17],
+              [5, "HERACROSS", 15, 17],
+              [5, "TAUROS", 15, 16],
+              [4, "PINSIR", 16, 16],
+              [4, "SCYTHER", 16, 16],
+              [1, "CHANSEY", 17, 17],
+              [1, "KANGASKHAN", 19, 19]
+            ]
+          },
+          "Water": {
+            "step_chance": 2,
+            "slots": [
+              [60, "PSYDUCK", 16, 18],
+              [30, "MARILL", 15, 18],
+              [5, "BUIZEL", 15, 17],
+              [5, "SLOWPOKE", 14, 16]
+            ]
+          },
+          "OldRod": {
+            "step_chance": 0,
+            "slots": [
+              [70, "MAGIKARP", 17, 21],
+              [30, "MAGIKARP", 17, 20]
+            ]
+          },
+          "GoodRod": {
+            "step_chance": 0,
+            "slots": [
+              [60, "MAGIKARP", 16, 20],
+              [20, "FEEBAS", 16, 20],
+              [20, "POLIWAG", 17, 18]
+            ]
+          },
+          "SuperRod": {
+            "step_chance": 0,
+            "slots": [
+              [40, "GOLDEEN", 16, 18],
+              [40, "REMORAID", 17, 19],
+              [15, "CARVANHA", 16, 17],
+              [4, "FINNEON", 15, 18],
+              [1, "DRATINI", 17, 17]
+            ]
+          }
+        }
+      }
+    },
+    "69": {
+      "name": "Route 8",
+      "width": 46,
+      "height": 35,
+      "objects": [],
+      "warps": [
+        {"src_x": 30, "src_y": 16, "dest_map": 71, "dest_x": 8, "dest_y": 2, "dir": 0, "event_id": 1},
+        {"src_x": 31, "src_y": 16, "dest_map": 71, "dest_x": 8, "dest_y": 2, "dir": 0, "event_id": 2},
+        {"src_x": 32, "src_y": 16, "dest_map": 71, "dest_x": 8, "dest_y": 2, "dir": 0, "event_id": 3}
+      ],
+      "passability": [
+        "fffffffffffffffffffffffff000000fffffffffffffff",
+        "fffffffffffffffffffffffff000000fffffffffffffff",
+        "fffffffffffffffffffffffff000000fffffffffffffff",
+        "fffffffffffffffffffffffff000000fffffffffffffff",
+        "fffffffffffffffffffffffffff00fffffffffffffffff",
+        "fffffffffffffffffffffffffff00fffffffffffffffff",
+        "fffffffffffffffffffffffffff00fffffffffffffffff",
+        "fffffffffffffffffffffffffff00fffffffffffffffff",
+        "fffff0fffffffffffffffffffff00fffffffffffffffff",
+        "fffffffffffffffffffffffffff00ffffffffffffff00f",
+        "f0ffff0f0ffffffffffffffffff00ffffffffffff0fff0",
+        "fff000ffffffffffffffffffff000000000ffffffff0ff",
+        "0ffffff0ffffffffffffffffff000000000fffffffffff",
+        "ff0ffffffffffffffffffffffff0000000ffffff0fffff",
+        "ffffffffffffffffffffffffffffff000ffffffffffff0",
+        "ffffffffffffffffffffffffffffff000ffffffffff0ff",
+        "ffffffffffffffffffffffffffffff000fffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffff0fffff0fffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffff0fffff0fffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff"
+      ],
+      "encounters": {
+        "0": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [20, "MAREEP", 16, 18],
+              [20, "ODDISH", 15, 17],
+              [13, "BONSLY", 14, 16],
+              [10, "DITTO", 16, 18],
+              [10, "DITTO", 15, 17],
+              [10, "LOTAD", 15, 18],
+              [10, "LOTAD", 15, 17],
+              [5, "BONSLY", 14, 17],
+              [1, "BONSLY", 15, 15],
+              [1, "BONSLY", 15, 16]
+            ]
+          },
+          "Water": {
+            "step_chance": 2,
+            "slots": [
+              [60, "TENTACOOL", 14, 19],
+              [30, "MANTYKE", 15, 16],
+              [10, "REMORAID", 14, 16]
+            ]
+          },
+          "OldRod": {
+            "step_chance": 0,
+            "slots": [
+              [100, "MAGIKARP", 16, 19]
+            ]
+          },
+          "GoodRod": {
+            "step_chance": 0,
+            "slots": [
+              [60, "BARBOACH", 17, 18],
+              [20, "KRABBY", 15, 16],
+              [20, "SHELLDER", 16, 19]
+            ]
+          },
+          "SuperRod": {
+            "step_chance": 0,
+            "slots": [
+              [40, "CHINCHOU", 17, 19],
+              [40, "QWILFISH", 16, 19],
+              [15, "CORSOLA", 15, 18],
+              [5, "STARYU", 15, 17]
+            ]
+          }
+        }
+      }
+    },
+    "70": {
+      "name": "Route 8 underwater",
+      "width": 46,
+      "height": 35,
+      "objects": [],
+      "passability": [
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffffffffffffffffff",
+        "fffffffffff000ffffffffffffffffffffffffffffffff",
+        "ffffffffff00000fffffffffffffffffffffffffffffff",
+        "ffffffffff00000fffffffffffffffffffffffffffffff",
+        "ffffffffff00000fffffffffffffffffffffffffffffff",
+        "ffffffffff00000fffffffffffffffffffffffffffffff",
+        "ffffffffff00000fffffffffffffffffffffffffffffff",
+        "ffffffffff0000ffffffffffffffffffffffffffffffff",
+        "fffffffffff000ffffffffffffffffffffffffffffffff",
+        "00fffffffff000fffffffffffffffffffffffffff00fff",
+        "000ffffffff0000ffffffffffffffffffffffffff0000f",
+        "000ffffffff000000ffffffffffffffffffffffff00000",
+        "000ffffffff0000000000ffffffffffffffffffffff000",
+        "000fffffffff0000000000000ffffff0000fffffffff00",
+        "000ffffffffff000000000000ffffff00000fffffffff0",
+        "0000ffffffffffff00000000fffffff0000000fffffff0",
+        "0000ffffffffffffffffffffffffffff00000000ffff00",
+        "00000ffffffffffffffffffffffffffff0000000000000",
+        "000000fffffffffffffffffffffffffffff00000000000",
+        "000000ffffffffffffffffffffffffffffff0000000000",
+        "0000000fffffffffffffffffffffffffffff0000000000",
+        "000000000ffffffffffffffffffffffffffff000000000",
+        "000000000000fffffffffffffffffffffffff000000000",
+        "0000000000000000ffffffffff00fffffffff000000000"
+      ],
+      "encounters": {
+        "0": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [20, "CHINCHOU", 17, 21],
+              [20, "CLAMPERL", 18, 20],
+              [20, "SHELLDER", 18, 20],
+              [10, "CLAMPERL", 18, 19],
+              [10, "CORSOLA", 17, 20],
+              [10, "RELICANTH", 16, 19],
+              [10, "SHELLDER", 18, 19]
+            ]
+          }
+        }
+      }
+    },
+    "71": {
+      "name": "Route 8 harbor",
+      "width": 20,
+      "height": 15,
+      "objects": [
+        {"kind": "gift", "item": "AURORATICKET", "x": 6, "y": 5, "event_id": 3},
+        {"kind": "gift", "item": "OLDSEAMAP", "x": 10, "y": 5, "event_id": 4}
+      ],
+      "warps": [
+        {"src_x": 8, "src_y": 2, "dest_map": 69, "dest_x": 31, "dest_y": 15, "dir": 0, "event_id": 1},
+        {"src_x": 8, "src_y": 6, "dest_map": 75, "dest_x": 17, "dest_y": 11, "dir": 2, "event_id": 2},
+        {"src_x": 8, "src_y": 6, "dest_map": 72, "dest_x": 14, "dest_y": 23, "dir": 8, "event_id": 2},
+        {"src_x": 8, "src_y": 6, "dest_map": 73, "dest_x": 14, "dest_y": 23, "dir": 8, "event_id": 2}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffff0fffffffffff",
+        "00000000000000000fff",
+        "ffffff00000fffffffff",
+        "ffffff00000fffffffff",
+        "ffffffff0fffffffffff",
+        "ffffffff0fffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "72": {
+      "name": "Berth Island",
+      "width": 29,
+      "height": 31,
+      "objects": [],
+      "warps": [
+        {"src_x": 13, "src_y": 24, "dest_map": 71, "dest_x": 8, "dest_y": 5, "dir": 8, "event_id": 1},
+        {"src_x": 14, "src_y": 24, "dest_map": 71, "dest_x": 8, "dest_y": 5, "dir": 8, "event_id": 2},
+        {"src_x": 15, "src_y": 24, "dest_map": 71, "dest_x": 8, "dest_y": 5, "dir": 8, "event_id": 3}
+      ],
+      "passability": [
+        "ffffffffffffff0ffffffffffffff",
+        "ffffffffffffff0ffffffffffffff",
+        "ffffffffffffff0ffffffffffffff",
+        "ffffffffffffff0ffffffffffffff",
+        "fffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffff",
+        "ffffffffff000000000ffffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff000f00000f000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff000f00000f000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffffff000000000ffffffffff",
+        "ffffffffff000000000ffffffffff",
+        "ffffffffffffff0ffffffffffffff",
+        "ffffffffffffff0ffffffffffffff",
+        "ffffffffffffff0ffffffffffffff",
+        "fffffffffffff000fffffffffffff",
+        "fffffffffffff000fffffffffffff",
+        "fffffffffffff000fffffffffffff",
+        "fffffffffffffffffffffffffffff",
+        "fffffffffff0fffff0fffffffffff",
+        "fffffffffffffffffffffffffffff",
+        "fffffffffff0fffff0fffffffffff",
+        "fffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffff"
+      ]
+    },
+    "73": {
+      "name": "Faraday Island",
+      "width": 29,
+      "height": 31,
+      "objects": [],
+      "warps": [
+        {"src_x": 13, "src_y": 24, "dest_map": 71, "dest_x": 8, "dest_y": 5, "dir": 8, "event_id": 1},
+        {"src_x": 14, "src_y": 24, "dest_map": 71, "dest_x": 8, "dest_y": 5, "dir": 8, "event_id": 2},
+        {"src_x": 15, "src_y": 24, "dest_map": 71, "dest_x": 8, "dest_y": 5, "dir": 8, "event_id": 3}
+      ],
+      "passability": [
+        "ffffffffffffff0ffffffffffffff",
+        "ffffffffffffff0ffffffffffffff",
+        "ffffffffffffff0ffffffffffffff",
+        "ffffffffffffff0ffffffffffffff",
+        "fffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffff",
+        "ffffffffff000000000ffffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffff0000000000000ffffffff",
+        "ffffffffff000000000ffffffffff",
+        "ffffffffff000000000ffffffffff",
+        "ffffffffffffff0ffffffffffffff",
+        "ffffffffffffff0ffffffffffffff",
+        "ffffffffffffff0ffffffffffffff",
+        "fffffffffffff000fffffffffffff",
+        "fffffffffffff000fffffffffffff",
+        "fffffffffffff000fffffffffffff",
+        "fffffffffffffffffffffffffffff",
+        "fffffffffff0fffff0fffffffffff",
+        "fffffffffffffffffffffffffffff",
+        "fffffffffff0fffff0fffffffffff",
+        "fffffffffffffffffffffffffffff",
+        "fffffffffffffffffffffffffffff"
+      ]
+    },
+    "74": {
+      "name": "Route 6 Cycling Road gate",
+      "width": 20,
+      "height": 15,
+      "objects": [],
+      "warps": [
+        {"src_x": 0, "src_y": 6, "dest_map": 45, "dest_x": 30, "dest_y": 9, "dir": 0, "event_id": 3},
+        {"src_x": 12, "src_y": 6, "dest_map": 44, "dest_x": 37, "dest_y": 17, "dir": 0, "event_id": 4}
+      ],
+      "passability": [
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ff000000000fffffffff",
+        "f0fffffffff0ffffffff",
+        "f00000000000ffffffff",
+        "f00000000000ffffffff",
+        "f00000000000ffffffff",
+        "f00000000000ffffffff",
+        "f00000000000ffffffff",
+        "f0fffffffff0ffffffff",
+        "ff000000000fffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff",
+        "ffffffffffffffffffff"
+      ]
+    },
+    "75": {
+      "name": "Tiall Region",
+      "width": 32,
+      "height": 24,
+      "objects": [],
+      "warps": [
+        {"src_x": 14, "src_y": 11, "dest_map": 71, "dest_x": 8, "dest_y": 5, "dir": 8, "event_id": 1}
+      ],
+      "passability": [
+        "ffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffff",
+        "fffffffffff0000000000fffffffffff",
+        "fffffffffff0000000000fffffffffff",
+        "fffffffff00000000000000fffffffff",
+        "fffffffff00000000000000fffffffff",
+        "fffffffff00000000000000fffffffff",
+        "fffffffff00000000000000fffffffff",
+        "fffffffff00000000000000fffffffff",
+        "fffffffff00000000000000fffffffff",
+        "fffffffffff0000000000fffffffffff",
+        "fffffffffff0000000000fffffffffff",
+        "ffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffff",
+        "ffffffffffffffffffffffffffffffff"
+      ],
+      "encounters": {
+        "0": {
+          "Land": {
+            "step_chance": 21,
+            "slots": [
+              [20, "GEODUDE_1", 11, 14],
+              [20, "RATTATA_1", 11, 14],
+              [10, "CUBONE", 11, 14],
+              [10, "DIGLETT_1", 11, 14],
+              [10, "MEOWTH_1", 11, 14],
+              [10, "PIKACHU", 11, 14],
+              [10, "SANDSHREW_1", 11, 14],
+              [10, "VULPIX_1", 11, 14]
+            ]
+          }
+        }
+      }
+    }
+  },
+  "connections": [
+    [41, "N", 0, 40, "S", 0],
+    [41, "S", 6, 45, "N", 0],
+    [44, "S", 43, 5, "N", 0],
+    [66, "N", 18, 5, "S", 0],
+    [7, "S", 0, 5, "N", 2],
+    [2, "N", 0, 5, "S", 4],
+    [7, "W", 5, 44, "E", 0],
+    [2, "W", 0, 66, "E", 0],
+    [69, "N", 0, 66, "S", 10],
+    [35, "W", 11, 39, "E", 0],
+    [7, "E", 0, 23, "W", 78],
+    [31, "S", 32, 23, "N", 0],
+    [21, "E", 0, 23, "W", 1],
+    [47, "W", 0, 7, "E", 0],
+    [21, "S", 0, 7, "N", 21],
+    [31, "W", 0, 35, "E", 10],
+    [69, "N", 12, 2, "S", 0],
+    [47, "E", 8, 52, "W", 0],
+    [21, "E", 77, 47, "W", 0]
+  ],
+  "home": [
+    3,
+    7,
+    5,
+    8
+  ],
+  "start": [
+    1,
+    9,
+    7
+  ]
+}

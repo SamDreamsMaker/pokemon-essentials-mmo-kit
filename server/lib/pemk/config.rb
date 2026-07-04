@@ -7,12 +7,24 @@ module PEMK
   # economy cap (the audit flagged the old `rescue 999_999` silent default).
   class Config
     attr_reader :bind, :port, :database_url, :economy_caps, :badges_max, :inventory_caps,
-                :monster_caps
+                :monster_caps, :world_path, :position_enforcement
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
       @port         = Integer(env.fetch("PEMK_PORT", "9998"))
       @database_url = env.fetch("DATABASE_URL")
+
+      # M4 Layer A: path to the build-time world export (server/data/world.json) the
+      # WorldData model loads. Just a PATH here — a missing file is tolerated at boot
+      # (audit no-ops); only a present-but-invalid file is a boot error (in WorldData).
+      @world_path   = env.fetch("PEMK_WORLD", File.join(root, "data", "world.json"))
+
+      # M4 Layer B enforcement mode: :off (detect+log only), :shadow (also log what a
+      # snap-back WOULD do, correcting nothing), :on (actually snap-back). Default
+      # :off — enforcement is opt-in and :shadow is the safe observe-first stage. An
+      # unknown value falls back to :off rather than booting into a stricter mode.
+      mode = env.fetch("PEMK_POS_ENFORCE", "off").to_s.strip.downcase
+      @position_enforcement = %w[off shadow on].include?(mode) ? mode.to_sym : :off
 
       caps = YAML.safe_load_file(File.join(root, "config", "economy_caps.yml"))
       @economy_caps = {

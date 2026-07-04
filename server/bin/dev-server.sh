@@ -23,6 +23,13 @@ pkill -f 'ruby bin/pemk_server.rb' 2>/dev/null || true
 sleep 0.5
 
 cd "$(dirname "$0")/.."   # -> server/
+
+# M4 Layer B: run the DEV server in SHADOW enforcement by default — it only LOGS what
+# a position snap-back would do ("posenforce[shadow]: ... WOULD-CORRECT ..."), never
+# corrects a player. Override with PEMK_POS_ENFORCE=off (silent) or =on (real
+# snap-back) once the shadow telemetry is confirmed clean.
+: "${PEMK_POS_ENFORCE:=shadow}"
+
 bundle exec rake db:migrate
-echo "PEMK server starting on 0.0.0.0:9998 (Ctrl-C to stop)"
-exec env PEMK_BIND=0.0.0.0 PEMK_PORT=9998 bundle exec ruby bin/pemk_server.rb
+echo "PEMK server starting on 0.0.0.0:9998 (enforce=$PEMK_POS_ENFORCE, Ctrl-C to stop)"
+exec env PEMK_BIND=0.0.0.0 PEMK_PORT=9998 PEMK_POS_ENFORCE="$PEMK_POS_ENFORCE" bundle exec ruby bin/pemk_server.rb
