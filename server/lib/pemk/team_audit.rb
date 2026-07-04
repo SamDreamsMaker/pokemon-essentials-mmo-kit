@@ -16,6 +16,16 @@ module PEMK
   class TeamAudit
     MODES = %i[off shadow on].freeze
 
+    # SOFT violations have a legitimate real-world cause, so they are logged but do NOT
+    # make a team "illegal" (and a future enforce gate must not block on them):
+    #   below_minimum_level — an operator can distribute an evolved mon below its
+    #     evolution level (event/gift), which minimum_level can't express;
+    #   unknown_* — a stale export predates newer content, which is a coverage gap,
+    #     not a cheat (re-export fixes it).
+    # Everything else (illegal move/ability, IV/EV/level over cap, party too large,
+    # unholdable item, malformed mon) has no legitimate cause and is HARD.
+    SOFT_PREFIXES = %w[below_minimum_level unknown_species unknown_move unknown_nature unknown_item].freeze
+
     def initialize(battle_data, mode: :off, party_max: nil, logger: nil)
       @bd        = battle_data
       @mode      = MODES.include?(mode) ? mode : :off
@@ -48,8 +58,11 @@ module PEMK
         mons << { slot: i, species: (m.is_a?(Hash) ? m["species"].to_s : nil), violations: vs }
       end
 
-      legal = team_v.empty? && mons.empty?
-      log_verdict(account_id, team_v, mons) unless legal
+      # "legal" is decided by HARD violations only; a soft-only team is logged as a
+      # suspicious (not illegal) team, because it can be a genuine event/gift mon.
+      any   = team_v.any? || mons.any?
+      legal = !hard_violation?(team_v, mons)
+      log_verdict(account_id, team_v, mons, legal) if any
       { checked: true, legal: legal, team_violations: team_v, mons: mons }
     end
 
@@ -172,18 +185,30 @@ module PEMK
       h.each { |stat, val| yield(stat, val) if val.is_a?(Integer) }
     end
 
-    def log_verdict(account_id, team_v, mons)
-      label = case @mode
-              when :on     then "REJECT"
-              when :shadow then "WOULD-REJECT"
-              else              "flag"
-              end
+    def soft_violation?(v)
+      SOFT_PREFIXES.any? { |p| v.start_with?(p) }
+    end
+
+    def hard_violation?(team_v, mons)
+      all = team_v + mons.flat_map { |mo| mo[:violations] }
+      all.any? { |v| !soft_violation?(v) }
+    end
+
+    def log_verdict(account_id, team_v, mons, legal)
+      # Soft-only -> "suspect suspicious team" (a real distribution can look like this);
+      # a hard violation -> the mode label + "illegal team". D1 has NO battle-entry gate,
+      # so even :on blocks nothing yet.
+      label, kind =
+        if legal
+          ["suspect", "suspicious team"]
+        else
+          [{ on: "REJECT", shadow: "WOULD-REJECT" }.fetch(@mode, "flag"), "illegal team"]
+        end
       parts = team_v.dup
       mons.each { |mo| parts << "slot#{mo[:slot]}(#{mo[:species]}):#{mo[:violations].join(',')}" }
       shown = parts.first(12)
       shown << "(+#{parts.length - shown.length} more)" if parts.length > shown.length
-      # Honest label: D1 has NO battle-entry gate, so even :on blocks nothing yet.
-      @log.call("team: account #{account_id} #{label} illegal team [#{shown.join(' | ')}] (detection-only, no enforce gate yet)")
+      @log.call("team: account #{account_id} #{label} #{kind} [#{shown.join(' | ')}] (detection-only, no enforce gate yet)")
     end
   end
 end

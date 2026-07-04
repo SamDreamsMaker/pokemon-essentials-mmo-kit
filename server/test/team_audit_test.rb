@@ -103,6 +103,24 @@ class TeamAuditTest < Minitest::Test
     assert_includes violations_of(mon("VENUSAUR", level: 10, moves: %w[PETALDANCE])), "below_minimum_level:10<32"
   end
 
+  # below_minimum_level is SOFT: a real event/gift can distribute an evolved mon below
+  # its evolution level, so it is logged ("suspect") but does NOT make the team illegal.
+  def test_below_minimum_level_is_soft_not_illegal
+    r = @audit.check(1, [mon("VENUSAUR", level: 10, moves: %w[PETALDANCE])])
+    assert r[:legal], "soft-only team must stay legal: #{r.inspect}"
+    assert_includes r[:mons][0][:violations], "below_minimum_level:10<32"
+    assert(@logs.any? { |m| m.include?("suspect suspicious team") }, @logs.inspect)
+  end
+
+  # A HARD violation (a move the species genuinely can't learn) does make it illegal,
+  # and mixing a hard + soft violation stays illegal (the Burmy-Payback + low-level case).
+  def test_hard_violation_makes_team_illegal
+    refute @audit.check(1, [mon("BULBASAUR", moves: %w[EARTHQUAKE])])[:legal]
+    mixed = @audit.check(1, [mon("VENUSAUR", level: 5, moves: %w[EARTHQUAKE])])   # below-min (soft) + illegal move (hard)
+    refute mixed[:legal]
+    assert(@logs.any? { |m| m.include?("illegal team") }, @logs.inspect)
+  end
+
   def test_illegal_and_unknown_moves
     assert_includes violations_of(mon("BULBASAUR", moves: %w[EARTHQUAKE])), "illegal_move:EARTHQUAKE" # exists, not learnable
     assert_includes violations_of(mon("BULBASAUR", moves: %w[FOOBAR])),     "unknown_move:FOOBAR"     # not a move at all

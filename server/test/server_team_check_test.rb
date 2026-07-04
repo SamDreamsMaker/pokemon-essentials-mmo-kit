@@ -42,7 +42,10 @@ class ServerTeamCheckTest < Minitest::Test
 
   def setup
     @db = Sequel.connect(ENV.fetch("DATABASE_URL"))
-    @db[:accounts].delete
+    @db[:pickups].delete rescue nil
+    @db[:monster_transfers].delete rescue nil
+    @db[:monsters].delete rescue nil
+    @db[:accounts].delete   # cascades to the rest
     @logs = []
   end
 
