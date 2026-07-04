@@ -112,6 +112,15 @@ class PositionAuditTest < Minitest::Test
     assert_equal :match, pa(w).check(1, env(map: 5, x: 1, y: 1), { last_pos: [5, 1, 1] })
   end
 
+  def test_stationary_on_a_blocked_tile_is_not_noclip
+    # A login seeded on (or a heartbeat over) a tile the export mis-marks as blocked
+    # must NOT no-clip — only a MOVE onto a blocked tile does. Guards the M4-B
+    # server-spawn seed against a snap-back loop.
+    w = FakeWorld.new(walk: { [5, 2, 1] => false })
+    assert_equal :match, pa_mode(w, :on).check(1, env(map: 5, x: 2, y: 1), { last_pos: [5, 2, 1] })
+    assert_empty @logs
+  end
+
   def test_legal_warp_destination_transfer
     w = FakeWorld.new(warps: { [5, 7, 10, 20] => true })
     assert_equal :match, pa(w).check(1, env(map: 7, x: 10, y: 20), { last_pos: [5, 3, 3] })
@@ -214,6 +223,14 @@ class PositionAuditTest < Minitest::Test
     # it is a known warp dest, so it must NOT be flagged.
     w = FakeWorld.new(warps: { [5, 5, 20, 20] => true })
     assert_equal :match, pa(w).check(1, env(map: 5, x: 20, y: 20), { last_pos: [5, 3, 3] })
+    assert_empty @logs
+  end
+
+  def test_same_map_warp_destination_on_a_blocked_tile_is_not_noclip
+    # Whitelist-before-noclip: a same-map warp pad landing on a tile the passability
+    # export mis-marks as blocked must be cleared by the warp whitelist, not :noclip.
+    w = FakeWorld.new(walk: { [5, 20, 20] => false }, warps: { [5, 5, 20, 20] => true })
+    assert_equal :match, pa_mode(w, :on).check(1, env(map: 5, x: 20, y: 20), { last_pos: [5, 3, 3] })
     assert_empty @logs
   end
 

@@ -118,7 +118,7 @@ module PEMK
       when :register then handle_register(conn, env)
       when :login    then handle_login(conn, env)
       when :auth     then handle_auth(conn, env)
-      when :save     then handle_save(env, dec[:body], authed)
+      when :save     then handle_save(env, dec[:body], authed, conn.data[:last_pos])
       when :econ     then handle_econ(conn, env, authed)
       when :inv      then handle_inv(conn, env, authed)
       when :uid_req  then handle_uid_req(conn, env, authed)
@@ -170,9 +170,11 @@ module PEMK
             @mailbox.submit(acct[:id]) do
               blob = @characters.load_blob(acct[:id])   # opaque; never loaded here
               rec  = reconcile_block(acct[:id])
+              pos  = (@characters.load_position(acct[:id]) rescue nil)   # M4-B: seed last_pos (never brick login)
               @reactor.post do
                 if @reactor.alive?(conn)   # never bind a dead conn into @online
                   bind(conn, acct[:id])
+                  conn.data[:last_pos] = pos if pos
                   reply_body(conn, { type: :login_ok, account_id: acct[:id], token: token }.merge(rec), blob)
                 end
               end
@@ -194,9 +196,11 @@ module PEMK
             @mailbox.submit(account_id) do
               blob = @characters.load_blob(account_id)
               rec  = reconcile_block(account_id)
+              pos  = (@characters.load_position(account_id) rescue nil)   # M4-B: seed last_pos (never brick login)
               @reactor.post do
                 if @reactor.alive?(conn)   # never bind a dead conn into @online
                   bind(conn, account_id)
+                  conn.data[:last_pos] = pos if pos
                   reply_body(conn, { type: :auth_ok, account_id: account_id }.merge(rec), blob)
                 end
               end
@@ -213,7 +217,7 @@ module PEMK
     # must commit in arrival order (raw-pool scheduling could commit the OLDER
     # blob last, silently rolling the account back), and the login/auth state
     # read serializes behind any in-flight save.
-    def handle_save(env, body, account_id)
+    def handle_save(env, body, account_id, last_pos)
       unless body.is_a?(String) && !body.empty?
         @log.call("server: empty :save from account #{account_id} -> ignore")
         return
@@ -222,8 +226,11 @@ module PEMK
       tid = env[:trainer_id]
       sv  = env[:save_version]
       wv  = env[:wire_version]
+      # Persist the SERVER-tracked position (captured on the reactor thread when the
+      # frame arrived, not client-claimed) alongside the blob, so the next login seeds
+      # the position audit. nil (no presence yet) leaves the stored position untouched.
       @mailbox.submit(account_id) do
-        @characters.store(account_id, blob: body, trainer_id: tid, save_version: sv, wire_version: wv)
+        @characters.store(account_id, blob: body, trainer_id: tid, save_version: sv, wire_version: wv, position: last_pos)
         @log.call("server: saved account #{account_id} (#{body.bytesize}B)")
       end
     end
@@ -391,6 +398,17 @@ module PEMK
       map = env[:map]
       return unless map.is_a?(Integer)
 
+      # M4 Layer B: audit FIRST. In :on mode an enforceable violation stashes the
+      # last-good tile in conn.data[:correct_to] — send a :pos_correct and REJECT the
+      # frame: no zone change and no fan-out of the rejected position, so peers keep
+      # seeing the offender at its last accepted tile and it never joins the illegal
+      # map's zone. In :off/:shadow correct_to is never set, so the frame flows on.
+      @pos_audit.check(account_id, env, conn.data)
+      if (tgt = conn.data.delete(:correct_to))
+        reply(conn, type: :pos_correct, map: tgt[0], x: tgt[1], y: tgt[2])
+        return
+      end
+
       old = conn.data[:map_id]
       if old && old != map
         @zones[old].delete(conn)
@@ -398,15 +416,6 @@ module PEMK
       end
       @zones[map].add(conn)
       conn.data[:map_id] = map
-
-      # M4 Layer B position audit: check this tile against the world model + log. In
-      # enforcement mode :on it may flag a snap-back — the audit stashes the last-good
-      # tile in conn.data[:correct_to]; send it as a :pos_correct so the client returns
-      # there. Inline + cheap (hash/string reads); no reply in :off/:shadow.
-      @pos_audit.check(account_id, env, conn.data)
-      if (tgt = conn.data.delete(:correct_to))
-        reply(conn, type: :pos_correct, map: tgt[0], x: tgt[1], y: tgt[2])
-      end
 
       broadcast_zone(map, conn, Wire.encode_split(env.merge(id: account_id)))
     end

@@ -81,15 +81,23 @@ module PEMK
 
       pmap, px, py = prev
       if pmap == map
+        # A stationary frame (heartbeat re-announce / turn-in-place / a login-seeded
+        # re-emit of the same tile) is not a MOVE, so it can't be a no-clip. This also
+        # stops a login on a tile the export mis-marks as blocked (bridge/event) from
+        # snap-back looping, and stops heartbeat no-clip spam while standing still.
+        return :match if x == px && y == py
+
+        # A known legal destination (a same-map warp pad / spin tile, or a spawn /
+        # heal tile) is legal even if the passability export mis-marks it — check the
+        # whitelist BEFORE noclip, mirroring the cross-map legal_transfer? ordering.
+        return :match if @world.warp_dest?(map, map, x, y) || @world.spawn_tile?(map, x, y)
+
         return :noclip if noclip?(map, x, y, env)
 
         # Chebyshev distance: an orthogonal OR diagonal single step is legal; a jump
         # of 2+ tiles between consecutive per-step frames is a teleport/speedhack —
-        # UNLESS it is a known same-map warp destination (teleport pad / spin tile /
-        # in-building reposition) or a LEDGE hop (a straight 2-tile jump over a ledge
-        # tile), both of which the world model carries.
+        # UNLESS it is a LEDGE hop (a straight 2-tile jump over a ledge tile).
         if [(x - px).abs, (y - py).abs].max > 1
-          return :match if @world.warp_dest?(map, map, x, y)
           return :match if ledge_hop?(map, px, py, x, y)
 
           return :teleport
