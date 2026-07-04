@@ -460,6 +460,8 @@ module PEMK
       mint = @encounter_mint.roll(map, enctype)
       return reply(conn, type: :encounter_deny, seq: seq, reason: "no_table") unless mint   # unexported -> local
 
+      @log.call("encounter: account #{account_id} MINT map #{map} #{enctype} -> " \
+                "#{mint['species']}@#{mint['level']}#{mint['shiny'] ? ' /SHINY' : ''}")
       reply(conn, type: :encounter_grant, seq: seq,
             species: mint["species"], level: mint["level"],
             pid: mint["pid"], iv: mint["iv"], shiny: mint["shiny"])
