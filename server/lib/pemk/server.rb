@@ -47,6 +47,7 @@ module PEMK
       @world      = WorldData.new(@config.world_path, logger: @log)
       @audit      = Audit.new(@world, logger: @log)
       @pos_audit  = PositionAudit.new(@world, logger: @log, mode: @config.position_enforcement)   # M4 Layer B
+      @pickups    = Pickups.new(@db)   # M4 Layer C one-shot ledger
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
       @zones    = Hash.new { |h, k| h[k] = Set.new }   # map_id => Set(conn); reactor-thread only
@@ -301,8 +302,23 @@ module PEMK
     # layer). Identity is the server-trusted account_id, never a client :id.
     def handle_interact_claim(conn, env, account_id)
       # Layer C: judge the pickup against the player's SERVER-tracked tile (Layer B),
-      # not the client-claimed px/py — so a remote pickup is caught.
-      @audit.check_interaction(account_id, env, conn.data[:last_pos])
+      # not the client-claimed px/py — so a remote pickup is caught. Inline + cheap.
+      verdict = @audit.check_interaction(account_id, env, conn.data[:last_pos])
+
+      # Layer C one-shot: a VALID item-ball pickup is recorded per account; a repeat
+      # claim for the same tile is a dupe. The DB write goes on the per-account mailbox
+      # so it never blocks the reactor. (Gifts have no fixed tile — skip them.)
+      return unless verdict == :match && env[:kind] == :item
+
+      map = env[:map]; x = env[:x]; y = env[:y]
+      return unless map.is_a?(Integer) && x.is_a?(Integer) && y.is_a?(Integer)
+
+      item = env[:item]
+      @mailbox.submit(account_id) do
+        if @pickups.record(account_id, map, x, y) == :dup
+          @log.call("audit: account #{account_id} already_taken item=#{item.to_s[0, 32]} at (#{map},#{x},#{y})")
+        end
+      end
     end
 
     # Server-authoritative trade COMMIT (M3.2). The only authoritative trade frame
