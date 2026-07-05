@@ -64,7 +64,8 @@ bash bin/setup.sh        # one-time: installs Ruby+Postgres, creates the dev DB
 
 ## Docs
 
-- **Install from scratch on Windows (novice-friendly):** [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md)
+- **▶ Start here — from zero to running (play *or* develop):** [`docs/GETTING-STARTED.md`](docs/GETTING-STARTED.md)
+- **Install the server from scratch on Windows (novice-friendly):** [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md)
 - **Client SDK guide, configuration & LAN/deploy:** [`Plugins/PEMK/README.md`](Plugins/PEMK/README.md)
 - **Dedicated server (ops, tests, schema):** [`server/README.md`](server/README.md)
 - **Security model & anti-cheat roadmap:** [`docs/ARCHITECTURE-SECURITY.md`](docs/ARCHITECTURE-SECURITY.md)
