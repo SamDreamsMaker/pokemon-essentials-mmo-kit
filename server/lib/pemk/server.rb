@@ -40,7 +40,12 @@ module PEMK
       @characters = Characters.new(@db)
       @ledger     = Ledger.new(@db, @config.economy_caps)
       @inventory  = Inventory.new(@db, @config.inventory_caps, logger: @log)
-      @monsters   = Monsters.new(@db, @config.monster_caps, logger: @log)
+      @encounter_rolls = EncounterRolls.new(@db)   # M4 D3.2: persisted mints -> mon provenance
+      # Provenance labeling only makes sense when the server actually mints encounters:
+      # off/shadow would label every honest catch "client" (and invert the signal). With
+      # rolls disabled, origin stays NULL = its documented "unknown" meaning.
+      @monsters   = Monsters.new(@db, @config.monster_caps, logger: @log,
+                                 rolls: (@config.battle_enforce_encounters == :on ? @encounter_rolls : nil))
       @trades     = Trades.new(@db)
       # M4 Layer A: read-only world model + detection-only interaction audit. Both are
       # in-memory and DB-free; a missing export just makes the audit a no-op.
@@ -49,6 +54,7 @@ module PEMK
       @team_audit = TeamAudit.new(@battle, mode: @config.battle_enforce_teams,
                                   party_max: @config.monster_caps[:party_max], logger: @log)   # M4 Layer D D1
       @encounter_mint = EncounterMint.new(@world, logger: @log)   # M4 Layer D D2 wild-encounter roller
+      @catch_calc = CatchCalc.new(@battle)                        # M4 Layer D D3 capture adjudication
       @audit      = Audit.new(@world, logger: @log)
       @pos_audit  = PositionAudit.new(@world, logger: @log, mode: @config.position_enforcement)   # M4 Layer B
       @pickups    = Pickups.new(@db)   # M4 Layer C one-shot ledger
@@ -79,6 +85,16 @@ module PEMK
       @log.call("server: battle data #{@battle.summary} (M4 Layer D)")
       @log.call("server: team legality enforcement = #{@config.battle_enforce_teams} (M4 Layer D D1, detection-only)")
       @log.call("server: encounter enforcement = #{@config.battle_enforce_encounters} (M4 Layer D D2)")
+      @log.call("server: catch enforcement = #{@config.battle_enforce_catches} (M4 Layer D D3)")
+      begin
+        pruned = @encounter_rolls.prune
+        @log.call("server: pruned #{pruned} stale encounter roll(s) (>#{EncounterRolls::RETENTION_DAYS}d, never fought)") if pruned.positive?
+      rescue StandardError => e
+        @log.call("server: encounter-roll prune failed #{e.class}: #{e.message}")
+      end
+      if @config.battle_enforce_catches == :on && @config.battle_enforce_encounters != :on
+        @log.call("server: WARNING catch enforcement is on but encounter enforcement is #{@config.battle_enforce_encounters} — catches need a server encounter mint, so they will all fail-open to local")
+      end
       @log.call("server: position enforcement = #{@config.position_enforcement} (M4 Layer B)")
       @log.call("server: pickup enforcement = #{@config.pickup_enforce ? 'on' : 'off'} (M4 Layer C server-mint)")
       @log.call("server: WARNING pickup reset ALLOWED (PEMK_ALLOW_PICKUP_RESET=on) — DEV ONLY, disable in production") if @config.pickup_reset_allowed
@@ -139,6 +155,8 @@ module PEMK
       when :team_check then handle_team_check(conn, env, authed)
       when :encounter_report then handle_encounter_report(conn, env, authed)
       when :encounter_req then handle_encounter_req(conn, env, authed)
+      when :catch_req then handle_catch_req(conn, env, authed)
+      when :catch_report then handle_catch_report(conn, env, authed)
       when :trade_commit then handle_trade_commit(conn, env, authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
@@ -414,8 +432,8 @@ module PEMK
     # server-tracked position (Layer B).
     def handle_encounter_report(conn, env, account_id)
       map     = env[:map]
-      enctype = env[:enctype].to_s
-      species = env[:species].to_s
+      enctype = env[:enctype].to_s[0, 24]
+      species = env[:species].to_s[0, 32]
       level   = env[:level]
       return unless map.is_a?(Integer) && !enctype.empty? && !species.empty?
 
@@ -441,7 +459,13 @@ module PEMK
     # Fail-OPEN: a wrong-map claim or a map with no table denies, and the client falls back
     # to a local roll — wild encounters must never just stop happening.
     def handle_encounter_req(conn, env, account_id)
-      seq     = env[:seq]
+      seq = env[:seq]
+      # Only an `on` server mints (an honest client only asks when `on` was advertised;
+      # a modified one asking anyway must not get real mints recorded as provenance).
+      unless @config.battle_enforce_encounters == :on
+        return reply(conn, type: :encounter_deny, seq: seq, reason: "not_enforcing")
+      end
+
       map     = env[:map]
       enctype = env[:enctype].to_s
       return reply(conn, type: :encounter_deny, seq: seq, reason: "bad_req") unless map.is_a?(Integer) && !enctype.empty?
@@ -460,11 +484,110 @@ module PEMK
       mint = @encounter_mint.roll(map, enctype)
       return reply(conn, type: :encounter_deny, seq: seq, reason: "no_table") unless mint   # unexported -> local
 
+      # Stash the mint on the connection (last 2 — a double wild battle mints two) so a
+      # following :catch_req can be adjudicated against WHAT THE SERVER MINTED — its
+      # species/level/IVs — not client claims. Same per-conn pattern as :last_pos.
+      stash = (conn.data[:enc_mints] ||= [])
+      stash << mint
+      stash.shift while stash.length > 2
+
+      # D3.2: persist the mint (durable claim-check for the caught mon's UID provenance).
+      # Background on the per-account mailbox — the grant reply stays inline, and mailbox
+      # FIFO guarantees this insert lands before any later catch/uid frame's DB work.
+      @mailbox.submit(account_id) do
+        begin
+          @encounter_rolls.record(account_id, mint, map, enctype)
+        rescue StandardError => e
+          @log.call("encounter: roll persist failed #{e.class}: #{e.message}")
+        end
+      end
+
       @log.call("encounter: account #{account_id} MINT map #{map} #{enctype} -> " \
                 "#{mint['species']}@#{mint['level']}#{mint['shiny'] ? ' /SHINY' : ''}")
       reply(conn, type: :encounter_grant, seq: seq,
             species: mint["species"], level: mint["level"],
             pid: mint["pid"], iv: mint["iv"], shiny: mint["shiny"])
+    end
+
+    # M4 Layer D D3 (on): server-adjudicated Poké Ball capture. The client asks for a
+    # verdict on a ball throw; the server finds the STASHED D2 encounter mint (so species/
+    # level/IVs are what IT minted, never client claims), computes the engine capture
+    # formula with clamped client inputs (HP bounded by the server-computed max, ball rate
+    # capped at the ball's legitimate best, status whitelisted) and rolls the shakes with
+    # SecureRandom — a cheat can no longer force an unrolled catch. A successful catch
+    # CONSUMES the stashed mint (one catch per encounter). Fail-OPEN: no mint / not
+    # enforcing / unknown species -> deny -> the client rolls locally.
+    def handle_catch_req(conn, env, account_id)
+      seq = env[:seq]
+      unless @config.battle_enforce_catches == :on
+        return reply(conn, type: :catch_deny, seq: seq, reason: "not_enforcing")
+      end
+
+      species = env[:species].to_s[0, 32]
+      level   = env[:level]
+      mints   = conn.data[:enc_mints]
+      mint    = mints.is_a?(Array) &&
+                mints.find { |m| m["species"] == species && m["level"] == level }
+      unless mint
+        @log.call("catch: account #{account_id} req #{species}@#{level.inspect} has NO stashed mint -> local")
+        return reply(conn, type: :catch_deny, seq: seq, reason: "no_encounter")
+      end
+
+      # A miss doesn't consume the mint (vanilla re-throws are legit), so count the
+      # attempts: a client hammering :catch_req to brute-force the roll shows up here.
+      mint["attempts"] = (mint["attempts"] || 0) + 1
+      if mint["attempts"] == 21
+        @log.call("catch: account #{account_id} SUSPECT catch-spam #{species}@#{level} (21+ attempts on one mint)")
+      end
+
+      hp_iv   = mint["iv"].is_a?(Array) ? mint["iv"][0] : nil
+      verdict = @catch_calc.adjudicate(species, mint["level"], hp_iv,
+                                       env[:ball].to_s, env[:hp_current], env[:status].to_s,
+                                       claimed_rate: env[:claimed_rate],
+                                       dex_owned: env[:dex_owned], charm: env[:charm] == true)
+      return reply(conn, type: :catch_deny, seq: seq, reason: "unknown_species") unless verdict
+
+      if verdict[:caught]
+        mints.delete_at(mints.index(mint))   # one successful catch per mint
+        # D3.2: stamp the persisted roll as caught (mailbox FIFO -> after its record).
+        pid = mint["pid"]
+        lvl = mint["level"]
+        @mailbox.submit(account_id) do
+          begin
+            unless @encounter_rolls.mark_caught(account_id, species, lvl, pid)
+              # Always anomalous in the caught branch: the roll's record must have failed.
+              @log.call("catch: account #{account_id} caught-stamp found NO roll for #{species}@#{lvl} (record failed earlier?)")
+            end
+          rescue StandardError => e
+            @log.call("catch: roll caught-stamp failed #{e.class}: #{e.message}")
+          end
+        end
+      end
+      @log.call("catch: account #{account_id} VERDICT #{species}@#{mint['level']} " \
+                "ball=#{env[:ball].to_s[0, 24]} shakes=#{verdict[:shakes]}#{verdict[:critical] ? ' CRIT' : ''} " \
+                "#{verdict[:caught] ? 'CAUGHT' : 'broke free'} " \
+                "(hp=#{env[:hp_current].inspect}/#{verdict[:total_hp]} status=#{env[:status].to_s[0, 16]})")
+      reply(conn, type: :catch_verdict, seq: seq,
+            shakes: verdict[:shakes], critical: verdict[:critical])
+    end
+
+    # M4 Layer D D3 (shadow): the client reports the shakes its LOCAL calc produced; the
+    # server rolls its own verdict from the same (clamped) inputs and logs both, so the
+    # ported formula can be validated against real play before `on`. Fire-and-forget.
+    def handle_catch_report(conn, env, account_id)
+      species = env[:species].to_s[0, 32]
+      return if species.empty?
+
+      mints = conn.data[:enc_mints]
+      mint  = mints.is_a?(Array) && mints.find { |m| m["species"] == species }
+      hp_iv = mint && mint["iv"].is_a?(Array) ? mint["iv"][0] : nil
+      would = @catch_calc.adjudicate(species, env[:level], hp_iv,
+                                     env[:ball].to_s, env[:hp_current], env[:status].to_s,
+                                     claimed_rate: env[:claimed_rate],
+                                     dex_owned: env[:dex_owned], charm: env[:charm] == true)
+      wm = would ? "#{would[:shakes]}#{would[:critical] ? ' CRIT' : ''}#{would[:caught] ? ' CAUGHT' : ''}" : "-"
+      @log.call("catch: account #{account_id} report #{species}@#{env[:level].inspect} " \
+                "ball=#{env[:ball].to_s[0, 24]} client_shakes=#{env[:shakes].inspect} server_would=#{wm}")
     end
 
     # Server-authoritative trade COMMIT (M3.2). The only authoritative trade frame
@@ -555,7 +678,8 @@ module PEMK
         pickup_enforce: @config.pickup_enforce,     # M4 Layer C: client gates pickups only when on
         pickup_reset_allowed: @config.pickup_reset_allowed,    # dev-only F9 reset offered only when on
         battle_enforce_teams: @config.battle_enforce_teams.to_s,   # M4 Layer D D1 team-legality mode
-        battle_enforce_encounters: @config.battle_enforce_encounters.to_s }   # M4 Layer D D2 encounter mode
+        battle_enforce_encounters: @config.battle_enforce_encounters.to_s,   # M4 Layer D D2 encounter mode
+        battle_enforce_catches: @config.battle_enforce_catches.to_s }        # M4 Layer D D3 catch mode
     end
 
     # Zone-scoped presence: track each player's current map and fan a position

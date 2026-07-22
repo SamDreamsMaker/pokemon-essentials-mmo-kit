@@ -26,7 +26,34 @@
 > table with server identity); generation influences that are ability/item CODE
 > (Shiny Charm/chaining, Synchronize, Cute Charm, Static/Magnet-Pull) aren't folded in.
 > No persistence yet — D3 (catch) adds `encounter_rolls` when it must reference the mint.
-> Next: D3 (server-adjudicated catch minting the encounter's identity).
+> **Progress (2026-07-05): D3 part 1 shipped (server-adjudicated catches).** The server
+> ports pbCaptureCalc exactly (`pemk/catch_calc.rb`, engine-parity unit-proven against
+> independently computed thresholds) and rolls the SHAKES with SecureRandom, bound to
+> the stashed D2 encounter mint (species/level/IVs the server itself issued; a caught
+> verdict consumes the mint). Client inputs are clamped to the honest envelope: HP to
+> the server-computed max (base stats + mint IV + level), ball rate to each ball's
+> legitimate cap (gen-8 values, 255 ceilings, Ultra-Beast /10), status whitelisted.
+> `PEMK_BATTLE_ENFORCE_CATCHES` off/shadow/on (shadow = report + server_would log; on =
+> the client adopts the server verdict via the one `pbCaptureCalc` seam). Fail-open
+> everywhere; requires encounters=on (no mint -> local). Honest gaps: a miss doesn't
+> consume the mint so re-requests retry at vanilla odds (attempt counter logs SUSPECT
+> catch-spam at 21+; ball ownership isn't validated — the bag is blob-authoritative);
+> static/event/roamer catches never mint so they stay local.
+>
+> **Progress (2026-07-22): D3 part 2 shipped (persisted rolls + mint provenance).**
+> Every D2 `on` mint is persisted (`encounter_rolls`, migration 009 — additive), the
+> catch verdict stamps it caught, and the caught mon's M3 UID mint CLAIMS it: each
+> minted identity now carries a provenance label on its registry row —
+> **`wild_caught`** (server-issued + server-verified capture), **`wild`**
+> (server-issued, no catch verdict — catches off, or fabricated from a fled
+> encounter's grant), **`client`** (no matching roll — legitimate for
+> starters/gifts/eggs, which is why it never rejects; a save-copied clone of a wild
+> mon self-labels: only one of the pair can claim the roll). Zero client/wire
+> changes; provenance is recorded only when encounters=on (else origin stays NULL =
+> unknown, never mislabeled); per-account mailbox FIFO makes record→stamp→claim
+> ordering deterministic; stale never-fought rolls are pruned at boot (7-day
+> retention). Detection/telemetry — the foundation for ranked provenance gating
+> later. Next: D4 (closed-form PvE reward bounds).
 
 This document answers the last open question in the anti-cheat ladder: **how does
 the server independently decide what a battle produced — the Pokémon that

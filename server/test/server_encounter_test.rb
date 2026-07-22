@@ -194,4 +194,17 @@ class ServerEncounterTest < Minitest::Test
     assert_nil recv(c, 2)   # pre-auth -> dropped
     c.close
   end
+
+  # A non-`on` server must not mint: a modified client asking anyway is denied (else its
+  # mints would be recorded as provenance while honest players roll locally).
+  def test_encounter_req_denied_unless_enforcing
+    start_server(encounter_mode: "shadow")
+    c, = authed_conn("ec9@t.co")
+    send_env(c, { type: :pos, map: 5, x: 3, y: 3 })
+    send_env(c, { type: :encounter_req, map: 5, enctype: :Land, seq: 1 })
+    r = recv(c)
+    assert_equal :encounter_deny, r[:type]
+    assert_equal "not_enforcing", r[:reason]
+    c.close
+  end
 end
