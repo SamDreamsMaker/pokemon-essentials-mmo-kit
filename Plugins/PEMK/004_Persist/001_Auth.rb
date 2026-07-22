@@ -165,6 +165,7 @@ module PEMK
       (PEMK::Pickup.adopt_reset_allowed(reply[:pickup_reset_allowed]) rescue nil)  # M4-C: dev-only F9 reset
       (PEMK::Encounter.adopt_mode(reply[:battle_enforce_encounters]) rescue nil)   # M4-D2: encounter mode
       (PEMK::Catch.adopt_mode(reply[:battle_enforce_catches]) rescue nil)          # M4-D3: catch mode
+      (PEMK::Reward.adopt_mode(reply[:battle_enforce_rewards]) rescue nil)         # M4-D4: reward mode
       save_token(reply[:token]) if reply[:token]
       save_local_account(@account_id)
       PEMK.log("auth: #{reply[:type]} account=#{@account_id} state=#{@pending_state ? 'received' : 'new'} econ=#{@pending_econ ? @pending_econ.size : 0}")
@@ -192,6 +193,7 @@ module PEMK
       (PEMK::Pickup.adopt_reset_allowed(reply[:pickup_reset_allowed]) rescue nil)  # M4-C: dev-only F9 reset
       (PEMK::Encounter.adopt_mode(reply[:battle_enforce_encounters]) rescue nil)   # M4-D2: encounter mode
       (PEMK::Catch.adopt_mode(reply[:battle_enforce_catches]) rescue nil)          # M4-D3: catch mode
+      (PEMK::Reward.adopt_mode(reply[:battle_enforce_rewards]) rescue nil)         # M4-D4: reward mode
       :ok
     end
 

@@ -16,7 +16,9 @@ module PEMK
     end
 
     # -> [:ack, balance] | [:dup, recorded_balance] | [:rej, current_balance, reason]
-    def apply_econ(account_id, field, value, seq, now: Time.now)
+    # +reason+ (M4 D4) attributes the ledger row (default "unattributed"); a caller can
+    # pass "battle:<n>" / "battle_suspect:<n>". Backward-compatible — old call sites omit it.
+    def apply_econ(account_id, field, value, seq, now: Time.now, reason: "unattributed")
       key = field.to_s.to_sym
       cap = @caps[key]
       return [:rej, current(account_id, field), :bad_field] unless cap && value.is_a?(Integer) && seq.is_a?(Integer)
@@ -36,7 +38,7 @@ module PEMK
               .insert(account_id: account_id, field: field.to_s, balance: value, last_seq: seq)
             @db[:economy_ledger].insert(
               account_id: account_id, field: field.to_s, delta: value - cur,
-              reason: "unattributed", seq: seq, balance_after: value, created_at: now
+              reason: reason.to_s, seq: seq, balance_after: value, created_at: now
             )
             result = [:ack, value]
           end
@@ -47,6 +49,12 @@ module PEMK
 
     def current(account_id, field)
       @db[:economy_balances].where(account_id: account_id, field: field.to_s).get(:balance) || 0
+    end
+
+    # Was this (account, field, seq) already applied? (D4: attribute/consume budget only
+    # for a genuinely new frame, never a reconnect replay.)
+    def recorded?(account_id, field, seq)
+      !@db[:economy_ledger].where(account_id: account_id, field: field.to_s, seq: seq).empty?
     end
 
     # Canonical economy for login_ok reconciliation: { balances: {field=>value},

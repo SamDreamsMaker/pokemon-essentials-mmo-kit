@@ -108,7 +108,13 @@ module PEMK
 
     def growth_rates_map
       out = {}
-      GameData::GrowthRate.each { |gr| out[gr.id.to_s] = { "max_exp" => gr.maximum_exp } }
+      GameData::GrowthRate.each do |gr|
+        # The FULL cumulative-exp curve, levels 1..max (pure table lookups; index 0 of the
+        # engine's exp_values is a -1 sentinel, so build from minimum_exp_for_level). The
+        # server needs the curve to turn level jumps into exp bounds (D4 reward envelope).
+        curve = (1..GameData::GrowthRate.max_level).map { |lvl| gr.minimum_exp_for_level(lvl) }
+        out[gr.id.to_s] = { "max_exp" => gr.maximum_exp, "curve" => curve }
+      end
       out
     end
 

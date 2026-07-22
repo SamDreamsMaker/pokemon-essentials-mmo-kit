@@ -169,10 +169,14 @@ if defined?(pbGenerateWildPokemon) && !defined?(pemk_orig_pbGenerateWildPokemon)
     # are a distinct cached-mint path, left local in D2.
     if !isRoamer && (PEMK::Encounter.enforcing? rescue false) && !(PEMK::Encounter.scaling_level_map? rescue false)
       mon = (PEMK::Encounter.request_and_build(species, level) rescue nil)
-      return mon if mon
+      if mon
+        (PEMK::Reward.note_foe(mon) rescue nil)   # D4: record the foe for the reward window
+        return mon
+      end
       # deny / timeout / offline / build fault -> fall through to a local roll
     end
     pkmn = pemk_orig_pbGenerateWildPokemon(species, level, isRoamer)
+    (PEMK::Reward.note_foe(pkmn) rescue nil) unless isRoamer   # D4
     # SHADOW: report the local roll for audit (only when not enforcing).
     if !isRoamer && (PEMK::Encounter.shadow? rescue false)
       map     = ($game_map  && $game_map.map_id) rescue nil

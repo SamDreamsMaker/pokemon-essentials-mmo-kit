@@ -9,7 +9,7 @@ module PEMK
     attr_reader :bind, :port, :database_url, :economy_caps, :badges_max, :inventory_caps,
                 :monster_caps, :world_path, :position_enforcement, :pickup_enforce,
                 :pickup_reset_allowed, :battle_data_path, :battle_enforce_teams,
-                :battle_enforce_encounters, :battle_enforce_catches
+                :battle_enforce_encounters, :battle_enforce_catches, :battle_enforce_rewards
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -68,6 +68,15 @@ module PEMK
       # PEMK_BATTLE_ENFORCE_ENCOUNTERS=on (a catch with no mint fail-opens to local).
       cmode = env.fetch("PEMK_BATTLE_ENFORCE_CATCHES", "off").to_s.strip.downcase
       @battle_enforce_catches = %w[off shadow on].include?(cmode) ? cmode.to_sym : :off
+
+      # M4 Layer D D4: wild-battle reward bounds (EXP level-jumps + money deltas). off =
+      # nothing; shadow/on both DETECT — a wild :battle_end opens a per-account budget
+      # window, money deltas get "battle:<n>" ledger attribution (or "battle_suspect"),
+      # and an impossible level jump is logged. Detection-only (Rare Candies level mons
+      # outside battle → never rejects); `on` is reserved for a future hard gate. Default
+      # off. Needs encounters=on for foe context (else it can't open windows).
+      rmode = env.fetch("PEMK_BATTLE_ENFORCE_REWARDS", "off").to_s.strip.downcase
+      @battle_enforce_rewards = %w[off shadow on].include?(rmode) ? rmode.to_sym : :off
 
       caps = YAML.safe_load_file(File.join(root, "config", "economy_caps.yml"))
       @economy_caps = {

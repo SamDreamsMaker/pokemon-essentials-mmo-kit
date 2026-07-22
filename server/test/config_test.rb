@@ -86,4 +86,14 @@ class ConfigTest < Minitest::Test
     assert_equal :on,     PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_CATCHES" => "ON")).battle_enforce_catches
     assert_equal :off,    PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_CATCHES" => "junk")).battle_enforce_catches
   end
+
+  # M4 Layer D D4: reward detection mode, off/shadow/on tri-state, default off.
+  def test_battle_enforce_rewards_defaults_off_and_reads_env
+    env = ENV.to_h
+    env.delete("PEMK_BATTLE_ENFORCE_REWARDS")
+    assert_equal :off,    PEMK::Config.new(env: env).battle_enforce_rewards
+    assert_equal :shadow, PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_REWARDS" => "shadow")).battle_enforce_rewards
+    assert_equal :on,     PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_REWARDS" => "ON")).battle_enforce_rewards
+    assert_equal :off,    PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_REWARDS" => "junk")).battle_enforce_rewards
+  end
 end

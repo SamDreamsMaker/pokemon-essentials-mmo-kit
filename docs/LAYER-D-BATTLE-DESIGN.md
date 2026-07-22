@@ -53,7 +53,24 @@
 > unknown, never mislabeled); per-account mailbox FIFO makes record→stamp→claim
 > ordering deterministic; stale never-fought rolls are pruned at boot (7-day
 > retention). Detection/telemetry — the foundation for ranked provenance gating
-> later. Next: D4 (closed-form PvE reward bounds).
+> later.
+>
+> **Progress (2026-07-22): D4 part 1 shipped (closed-form reward bounds, detection).**
+> The server now bounds what a WILD battle can produce. A `:battle_end_report`
+> (outcome + foe pids, matched to the connection's D2 mints so a fabricated report
+> opens nothing) starts a per-account budget window: the max EXP the party could gain
+> (`reward_calc.rb` reproduces the gen-8 scaled formula at its maximum × the full
+> multiplier stack × 6 gainers) and the money it could move (Pay Day gain / blackout
+> loss, scaled to the exported max level). Money `:econ` deltas then get a clean
+> ledger attribution (`battle:<n>` / `unattributed` — never a suspect label persisted),
+> and over-budget money or an impossible party level jump (checked via the newly
+> exported growth curves) is LOGGED. Detection-only (Rare Candies level mons outside
+> battle, so nothing rejects). `PEMK_BATTLE_ENFORCE_REWARDS` off/shadow/on, default
+> off; needs encounters=on for foe context. Adversarial review caught (and fixed
+> before commit) a persisted-false-accusation bug (a spend after a win labeled
+> suspect in the ledger), an inert-client bug (foes wiped before the report), and a
+> cross-thread window race. Next: D6 (per-mon EXP/level authority) or the engine tier
+> (D7+).
 
 This document answers the last open question in the anti-cheat ladder: **how does
 the server independently decide what a battle produced — the Pokémon that
