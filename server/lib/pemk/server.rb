@@ -40,7 +40,12 @@ module PEMK
       @characters = Characters.new(@db)
       @ledger     = Ledger.new(@db, @config.economy_caps)
       @inventory  = Inventory.new(@db, @config.inventory_caps, logger: @log)
-      @monsters   = Monsters.new(@db, @config.monster_caps, logger: @log)
+      @encounter_rolls = EncounterRolls.new(@db)   # M4 D3.2: persisted mints -> mon provenance
+      # Provenance labeling only makes sense when the server actually mints encounters:
+      # off/shadow would label every honest catch "client" (and invert the signal). With
+      # rolls disabled, origin stays NULL = its documented "unknown" meaning.
+      @monsters   = Monsters.new(@db, @config.monster_caps, logger: @log,
+                                 rolls: (@config.battle_enforce_encounters == :on ? @encounter_rolls : nil))
       @trades     = Trades.new(@db)
       # M4 Layer A: read-only world model + detection-only interaction audit. Both are
       # in-memory and DB-free; a missing export just makes the audit a no-op.
@@ -81,6 +86,12 @@ module PEMK
       @log.call("server: team legality enforcement = #{@config.battle_enforce_teams} (M4 Layer D D1, detection-only)")
       @log.call("server: encounter enforcement = #{@config.battle_enforce_encounters} (M4 Layer D D2)")
       @log.call("server: catch enforcement = #{@config.battle_enforce_catches} (M4 Layer D D3)")
+      begin
+        pruned = @encounter_rolls.prune
+        @log.call("server: pruned #{pruned} stale encounter roll(s) (>#{EncounterRolls::RETENTION_DAYS}d, never fought)") if pruned.positive?
+      rescue StandardError => e
+        @log.call("server: encounter-roll prune failed #{e.class}: #{e.message}")
+      end
       if @config.battle_enforce_catches == :on && @config.battle_enforce_encounters != :on
         @log.call("server: WARNING catch enforcement is on but encounter enforcement is #{@config.battle_enforce_encounters} — catches need a server encounter mint, so they will all fail-open to local")
       end
@@ -448,7 +459,13 @@ module PEMK
     # Fail-OPEN: a wrong-map claim or a map with no table denies, and the client falls back
     # to a local roll — wild encounters must never just stop happening.
     def handle_encounter_req(conn, env, account_id)
-      seq     = env[:seq]
+      seq = env[:seq]
+      # Only an `on` server mints (an honest client only asks when `on` was advertised;
+      # a modified one asking anyway must not get real mints recorded as provenance).
+      unless @config.battle_enforce_encounters == :on
+        return reply(conn, type: :encounter_deny, seq: seq, reason: "not_enforcing")
+      end
+
       map     = env[:map]
       enctype = env[:enctype].to_s
       return reply(conn, type: :encounter_deny, seq: seq, reason: "bad_req") unless map.is_a?(Integer) && !enctype.empty?
@@ -473,6 +490,17 @@ module PEMK
       stash = (conn.data[:enc_mints] ||= [])
       stash << mint
       stash.shift while stash.length > 2
+
+      # D3.2: persist the mint (durable claim-check for the caught mon's UID provenance).
+      # Background on the per-account mailbox — the grant reply stays inline, and mailbox
+      # FIFO guarantees this insert lands before any later catch/uid frame's DB work.
+      @mailbox.submit(account_id) do
+        begin
+          @encounter_rolls.record(account_id, mint, map, enctype)
+        rescue StandardError => e
+          @log.call("encounter: roll persist failed #{e.class}: #{e.message}")
+        end
+      end
 
       @log.call("encounter: account #{account_id} MINT map #{map} #{enctype} -> " \
                 "#{mint['species']}@#{mint['level']}#{mint['shiny'] ? ' /SHINY' : ''}")
@@ -519,7 +547,22 @@ module PEMK
                                        dex_owned: env[:dex_owned], charm: env[:charm] == true)
       return reply(conn, type: :catch_deny, seq: seq, reason: "unknown_species") unless verdict
 
-      mints.delete_at(mints.index(mint)) if verdict[:caught]   # one successful catch per mint
+      if verdict[:caught]
+        mints.delete_at(mints.index(mint))   # one successful catch per mint
+        # D3.2: stamp the persisted roll as caught (mailbox FIFO -> after its record).
+        pid = mint["pid"]
+        lvl = mint["level"]
+        @mailbox.submit(account_id) do
+          begin
+            unless @encounter_rolls.mark_caught(account_id, species, lvl, pid)
+              # Always anomalous in the caught branch: the roll's record must have failed.
+              @log.call("catch: account #{account_id} caught-stamp found NO roll for #{species}@#{lvl} (record failed earlier?)")
+            end
+          rescue StandardError => e
+            @log.call("catch: roll caught-stamp failed #{e.class}: #{e.message}")
+          end
+        end
+      end
       @log.call("catch: account #{account_id} VERDICT #{species}@#{mint['level']} " \
                 "ball=#{env[:ball].to_s[0, 24]} shakes=#{verdict[:shakes]}#{verdict[:critical] ? ' CRIT' : ''} " \
                 "#{verdict[:caught] ? 'CAUGHT' : 'broke free'} " \

@@ -22,13 +22,20 @@ module PEMK
   # level drift vs at-issue values is NORMAL (evolution/level-up), never flagged.
   #
   # HONEST: this makes instances traceable and (in M3.2) trade-gated — NOT
-  # unforgeable. A modified client can fabricate a plausible mon and get it a uid;
-  # acquisition validation is M4+. Runs under the per-account PlayerMailbox.
+  # unforgeable. A modified client can fabricate a plausible mon and get it a uid,
+  # but since M4 D3 part 2 each mint's PROVENANCE is recorded: an identity matching
+  # an encounter roll the server actually issued is labeled wild_caught/wild; one
+  # that matches nothing is labeled client (legitimate for starters/gifts/eggs —
+  # which is why a missing roll never rejects). A save-copied clone of a wild mon
+  # is thereby self-labeling: only ONE of the pair can claim the roll (first swept
+  # wins — not necessarily the original), the other gets "client" — either way the
+  # dupe is visible. Runs under the per-account PlayerMailbox.
   class Monsters
-    def initialize(db, caps, logger: nil)
-      @db   = db
-      @caps = caps                 # { uid_req_max:, party_max:, level_max: }
-      @log  = logger || ->(_m) {}
+    def initialize(db, caps, logger: nil, rolls: nil)
+      @db    = db
+      @caps  = caps                # { uid_req_max:, party_max:, level_max: }
+      @log   = logger || ->(_m) {}
+      @rolls = rolls               # EncounterRolls | nil (provenance recording off)
     end
 
     # -> [:ack, grants] | [:rej, ["bad_shape"]]   (grants = [{tmp:, uid:}, ...])
@@ -36,6 +43,7 @@ module PEMK
       return [:rej, ["bad_shape"]] unless mons.is_a?(Array) && mons.size <= @caps[:uid_req_max]
 
       grants = []
+      origins = Hash.new(0)
       @db.transaction do
         mons.each do |m|
           unless valid_mint_entry?(m)
@@ -43,9 +51,16 @@ module PEMK
             next
           end
 
-          uid = mint_one(account_id, m)
-          grants << { tmp: m[:tmp], uid: uid } if uid
+          uid, origin = mint_one(account_id, m)
+          if uid
+            grants << { tmp: m[:tmp], uid: uid }
+            origins[origin] += 1 if origin
+          end
         end
+      end
+      if origins.any?
+        @log.call("mon: account #{account_id} minted #{grants.size} " \
+                  "(#{origins.map { |k, v| "#{k}=#{v}" }.join(' ')})")
       end
       [:ack, grants]
     end
@@ -109,8 +124,20 @@ module PEMK
     # Lookup-or-mint against the monsters_mint_dedup unique index. insert_conflict
     # returns nil on conflict -> re-SELECT the existing row (same instance, replayed
     # request). The rescue is belt-and-braces for the race the mailbox already
-    # prevents per-account.
+    # prevents per-account. -> [uid, origin | nil]
+    #
+    # PROVENANCE (D3 part 2): the claim runs INSIDE mint_batch's transaction and
+    # BEFORE the insert — a fresh mint whose identity matches an unclaimed server
+    # encounter roll claims it (origin wild_caught/wild); no match -> "client". On a
+    # REPLAY the insert conflicts and the existing row keeps its original origin (the
+    # first attempt's claim committed with it, so the replay's claim finds nothing and
+    # its discarded "client" label never mislabels). A save-copied clone of a wild mon
+    # (new nonce, same pid) finds the roll already claimed -> labeled "client".
     def mint_one(account_id, m)
+      origin =
+        if @rolls
+          (@rolls.claim(account_id, m[:species], m[:pid]) || :client).to_s
+        end
       uid = @db[:monsters].insert_conflict.insert(
         owner_account_id:  account_id,
         issuer_account_id: account_id,
@@ -118,11 +145,12 @@ module PEMK
         species:           m[:species].to_s,
         level_at_issue:    m[:level],
         personal_id:       m[:pid],
-        egg_at_issue:      m[:egg]
+        egg_at_issue:      m[:egg],
+        origin:            origin
       )
-      uid || existing_uid(account_id, m[:tmp])
+      uid ? [uid, origin] : [existing_uid(account_id, m[:tmp]), nil]
     rescue Sequel::UniqueConstraintViolation
-      existing_uid(account_id, m[:tmp])
+      [existing_uid(account_id, m[:tmp]), nil]
     end
 
     def existing_uid(account_id, nonce)

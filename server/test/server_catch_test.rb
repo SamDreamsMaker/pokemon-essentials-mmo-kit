@@ -44,6 +44,7 @@ class ServerCatchTest < Minitest::Test
 
   def setup
     @db = Sequel.connect(ENV.fetch("DATABASE_URL"))
+    @db[:encounter_rolls].delete rescue nil
     @db[:pickups].delete rescue nil
     @db[:monster_transfers].delete rescue nil
     @db[:monsters].delete rescue nil
@@ -194,6 +195,40 @@ class ServerCatchTest < Minitest::Test
     c = open_conn
     send_env(c, { type: :catch_req, species: "SPINARAK", level: 12, ball: :MASTERBALL, seq: 1 })
     assert_nil recv(c, 2)
+    c.close
+  end
+
+  # --- D3.2: the full provenance chain over the wire -----------------------------------
+  # encounter (roll persisted) -> Master Ball catch (roll caught-stamped) -> the caught
+  # mon's UID mint (sweep) claims the roll -> monsters.origin == "wild_caught". A second
+  # fabricated identity in the same batch (a pid the server never issued) -> "client".
+  # Mailbox FIFO makes the ordering deterministic: record, mark_caught and mint_batch run
+  # in submit order for the account.
+  def test_caught_mon_uid_mint_gets_wild_caught_provenance
+    start_server
+    c, = authed_conn("ct8@t.co")
+    g = mint(c)
+    r = catch_req(c, g, ball: :MASTERBALL, seq: 2)
+    assert_equal :catch_verdict, r[:type]
+    assert_equal 4, r[:shakes]
+
+    send_env(c, { type: :uid_req, seq: 3, mons: [
+                  { tmp: 11, species: g[:species], level: g[:level], pid: g[:pid], egg: false },
+                  { tmp: 12, species: "SPINARAK", level: 12, pid: 424_242, egg: false }   # fabricated
+                ] })
+    ug = recv(c)
+    assert_equal :uid_grant, ug[:type]
+    assert_equal 2, ug[:grants].length
+
+    by_tmp = ug[:grants].to_h { |x| [x[:tmp], x[:uid]] }
+    assert_equal "wild_caught", @db[:monsters].where(id: by_tmp[11]).get(:origin)
+    assert_equal "client",      @db[:monsters].where(id: by_tmp[12]).get(:origin)
+
+    roll = @db[:encounter_rolls].where(account_id: @db[:accounts].where(email: "ct8@t.co").get(:id)).first
+    refute_nil roll
+    refute_nil roll[:caught_at]
+    refute_nil roll[:claimed_at]
+    assert_equal g[:pid], roll[:pid]
     c.close
   end
 end
