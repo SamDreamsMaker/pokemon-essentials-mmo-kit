@@ -76,6 +76,17 @@ module PEMK
     def max_level; @caps["max_level"]; end
     def growth_rate_max_exp(rate); g = @growth_rates[rate.to_s]; g && g["max_exp"]; end
 
+    # Cumulative EXP required to BE at +level+ on this growth rate (curve[level-1]), or
+    # nil when the export predates the curve (older battle_data.json) or the rate/level
+    # is unknown — callers treat nil as unjudgeable. (D4 reward envelope.)
+    def exp_for_level(rate, level)
+      g = @growth_rates[rate.to_s]
+      curve = g && g["curve"]
+      return nil unless curve.is_a?(Array) && level.is_a?(Integer) && level >= 1 && level <= curve.length
+
+      curve[level - 1]
+    end
+
     # Attacking x defending effectiveness on the engine scale (0/1/2/4); an unknown
     # pairing defaults to NORMAL so a missing cell never fabricates (in)effectiveness.
     def type_effectiveness(atk, dfn)

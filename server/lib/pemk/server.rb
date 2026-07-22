@@ -55,6 +55,11 @@ module PEMK
                                   party_max: @config.monster_caps[:party_max], logger: @log)   # M4 Layer D D1
       @encounter_mint = EncounterMint.new(@world, logger: @log)   # M4 Layer D D2 wild-encounter roller
       @catch_calc = CatchCalc.new(@battle)                        # M4 Layer D D3 capture adjudication
+      # M4 Layer D D4 wild-battle reward bounds (detection). Only active when the operator
+      # opts in; needs encounter context (foe mints) for meaningful windows.
+      @reward_audit = if @config.battle_enforce_rewards != :off
+                        RewardAudit.new(RewardCalc.new(@battle), @battle, logger: @log)
+                      end
       @audit      = Audit.new(@world, logger: @log)
       @pos_audit  = PositionAudit.new(@world, logger: @log, mode: @config.position_enforcement)   # M4 Layer B
       @pickups    = Pickups.new(@db)   # M4 Layer C one-shot ledger
@@ -86,6 +91,10 @@ module PEMK
       @log.call("server: team legality enforcement = #{@config.battle_enforce_teams} (M4 Layer D D1, detection-only)")
       @log.call("server: encounter enforcement = #{@config.battle_enforce_encounters} (M4 Layer D D2)")
       @log.call("server: catch enforcement = #{@config.battle_enforce_catches} (M4 Layer D D3)")
+      @log.call("server: reward enforcement = #{@config.battle_enforce_rewards} (M4 Layer D D4, detection-only)")
+      if @config.battle_enforce_rewards != :off && @config.battle_enforce_encounters != :on
+        @log.call("server: WARNING reward detection is on but encounter enforcement is #{@config.battle_enforce_encounters} — no foe context, so battle windows can't open")
+      end
       begin
         pruned = @encounter_rolls.prune
         @log.call("server: pruned #{pruned} stale encounter roll(s) (>#{EncounterRolls::RETENTION_DAYS}d, never fought)") if pruned.positive?
@@ -157,6 +166,7 @@ module PEMK
       when :encounter_req then handle_encounter_req(conn, env, authed)
       when :catch_req then handle_catch_req(conn, env, authed)
       when :catch_report then handle_catch_report(conn, env, authed)
+      when :battle_end_report then handle_battle_end(conn, env, authed)
       when :trade_commit then handle_trade_commit(conn, env, authed)
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, dec[:body], authed)
@@ -276,7 +286,17 @@ module PEMK
       value = env[:value]
       seq   = env[:seq]
       @mailbox.submit(account_id) do
-        status = @ledger.apply_econ(account_id, field, value, seq)
+        # D4: attribute a fresh MONEY change to a recent wild battle's budget window
+        # (reason "battle:<n>"/"battle_suspect:<n>"), else "unattributed". Only on a
+        # genuinely new frame (never a replay), only for :money, only when reward
+        # detection is enabled — otherwise the reason stays the M2 default.
+        reason = "unattributed"
+        if @reward_audit && field.to_s == "money" && value.is_a?(Integer) && !@ledger.recorded?(account_id, field, seq)
+          delta = value - @ledger.current(account_id, field)
+          reason, suspect = @reward_audit.note_money(account_id, delta)
+          @log.call("reward: account #{account_id} SUSPECT money delta #{delta} exceeds battle window (#{reason})") if suspect
+        end
+        status = @ledger.apply_econ(account_id, field, value, seq, reason: reason)
         @reactor.post do
           case status.first
           when :ack, :dup then reply(conn, type: :econ_ack, field: field, value: status[1], seq: seq)
@@ -321,10 +341,68 @@ module PEMK
     def handle_mon_party(conn, env, account_id)
       mons = env[:mons]
       seq  = env[:seq]
+      # D4: diff per-uid levels vs the last projection on this connection; a level JUMP
+      # needing more exp than a recent battle window holds is logged (detection-only —
+      # Rare Candies level mons outside battle, so it never rejects). Inline pre-check.
+      reward_check_levels(conn, account_id, mons) if @reward_audit
       @mailbox.submit(account_id) do
         status = @monsters.apply_party(account_id, mons, seq)
         @reactor.post { reply(conn, type: :mon_ack, seq: seq, flagged: status[1].any?) }
       end
+    end
+
+    # M4 Layer D D4: the client reports a wild battle's end (outcome + the foes it
+    # fought); the server opens/extends a per-account reward budget window, but ONLY for
+    # foes it can prove it minted (matched by pid in this connection's encounter stash) —
+    # a fabricated :battle_end with no real foe grants no budget. Inline, no reply.
+    def handle_battle_end(conn, env, account_id)
+      return unless @reward_audit
+
+      outcome = env[:outcome]
+      claimed = env[:foes]
+      return unless outcome.is_a?(Integer) && claimed.is_a?(Array)
+
+      stash = conn.data[:enc_mints] || []
+      foes  = []
+      claimed.first(2).each do |f|
+        next unless f.is_a?(Hash)
+
+        pid = f[:pid]
+        m = stash.find { |x| x["pid"] == pid }   # provable: an identity THIS conn was minted
+        foes << { species: m["species"], level: m["level"] } if m
+      end
+      return if foes.empty?
+
+      w = @reward_audit.record_battle(account_id, foes, outcome)
+      @log.call("reward: account #{account_id} battle##{w[:id]} outcome=#{outcome} " \
+                "foes=#{foes.map { |f| "#{f[:species]}@#{f[:level]}" }.join(',')} " \
+                "budget exp=#{w[:exp]} gain=#{w[:gain]} loss=#{w[:loss]}")
+    end
+
+    # Level-jump exp bound (D4). Diffs the new projection vs the last one stashed on the
+    # connection; feeds real jumps to the reward window. Runs on the reactor thread.
+    def reward_check_levels(conn, account_id, mons)
+      return unless mons.is_a?(Array)
+
+      prev = conn.data[:party_levels] || {}
+      cur  = {}
+      changes = []
+      mons.each do |m|
+        next unless m.is_a?(Hash)
+
+        uid = m[:uid]; sp = m[:species]; lvl = m[:level]
+        next unless lvl.is_a?(Integer)
+
+        cur[uid] = [sp, lvl] if uid
+        old = uid && prev[uid]
+        changes << [sp, old[1], lvl] if old && old[0] == sp && lvl > old[1]
+      end
+      conn.data[:party_levels] = cur
+
+      return if changes.empty?
+
+      suspect, detail = @reward_audit.check_levels(account_id, changes)
+      @log.call("reward: account #{account_id} SUSPECT level jump — #{detail}") if suspect
     end
 
     # Detection-only interaction audit (M4 Layer A). Runs INLINE on the reactor
@@ -679,7 +757,8 @@ module PEMK
         pickup_reset_allowed: @config.pickup_reset_allowed,    # dev-only F9 reset offered only when on
         battle_enforce_teams: @config.battle_enforce_teams.to_s,   # M4 Layer D D1 team-legality mode
         battle_enforce_encounters: @config.battle_enforce_encounters.to_s,   # M4 Layer D D2 encounter mode
-        battle_enforce_catches: @config.battle_enforce_catches.to_s }        # M4 Layer D D3 catch mode
+        battle_enforce_catches: @config.battle_enforce_catches.to_s,         # M4 Layer D D3 catch mode
+        battle_enforce_rewards: @config.battle_enforce_rewards.to_s }        # M4 Layer D D4 reward mode
     end
 
     # Zone-scoped presence: track each player's current map and fan a position
