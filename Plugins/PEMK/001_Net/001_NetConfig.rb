@@ -60,6 +60,10 @@ module PEMK
     # this stalls entering every wild battle in `on` mode, so keep it tight.
     ENCOUNTER_GRANT_TIMEOUT = 2.0
 
+    # M4 Layer D D3: max seconds to block for a server catch verdict before falling back
+    # to the local roll (a ball throw must always resolve).
+    CATCH_VERDICT_TIMEOUT = 2.5
+
     # Wire framing: a big-endian uint32 length prefix precedes each payload.
     # Must stay in sync with the server. (Validated in Phase 0: sockets + this
     # framing round-trip correctly under mkxp-z / MRI 3.1.3.)

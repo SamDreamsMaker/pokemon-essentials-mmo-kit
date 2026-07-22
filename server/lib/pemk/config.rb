@@ -9,7 +9,7 @@ module PEMK
     attr_reader :bind, :port, :database_url, :economy_caps, :badges_max, :inventory_caps,
                 :monster_caps, :world_path, :position_enforcement, :pickup_enforce,
                 :pickup_reset_allowed, :battle_data_path, :battle_enforce_teams,
-                :battle_enforce_encounters
+                :battle_enforce_encounters, :battle_enforce_catches
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -60,6 +60,14 @@ module PEMK
       # it (server owns species/level/shiny/IVs). Default off. Unknown -> off.
       emode = env.fetch("PEMK_BATTLE_ENFORCE_ENCOUNTERS", "off").to_s.strip.downcase
       @battle_enforce_encounters = %w[off shadow on].include?(emode) ? emode.to_sym : :off
+
+      # M4 Layer D D3: server-adjudicated Poké Ball captures, same tri-state. off = local;
+      # shadow = client reports its local shake result, server logs what it would roll;
+      # on = the SERVER rolls the shakes (client requests a verdict and adopts it). `on`
+      # binds the catch to a stashed D2 encounter mint, so it effectively requires
+      # PEMK_BATTLE_ENFORCE_ENCOUNTERS=on (a catch with no mint fail-opens to local).
+      cmode = env.fetch("PEMK_BATTLE_ENFORCE_CATCHES", "off").to_s.strip.downcase
+      @battle_enforce_catches = %w[off shadow on].include?(cmode) ? cmode.to_sym : :off
 
       caps = YAML.safe_load_file(File.join(root, "config", "economy_caps.yml"))
       @economy_caps = {

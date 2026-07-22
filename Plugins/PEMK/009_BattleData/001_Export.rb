@@ -53,7 +53,8 @@ module PEMK
         "tutor_moves"      => sp.tutor_moves.map(&:to_s),   # combined TM/HM/tutor pool in v21.1
         "egg_moves"        => sp.egg_moves.map(&:to_s),
         "prev_species"     => (prev && prev.to_s),    # immediate pre-evolution id (String), or null
-        "minimum_level"    => sp.minimum_level
+        "minimum_level"    => sp.minimum_level,
+        "flags"            => sp.flags.map(&:to_s)    # species flags (UltraBeast, ... — D3 catch rules)
       }
     end
 

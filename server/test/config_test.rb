@@ -76,4 +76,14 @@ class ConfigTest < Minitest::Test
     assert_equal :on,     PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_ENCOUNTERS" => "ON")).battle_enforce_encounters
     assert_equal :off,    PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_ENCOUNTERS" => "nope")).battle_enforce_encounters
   end
+
+  # M4 Layer D D3: catch adjudication mode, off/shadow/on tri-state, default off.
+  def test_battle_enforce_catches_defaults_off_and_reads_env
+    env = ENV.to_h
+    env.delete("PEMK_BATTLE_ENFORCE_CATCHES")
+    assert_equal :off,    PEMK::Config.new(env: env).battle_enforce_catches
+    assert_equal :shadow, PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_CATCHES" => "shadow")).battle_enforce_catches
+    assert_equal :on,     PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_CATCHES" => "ON")).battle_enforce_catches
+    assert_equal :off,    PEMK::Config.new(env: ENV.to_h.merge("PEMK_BATTLE_ENFORCE_CATCHES" => "junk")).battle_enforce_catches
+  end
 end

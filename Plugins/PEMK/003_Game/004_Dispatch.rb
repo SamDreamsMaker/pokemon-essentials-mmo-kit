@@ -28,6 +28,9 @@ module PEMK
       when :encounter_grant, :encounter_deny
         # M4 Layer D D2 (on): reply to a blocking :encounter_req (keyed by seq).
         Encounter.on_reply(msg)
+      when :catch_verdict, :catch_deny
+        # M4 Layer D D3 (on): reply to a blocking :catch_req (keyed by seq).
+        Catch.on_reply(msg)
       when :econ_ack, :econ_rej
         # Server's canonical economy balance: :econ_ack is the accepted value,
         # :econ_rej the current balance an over-cap/invalid change rolled back to.

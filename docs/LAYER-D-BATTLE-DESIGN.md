@@ -26,7 +26,21 @@
 > table with server identity); generation influences that are ability/item CODE
 > (Shiny Charm/chaining, Synchronize, Cute Charm, Static/Magnet-Pull) aren't folded in.
 > No persistence yet — D3 (catch) adds `encounter_rolls` when it must reference the mint.
-> Next: D3 (server-adjudicated catch minting the encounter's identity).
+> **Progress (2026-07-05): D3 part 1 shipped (server-adjudicated catches).** The server
+> ports pbCaptureCalc exactly (`pemk/catch_calc.rb`, engine-parity unit-proven against
+> independently computed thresholds) and rolls the SHAKES with SecureRandom, bound to
+> the stashed D2 encounter mint (species/level/IVs the server itself issued; a caught
+> verdict consumes the mint). Client inputs are clamped to the honest envelope: HP to
+> the server-computed max (base stats + mint IV + level), ball rate to each ball's
+> legitimate cap (gen-8 values, 255 ceilings, Ultra-Beast /10), status whitelisted.
+> `PEMK_BATTLE_ENFORCE_CATCHES` off/shadow/on (shadow = report + server_would log; on =
+> the client adopts the server verdict via the one `pbCaptureCalc` seam). Fail-open
+> everywhere; requires encounters=on (no mint -> local). Honest gaps: a miss doesn't
+> consume the mint so re-requests retry at vanilla odds (attempt counter logs SUSPECT
+> catch-spam at 21+; ball ownership isn't validated — the bag is blob-authoritative);
+> static/event/roamer catches never mint so they stay local. Next: D3 part 2 —
+> persist `encounter_rolls` + bind the caught mon's UID mint to the server-issued
+> identity (kills "mint an identity the server didn't issue").
 
 This document answers the last open question in the anti-cheat ladder: **how does
 the server independently decide what a battle produced — the Pokémon that
