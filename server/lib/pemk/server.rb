@@ -100,8 +100,11 @@ module PEMK
       @trade_deliveries = TradeDeliveries.new(@db, logger: @log) if @config.trade_redelivery
       @shop_deals = ShopDeals.new(@db) if @config.shop_enforce == :on   # E3: a deal runs once, asked again by its nonce
       @money_claims = MoneyClaims.new(@db) if @config.money_authority != :off   # money authority M1a: prize claims judged
-      # Trainer proof P3: a claim naming its battle's seed gets the replay's verdict (shadow).
-      @trainer_proofs = TrainerProofs.new(@db, logger: @log) if @trainer_battles && @money_claims
+      # Trainer proof: a claim naming its battle's seed gets the replay's verdict (P3); under
+      # `on` it is held until that verdict (P4 - decided below, with M3).
+      if @config.trainer_proof != :off && @trainer_battles && @money_claims
+        @trainer_proofs = TrainerProofs.new(@db, logger: @log)
+      end
       @last_proof_sweep = nil
       @proof_sweeping   = false
       if @config.money_authority == :off
@@ -128,6 +131,10 @@ module PEMK
       # M3: money rises only through the server's own transactions - where every source
       # is one it bounds; 'on' with a blocker left runs as shadow.
       @money_enforce = @config.money_authority == :on && money_blockers.empty?
+      # Trainer proof P4: a trainer prize is paid on its battle's replay - where money
+      # authority enforces, battle rng is on, and the team lock and EXP tracking run (the
+      # team's checks); 'on' otherwise runs as shadow.
+      @trainer_enforce = @config.trainer_proof == :on && @money_enforce && !@trainer_proofs.nil? && team_proof_gaps.empty?
       @last_item_sweep = nil
       @item_sweeping   = false
       @audit      = Audit.new(@world, logger: @log)
@@ -203,6 +210,7 @@ module PEMK
       @log.call("server: peer body check = #{@config.peer_check} (relayed Pokemon may name #{@config.peer_classes.join(', ')})")
       @log.call("server: shop enforcement = #{@config.shop_enforce} (Mart purchases and sales made server-side when on)")
       log_money_authority
+      log_trainer_proof
       @log.call("server: item authority = #{@config.item_authority} (item increases judged against server-known sources; logs only)")
       if @config.item_authority == :on
         if @item_enforce
@@ -345,7 +353,7 @@ module PEMK
       when :catch_req then handle_catch_req(conn, env, authed)
       when :catch_report then handle_catch_report(conn, env, authed)
       when :battle_end_report then handle_battle_end(conn, env, authed)
-      when :battle_record then handle_battle_record(env, body, authed)
+      when :battle_record then handle_battle_record(conn, env, body, authed)
       when :trainer_battle_req then handle_trainer_battle_req(conn, env, authed)
       when :flags then handle_flags(conn, env, authed)
       when :flag_delta then handle_flag_delta(env, authed)
@@ -389,7 +397,7 @@ module PEMK
     # What a client says it can do (a login or auth frame's :caps). Unknown words are
     # ignored; a client that lists nothing gets the pre-caps behaviour.
     def note_caps(conn, env)
-      conn.data[:caps] = Array(env[:caps]).grep(String).first(8).map { |c| c[0, 32] }
+      conn.data[:caps] = Array(env[:caps]).grep(String).first(16).map { |c| c[0, 32] }
     end
 
     def repairs?(conn)
@@ -397,9 +405,10 @@ module PEMK
     end
 
     # M3: a client that claims no prizes would see every one of them refused - it has to
-    # update before it plays here.
+    # update before it plays here. So does one that cannot wait for a prize's proof (P4).
     def money_update_required?(conn)
-      @money_enforce && !Array(conn.data[:caps]).include?("money_claims")
+      caps = Array(conn.data[:caps])
+      (@money_enforce && !caps.include?("money_claims")) || (@trainer_enforce && !caps.include?("trainer_proof"))
     end
 
     def handle_login(conn, env)
@@ -542,10 +551,16 @@ module PEMK
         @trade_deliveries&.seal(account_id)   # traded Pokemon reported before this save are on disk
         # A checkpoint waits for the battle's event to end: the prizes claimed before it
         # are in this save, so a fresh login keeps them.
-        @money_claims&.seal(account_id)
+        @money_claims&.seal(account_id, held: saved_claims(env))   # ... and the held ones this blob lists (P4)
         @log.call("server: saved account #{account_id} (#{body.bytesize}B)")
       end
       answer.(type: :save_err, reason: "busy") unless queued   # the account's queue is full
+    end
+
+    # P4: the prize claims a pushed save's blob carries, as the client names them when it
+    # writes the blob - nonces only, bounded. An older client names none.
+    def saved_claims(env)
+      Array(env[:claims]).select { |n| MoneyClaims.nonce(n) }.last(CLAIMS_SENT_MAX)   # the newest: its latest battles
     end
 
     # Server-authoritative economy. Serialized per account on the mailbox: apply the
@@ -1670,20 +1685,35 @@ module PEMK
       claim_sent(conn, nonce)
       @mailbox.submit(account_id) do
         done = @money_claims.find(account_id, nonce)
+        # first: judged by this request - money a login's balance could not hold yet (M3).
+        first = false
+        # P4: the claim was held - the client took its money out of the game meanwhile.
+        was_held = !done.nil? && done[:verdict] == "held" && done[:voided_at].nil?
         verdict, accepted =
           if done && done[:voided_at] then ["void", 0]   # a fresh login undid it: never paid again by its nonce
+          elsif was_held                                  # P4: paid once its battle's proof is in
+            settled = settle_held(account_id, done)
+            first = settled[0] != "held"
+            settled
           elsif done then [done[:verdict], @money_enforce ? done[:credited] : done[:accepted]]
           elsif claim_waits?(conn, account_id, env, payday, prize_sent) then ["wait", 0]
-          elsif payday then judge_payday(conn, account_id, nonce, env, foes)
-          else judge_claim(conn, account_id, nonce, env, trainers)
+          elsif payday && foes.nil? && prize_held?(account_id, env) then ["held", 0]   # P4: as its prize is
+          else
+            first = true
+            payday ? judge_payday(conn, account_id, nonce, env, foes) : judge_claim(conn, account_id, nonce, env, trainers)
           end
-        # Trainer proof P3: the battle the claim names, for its replay's verdict.
-        @trainer_proofs.link_claim(account_id, nonce, env[:seed], trainers) if @trainer_proofs && trainers && !done &&
-                                                                              verdict != "wait"
-        # first: judged by this request - money a login's balance could not hold yet (M3).
-        first = done.nil? && verdict != "wait"
+        # Trainer proof P3: the battle the claim names, for its replay's verdict (shadow -
+        # under enforcement a held claim is linked as it is judged).
+        if first && trainers && @trainer_proofs && !@trainer_enforce
+          @trainer_proofs.link_claim(account_id, nonce, env[:seed], trainers)
+        end
+        ack = { type: :money_claim_ack, nonce: nonce, verdict: verdict, accepted: accepted, first: first }
+        ack[:held] = true if was_held   # its money comes back with what is paid, in any mode
+        if verdict == "held" && (wait = held_wait(account_id, nonce))
+          ack[:wait] = wait             # when to ask again: the allowance has room tomorrow
+        end
         @reactor.post do
-          reply(conn, type: :money_claim_ack, nonce: nonce, verdict: verdict, accepted: accepted, first: first) if @reactor.alive?(conn)
+          reply(conn, **ack) if @reactor.alive?(conn)
         end
       rescue StandardError => e
         @log.call("money: claim failed #{e.class}: #{e.message}")
@@ -1786,7 +1816,10 @@ module PEMK
         end
         @money_shadow&.claim(account_id, accepted, before: before) if accepted.positive?
       end
-      note_payday(account_id, verdict, amount, accepted, bound, label)
+      # P4: the Pay Day of a battle no replay proves (its prize from the allowance, or waiting
+      # for room in it) is not paid - nor a sign of a cheat
+      unproven_prize = prize && (prize[:verdict] == "allowance" || prize[:proof] == "unprovable")
+      note_payday(account_id, verdict, amount, accepted, bound, label, flag: !unproven_prize)
       [verdict, @money_enforce ? credited : accepted]   # M3: what the client keeps is what was paid
     end
 
@@ -1827,7 +1860,7 @@ module PEMK
       learned.reverse.uniq.reverse.last(4)
     end
 
-    def note_payday(account_id, verdict, amount, accepted, bound, label)
+    def note_payday(account_id, verdict, amount, accepted, bound, label, flag: true)
       tag = label ? " (#{label})" : ""
       case verdict
       when "paid"
@@ -1839,7 +1872,7 @@ module PEMK
         @log.call("money: account #{account_id} pay day #{amount} capped at #{accepted} (the day's allowance)#{tag}")
       else
         @log.call("money: account #{account_id} WOULD-REFUSE pay day #{amount} (#{verdict})")
-        flag_anomaly(account_id, :money_claim)
+        flag_anomaly(account_id, :money_claim) if flag
       end
     end
 
@@ -1886,7 +1919,10 @@ module PEMK
         keys << MoneyClaims.trainer_key(type, name, version) unless place["repeatable"]   # its event is its clock
         keys << MoneyClaims.event_key(tmap, event, place["page"]) unless place["rematch"]
       end
-      bound *= 2 if env[:amulet] == true && prize_item_held?(account_id, env[:partner])
+      # P4: a battle recorded on its seed had no partner at the player's side (the recorder
+      # arms none) - its prize is no partner's Amulet Coin's.
+      partner = @trainer_enforce && env.key?(:seed) ? nil : env[:partner]
+      bound *= 2 if env[:amulet] == true && prize_item_held?(account_id, partner)
       bound *= 2 if env[:happy_hour] == true && happy_hour_possible?(conn, trainers)
       amount = env[:amount]
       accepted = verdict ? 0 : [amount, bound].min
@@ -1901,15 +1937,35 @@ module PEMK
           accepted = left
         end
       end
+      # P4: under enforcement a payable prize waits for its battle's proof - or, when no
+      # replay can prove it, for room in the day's small allowance.
+      gate = @trainer_enforce && MoneyClaims::PAID.include?(verdict) ? proof_gate(account_id, env, trainers) : nil
       credited = 0
+      why = nil
+      proof = nil
       @db.transaction do
         before = money_row(account_id)
-        credited = pay_claim(account_id, nonce, "prize", accepted)
+        case gate&.first
+        when :hold then verdict = "held"   # its would-be pay kept in accepted, nothing credited yet
+        when :refuse then verdict, accepted, proof, why = "refuted", 0, gate[1], gate[2]
+        when :allowance
+          why = gate[1]
+          if (pay = allowance_pay(account_id, accepted))
+            verdict, accepted = "allowance", pay
+            @money_daily.add_unproven(account_id, pay)
+          else
+            verdict, proof = "held", "unprovable"   # paid once the allowance has room
+          end
+        end
+        credited = pay_claim(account_id, nonce, "prize", accepted) unless verdict == "held"
         @money_claims.record(account_id, nonce, verdict: verdict, mode: money_mode, amount: amount, accepted: accepted,
                                                 map: map, trainers: trainers, credited: credited,
-                                                kind: again_any ? "repeatable" : "trainer")
-        @money_claims.pay(account_id, keys.uniq, nonce, rematch: rematch || again) if MoneyClaims::PAID.include?(verdict)
-        @money_shadow&.claim(account_id, accepted, before: before) if accepted.positive?
+                                                kind: again_any ? "repeatable" : "trainer",
+                                                trainer_battle_id: gate&.first == :hold ? gate[1][:id] : nil,
+                                                proof: proof)
+        # held: its battle's keys reserved - no second claim for it while the proof comes
+        @money_claims.pay(account_id, keys.uniq, nonce, rematch: rematch || again) if MoneyClaims::KEYED.include?(verdict)
+        @money_shadow&.claim(account_id, accepted, before: before) if accepted.positive? && verdict != "held"
         # A battle paid before, fought again: its prize in the next frame is a repeat.
         # (what the battle pays by the server's own count, not what the client states) So
         # is a battle the game lets be fought again, fought before its cadence.
@@ -1917,8 +1973,112 @@ module PEMK
           @money_shadow&.repeat(account_id, [amount, bound].min, before: before)
         end
       end
-      note_claim(account_id, verdict, amount, accepted, bound, trainers, where, again: again)
+      note_claim(account_id, verdict, amount, accepted, bound, trainers, where, again: again, why: why)
+      # a claim over its bound stays a sign, whatever the proof gate made of it
+      flag_anomaly(account_id, :money_suspect) if gate && amount > bound
       [verdict, @money_enforce ? credited : accepted]   # M3: what the client keeps is what was paid
+    end
+
+    # === trainer proof P4: a prize paid on its battle's replay =======================
+
+    # P4: what a payable prize needs before it is paid (under enforcement). A battle the
+    # recorder arms - one trainer, alone in its battle, no partner at the player's side -
+    # names its seed and is held until its replay's verdict. A claim that names no seed
+    # is paid from the day's allowance: no replay can prove it (a double battle, a battle
+    # fought offline or before its seed came - or a client that never asked: the allowance
+    # bounds that too). -> [:hold, the seed's row] | [:allowance, why] | [:refuse, proof, why]
+    def proof_gate(account_id, env, trainers)
+      type, name, version, map, event = trainers.length == 1 ? trainers[0] : nil
+      return [:allowance, "a battle against several trainers"] unless type
+      unless @world.trainer_alone?(map, event, type, name, version)
+        return [:allowance, "a battle the exports do not tell apart from a double battle"]
+      end
+      return [:allowance, "a battle not recorded on its seed"] unless env.key?(:seed)
+
+      row = @trainer_proofs.seed_row(account_id, env[:seed], trainers)
+      return [:refuse, "wrong_seed", "it names a seed that is not its battle's"] unless row
+      return [:refuse, "wrong_seed", "another claim holds its battle"] if @money_claims.seed_claimed?(row[:id])
+
+      [:hold, row]
+    end
+
+    # P4: what the day's allowance for the prizes no replay proves pays of +accepted+ now:
+    # all of it, or - a prize over the whole allowance, on a day nothing was paid from it -
+    # the allowance; nil while there is no room (the claim waits for the next UTC day).
+    # An allowance of 0 pays nothing, and nothing waits.
+    def allowance_pay(account_id, accepted)
+      cap = @config.money_unproven_daily
+      return 0 unless cap.positive?
+
+      paid = @money_daily.unproven_paid(account_id)
+      return accepted if accepted <= cap - paid
+      return cap if accepted > cap && paid.zero?
+
+      nil
+    end
+
+    # P4: when a held claim is best asked again - one waiting for room in the allowance, at
+    # the next UTC day (at most an hour on); one waiting for its replay, when told (nil).
+    def held_wait(account_id, nonce)
+      claim = @money_claims.find(account_id, nonce)
+      return nil unless claim && claim[:verdict] == "held" && claim[:proof] == "unprovable"
+
+      now = Time.now.utc
+      (Time.utc(now.year, now.month, now.day) + 86_400 - now).ceil.clamp(60, 3600)
+    end
+
+    # P4: a trainer battle's Pay Day waits while its prize waits for its replay - or, proven,
+    # for the ask that pays it.
+    def prize_held?(account_id, env)
+      return false unless @trainer_enforce
+
+      prize = @money_claims.find(account_id, MoneyClaims.nonce(env[:trainer_claim]))
+      !prize.nil? && prize[:verdict] == "held" && [nil, "proven"].include?(prize[:proof]) && prize[:voided_at].nil?
+    end
+
+    # P4: a held claim asked again - paid once its battle's proof is in, in this answer's
+    # own transaction (the sweep only decides). Proven: what was held. Unprovable: from the
+    # day's allowance, once it has room. Refuted, unrecorded: nothing, and its battle stays
+    # paid for - a refusal stands in every mode; with enforcement turned off since, any
+    # other is paid as M3 pays it. -> [verdict, what the client keeps]
+    def settle_held(account_id, claim)
+      proof = claim[:proof]
+      proof = "proven" if !@trainer_enforce && (proof.nil? || proof == "unprovable")
+      return ["held", 0] if proof.nil?
+
+      nonce = claim[:nonce]
+      verdict = accepted = nil
+      credited = 0
+      @db.transaction do
+        before = money_row(account_id)
+        case proof
+        when "proven" then verdict, accepted = "paid", claim[:accepted]
+        when "unprovable"
+          pay = allowance_pay(account_id, claim[:accepted])
+          raise Sequel::Rollback unless pay   # no room today: it waits
+          verdict, accepted = "allowance", pay
+          @money_daily.add_unproven(account_id, pay)
+        else verdict, accepted = "refuted", 0
+        end
+        credited = pay_claim(account_id, nonce, "prize", accepted)
+        @money_claims.settle(account_id, nonce, verdict: verdict, accepted: accepted, credited: credited)
+        @money_shadow&.claim(account_id, accepted, before: before) if accepted.positive?
+      end
+      return ["held", 0] unless verdict
+
+      note_settled(account_id, claim, proof, verdict, accepted)
+      [verdict, @money_enforce ? credited : accepted]
+    end
+
+    def note_settled(account_id, claim, proof, verdict, accepted)
+      what = "money: account #{account_id} prize claim #{claim[:nonce]} (#{claim[:amount]})"
+      case verdict
+      when "paid" then @log.call("#{what} proven: paid #{accepted}")
+      when "allowance" then @log.call("#{what} unprovable: paid #{accepted} from the day's allowance")
+      else
+        @log.call("#{what} REFUSED: #{proof}")
+        flag_anomaly(account_id, :money_claim)
+      end
     end
 
     # The trainers one event battles in separate calls (a rival's branches) are not one
@@ -2019,7 +2179,7 @@ module PEMK
       trainers.any? { |type, name, version, _, _| @battle.trainer_knows_any?(type, name, version, HAPPY_HOUR_MOVES) }
     end
 
-    def note_claim(account_id, verdict, amount, accepted, bound, trainers, where, again: false)
+    def note_claim(account_id, verdict, amount, accepted, bound, trainers, where, again: false, why: nil)
       names = trainers.map { |t| "#{t[0]} #{t[1]} v#{t[2]}" }.join(", ")
       case verdict
       when "paid"
@@ -2027,6 +2187,15 @@ module PEMK
       when "suspect"
         @log.call("money: account #{account_id} SUSPECT prize #{amount} over its bound #{bound} for #{names}")
         flag_anomaly(account_id, :money_suspect)
+      when "held"
+        until_when = why ? "the day's allowance for prizes no replay proves has room (#{why})" : "its battle's replay proves it"
+        @log.call("money: account #{account_id} prize #{amount} for #{names} held until #{until_when}")
+      when "allowance"
+        @log.call("money: account #{account_id} prize #{amount} for #{names} paid #{accepted} from the day's allowance " \
+                  "for prizes no replay proves (#{why})")
+      when "refuted"
+        @log.call("money: account #{account_id} REFUSED prize #{amount} for #{names}: #{why}")
+        flag_anomaly(account_id, :money_claim)
       else
         @log.call("money: account #{account_id} WOULD-REFUSE prize #{amount} for #{names} (#{verdict}" \
                   "#{where ? ", on map #{where}" : ''}" \
@@ -2059,6 +2228,46 @@ module PEMK
 
       names = again.map { |m, e, type, name, v| "#{type} #{name} v#{v} (map #{m} event #{e})" }
       @log.call("server: money: battles the game lets be fought again, each paid at most once per 20 minutes: #{names.join(', ')}")
+    end
+
+    # At boot: the trainer proof's mode, what keeps 'on' from enforcing, and the battles no
+    # replay can prove - under enforcement their prizes come from the day's allowance.
+    def log_trainer_proof
+      mode = @config.trainer_proof
+      what = if @trainer_enforce
+               "a trainer prize is held until its battle's replay proves it; those no replay can prove are paid " \
+               "from #{@config.money_unproven_daily} a day"
+             elsif @trainer_proofs then "each prize claim naming its battle gets its replay's verdict; logs only"
+             else "nothing is proven"
+             end
+      @log.call("server: trainer proof = #{mode} (#{what})")
+      return if mode == :off
+
+      missing = []
+      missing << "battle rng is not on (PEMK_BATTLE_ENFORCE_RNG): trainer battles are not seeded" unless @config.battle_enforce_rng == :on
+      missing << "money authority is off (PEMK_MONEY_AUTHORITY)" if @config.money_authority == :off
+      missing << "money authority does not enforce (PEMK_MONEY_AUTHORITY=on and its preconditions)" unless @money_enforce
+      missing.concat(team_proof_gaps)
+      if @trainer_proofs.nil?
+        @log.call("server: WARNING trainer proof '#{mode}' does nothing until: #{missing.join('; ')}")
+        return
+      end
+      @log.call("server: WARNING trainer proof 'on' runs as shadow until: #{missing.join('; ')}") if mode == :on && !@trainer_enforce
+      @log.call("server: trainer proof: a prize waits for its battle's replay - run bin/pemk_replay.rb with PEMK_REPLAY_LOOP")
+      shared = @world.trainers_not_alone
+      return if shared.empty?
+
+      names = shared.map { |m, e, type, name, v| "#{type} #{name} v#{v} (map #{m} event #{e})" }
+      @log.call("server: trainer proof: battles with more than one trainer, never proven: #{names.join(', ')}")
+    end
+
+    # What keeps a replay from checking the player's team against the server's own: the
+    # first-sight lock (IVs, shiny, gender) comes with D1, the EXP seen with D6.
+    def team_proof_gaps
+      out = []
+      out << "the team lock is off (PEMK_BATTLE_ENFORCE_TEAMS): a record's IVs are its word" if @config.battle_enforce_teams == :off
+      out << "EXP tracking is off (PEMK_BATTLE_ENFORCE_EXP): a record's levels are its word" if @config.battle_enforce_exp == :off
+      out
     end
 
     # M3: an account with no money yet starts from the exported start money - the client
@@ -2125,7 +2334,8 @@ module PEMK
         @money_claims.void_unsealed(account_id) do |c|
           undone = take_back(account_id, c)
           if undone
-            @money_shadow&.void(account_id, c[:accepted], before: money_row(account_id)) if c[:accepted].positive?
+            # (a held claim never reached the shadow balance: nothing to take out of it)
+            @money_shadow&.void(account_id, c[:accepted], before: money_row(account_id)) if c[:accepted].positive? && c[:verdict] != "held"
           else
             kept += 1
           end
@@ -2327,6 +2537,9 @@ module PEMK
         return deny.("bad")
       end
       return deny.("unknown") unless @world.trainer_place(map, event, type, name, version)
+      # P4: a battle this trainer may share with another is never recorded - no seed for it
+      # (its prize comes from the day's allowance).
+      return deny.("unprovable") if @trainer_proofs && !@world.trainer_alone?(map, event, type, name, version)
 
       here = conn.data[:last_pos]
       return deny.("not_here") unless here.is_a?(Array) && here[0] == map
@@ -2340,9 +2553,13 @@ module PEMK
       end
     end
 
-    def handle_battle_record(env, body, account_id)
+    # Trainer proof P4: a record naming a client nonce (a trainer battle's) is acknowledged
+    # once stored - or known, or never storable - so the client stops sending it again;
+    # one over the hourly cap, or not stored for an error, is not (it comes again later).
+    def handle_battle_record(conn, env, body, account_id)
       return unless @battle_records
 
+      rec_nonce = MoneyClaims.nonce(env[:rec_nonce])
       @mailbox.submit(account_id) do
         begin
           result = @battle_records.ingest(account_id, env, body)
@@ -2350,6 +2567,9 @@ module PEMK
           flag_anomaly(account_id, :rng_desync) if result == :desync
           # Trainer proof P3: a replay daemon listening replays it now, not at its next poll.
           (@db.notify(TrainerProofs::REPLAY_CHANNEL) rescue nil) if @trainer_proofs && %i[ok desync].include?(result)
+          if rec_nonce && !%i[later error].include?(result)
+            @reactor.post { reply(conn, type: :battle_record_ack, rec_nonce: rec_nonce) if @reactor.alive?(conn) }
+          end
         rescue StandardError => e
           @log.call("battlerec: ingest job failed #{e.class}: #{e.message}")
         end
@@ -2703,8 +2923,11 @@ module PEMK
 
     PROOF_SWEEP_SEC = 5
 
+    PROOF_STALE_LOG_SEC = 300
+
     # Trainer proof P3: the replay's verdicts into the prize claims, on a worker. Shadow:
-    # what enforcement would hold is logged (WOULD-HOLD), nothing is held.
+    # what enforcement would hold is logged (WOULD-HOLD), nothing is held. P4: a verdict
+    # tells the online client to ask for its claim again - that ask pays it.
     def maybe_proof_sweep
       return unless @trainer_proofs
       return if @proof_sweeping
@@ -2716,17 +2939,35 @@ module PEMK
       @proof_sweeping   = true
       @pool.submit do
         @trainer_proofs.sweep.each do |account_id, nonce, proof, reason|
-          if proof == :proven
+          if @trainer_enforce
+            @log.call("trainerproof: account #{account_id} claim #{nonce} #{proof.to_s.upcase}#{reason ? ": #{reason}" : ''}")
+            @reactor.post do
+              conn = @online[account_id]
+              reply(conn, type: :money_claim_ready, nonce: nonce) if conn && @reactor.alive?(conn)
+            end
+          elsif proof == :proven
             @log.call("trainerproof: account #{account_id} claim #{nonce} PROVEN")
           else
             @log.call("trainerproof: account #{account_id} claim #{nonce} WOULD-HOLD (#{proof}): #{reason}")
           end
         end
+        note_stale_replays(@trainer_proofs.stale, now)
       rescue StandardError => e
         @log.call("trainerproof: sweep failed #{e.class}: #{e.message}")
       ensure
         @reactor.post { @proof_sweeping = false }
       end
+    end
+
+    # The replay daemon's silence is an alarm, not a verdict: the claims whose record waits
+    # for its replay stay held (at most one warning every PROOF_STALE_LOG_SEC).
+    def note_stale_replays(count, now)
+      return unless count.positive?
+      return if @last_stale_log && now - @last_stale_log < PROOF_STALE_LOG_SEC
+
+      @last_stale_log = now
+      @log.call("trainerproof: WARNING #{count} prize claim(s) wait for their battle's replay for more than " \
+                "#{TrainerProofs::RECORD_WAIT / 60} minutes - is bin/pemk_replay.rb running (PEMK_REPLAY_LOOP)?")
     end
 
     BAN_SWEEP_SEC = 10
@@ -2955,6 +3196,8 @@ module PEMK
         money_claims: money_mode,                                             # money authority: how prizes are claimed
         save_ack: true,                                                      # each save is answered written or not
         trainer_seed: !@trainer_battles.nil?,                                # a trainer battle asks for its seed first
+        trainer_proof: @trainer_enforce ? "on" : "off",                      # P4: a prize waits for its battle's proof
+        record_ack: !@trainer_proofs.nil?,                                   # P4: a trainer battle's record is acknowledged
         flags_seq: (@flag_state ? (@flag_state.snapshot(account_id)&.fetch(:last_seq, 0) || 0) : 0),
         flag_policy: flag_policy,
         flag_facts: (@config.flag_state == :on && @flag_state ? @flag_state.materialize_facts(account_id) : nil) }

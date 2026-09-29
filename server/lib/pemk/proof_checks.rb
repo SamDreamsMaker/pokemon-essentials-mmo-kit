@@ -7,15 +7,39 @@ module PEMK
   # was won with the team the record says - which is the client's word. Each Pokemon of
   # that team must be one the server knows for this account: registered (a uid), owned,
   # not quarantined, its first-sight lock kept (IVs, shiny, gender - audit item 5) and no
-  # more EXP than the server has seen (D6). Database only: runs in the replay tool.
+  # more EXP than the server has seen (D6). With the game's battle data (P4's review): the
+  # species it was first seen as or an evolution of it, and a legal set (D1's TeamAudit).
+  # And the record is replayed on its seed row's seed, against that row's trainer - never
+  # on what its body says. Database and data only: runs in the replay tool.
   module ProofChecks
     STATS = %w[HP ATTACK DEFENSE SPECIAL_ATTACK SPECIAL_DEFENSE SPEED].freeze
     IV_TRAINED = 31   # Hyper Training raises an IV to this, the one legal change
+    # A move or an ability no data explains may have come from an event script: the set
+    # is then unprovable, not refuted.
+    LEGIT_ELSEWHERE = %w[illegal_move: illegal_ability:].freeze
 
     module_function
 
-    # -> [:ok | :unprovable | :refuted, reason | nil]
-    def player_team(db, account_id, record)
+    # A trainer record bound to a seed row is that row's battle: run on the row's seed (the
+    # one the ingest walked), against the row's trainer. -> [the record to replay, nil] |
+    # [nil, why it is not its seed row's battle]
+    def bind_to_seed(record, stored_seed, seed_row)
+      return [nil, "the record is not a trainer battle's (#{record[:kind].inspect})"] unless record[:kind] == "trainer"
+      return [nil, "the record says it ran on no seed (#{record[:mode].inspect})"] unless record[:mode].to_s == "on"
+      unless record[:seed] == stored_seed && stored_seed == seed_row[:seed]
+        return [nil, "the record names another seed than its battle's"]
+      end
+
+      want = [[seed_row[:tr_type], seed_row[:tr_name], seed_row[:tr_version]]]
+      got = Array(record[:trainers]).map { |t| Array(t).map { |v| v.is_a?(Symbol) ? v.to_s : v } }
+      return [nil, "the record names another trainer than its seed's (#{got.inspect})"] unless got == want
+
+      [record.merge(seed: seed_row[:seed], mode: "on"), nil]
+    end
+
+    # -> [:ok | :unprovable | :refuted, reason | nil]. +audit+: a TeamAudit on the game's
+    # battle data.
+    def player_team(db, account_id, record, audit: nil)
       frames = Array(record.is_a?(Hash) && record[:init].is_a?(Hash) ? record[:init][:player] : nil).compact
       return [:unprovable, "no player team in the record"] if frames.empty?
 
@@ -26,27 +50,62 @@ module PEMK
           unprovable ||= "player #{i}: a Pokemon the server has not registered yet"
           next
         end
-        why = pokemon(db, account_id, uid, f)
-        return [:refuted, "player #{i} (uid #{uid}): #{why}"] if why
+        verdict, why = pokemon(db, account_id, uid, f, audit)
+        return [:refuted, "player #{i} (uid #{uid}): #{why}"] if verdict == :refuted
+
+        unprovable ||= "player #{i} (uid #{uid}): #{why}" if verdict == :unprovable
       end
       unprovable ? [:unprovable, unprovable] : [:ok, nil]
     end
 
-    # -> why this frame is not the server's Pokemon +uid+ of +account_id+, or nil.
-    def pokemon(db, account_id, uid, frame)
+    # -> [:refuted | :unprovable, why] when this frame is not the server's Pokemon +uid+
+    # of +account_id+ as it may be, or nil.
+    def pokemon(db, account_id, uid, frame, audit = nil)
       mon = db[:monsters].where(id: uid).first
-      return "not this account's" unless mon && mon[:owner_account_id] == account_id
-      return "#{mon[:status]}, not active" unless mon[:status] == "active"
+      return [:refuted, "not this account's"] unless mon && mon[:owner_account_id] == account_id
+      return [:refuted, "#{mon[:status]}, not active"] unless mon[:status] == "active"
 
-      if (lock = db[:monster_blocks].where(uid: uid).first)
+      lock = db[:monster_blocks].where(uid: uid).first
+      if lock
         why = kept_lock(lock, frame)
-        return why if why
+        return [:refuted, why] if why
       end
-      seen = db[:monster_stats].where(uid: uid).get(:exp)
+      # The replay's level follows its EXP: a record without it would choose its level.
       exp = frame[:exp]
-      return "EXP #{exp}, more than the #{seen} the server has seen" if seen && exp.is_a?(Integer) && exp > seen
+      return [:refuted, "no EXP in the record"] unless exp.is_a?(Integer)
 
-      nil
+      seen = db[:monster_stats].where(uid: uid).get(:exp)
+      return [:refuted, "EXP #{exp}, more than the #{seen} the server has seen"] if seen && exp > seen
+
+      set = audit ? legal_set(audit, (lock && lock[:species]) || mon[:species], frame) : nil
+      return set if set
+
+      seen ? nil : [:unprovable, "no EXP the server has seen for it"]
+    end
+
+    # The species a uid can be - the one it was first seen as (or issued as), or an
+    # evolution of it - and a legal set.
+    def legal_set(audit, first_species, frame)
+      if first_species
+        family = audit.evolves_from?(frame[:species], first_species)
+        return [:refuted, "species #{frame[:species]} is not #{first_species} or an evolution of it"] if family == false
+        return [:unprovable, "species #{frame[:species]}: the battle data cannot say"] if family.nil?
+      end
+      hard = audit.hard_violations(audit_frame(frame))
+      return nil if hard.empty?
+
+      firm = hard.reject { |v| LEGIT_ELSEWHERE.any? { |p| v.start_with?(p) } }
+      return [:refuted, "an illegal set: #{firm.join(', ')}"] unless firm.empty?
+
+      [:unprovable, "a set no data explains: #{hard.join(', ')}"]
+    end
+
+    # A record's mon frame as TeamAudit takes one - its six stats only, as the replay reads
+    # them (a key of the client's own is no stat, and no text of a verdict).
+    def audit_frame(f)
+      stats = ->(h) { h.is_a?(Hash) ? STATS.to_h { |s| [s, h[s] || h[s.to_sym]] }.compact : nil }
+      { "species" => f[:species].to_s, "level" => f[:level], "ivs" => stats.(f[:iv]), "evs" => stats.(f[:ev]),
+        "moves" => Array(f[:moves]).map(&:to_s), "ability" => f[:ability], "nature" => f[:nature], "item" => f[:item] }
     end
 
     def kept_lock(lock, frame)
@@ -63,6 +122,14 @@ module PEMK
       return "gender changed" if !lock[:gender].nil? && frame[:gender] != lock[:gender]
 
       nil
+    end
+
+    # A record's words, safe to store and print: its bytes may be anything a client sent
+    # (the database refuses invalid UTF-8 and NUL). At most 1000 characters.
+    def safe_text(value)
+      return nil if value.nil?
+
+      value.to_s.dup.force_encoding(Encoding::UTF_8).scrub("?").delete("\u0000")[0, 1000]
     end
 
     # A jsonb column as a Hash: JSON text without the pg_json extension (the replay tool's

@@ -6,6 +6,8 @@ lib = File.expand_path("../lib", __dir__)
 $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 require "pemk/proof_checks"
 require "pemk/trainer_proofs"
+require "pemk/battle_data"
+require "pemk/team_audit"
 
 # Trainer proof P3 (docs/TRAINER-PROOF-DESIGN.md). The player's team in a trainer record
 # must be the server's own Pokemon (ProofChecks); a prize claim naming its battle's seed
@@ -76,6 +78,68 @@ class TrainerProofsTest < Minitest::Test
     assert_equal [:unprovable, "player 1: a Pokemon the server has not registered yet"], [verdict, reason]
   end
 
+  # P4's review: with the game's battle data, the species a uid can be (the one first seen,
+  # or an evolution of it) and a legal set. A move no data explains may come from an event
+  # script: unprovable, not refuted.
+  AUDIT = PEMK::TeamAudit.new(PEMK::BattleData.new(File.expand_path("../data/battle_data.json", __dir__)))
+
+  def test_the_player_team_is_what_its_pokemon_can_be
+    ok = mon(@me, ivs: STATS.to_h { |s| [s, 10] }, exp: 6000)
+    set = ->(**kw) { frame(ok).merge(species: "WARTORTLE", level: 20, moves: %w[TACKLE BITE], ability: "TORRENT",
+                                     nature: "HARDY", ev: STATS.to_h { |s| [s, 20] }).merge(kw) }
+    check = ->(f) { PEMK::ProofChecks.player_team(@db, @me, team(f), audit: AUDIT) }
+    assert_equal [:ok, nil], check.(set.())
+    assert_equal :ok, check.(set.(species: "BLASTOISE"))[0], "an evolution"
+    {
+      set.(species: "PIKACHU")                                      => /species PIKACHU is not WARTORTLE or an evolution/,
+      set.(species: "SQUIRTLE")                                     => /species SQUIRTLE is not WARTORTLE/,
+      set.(ev: STATS.to_h { |s| [s, 100] })                         => /an illegal set: ev_total_over:600>510/,
+      set.(item: "BICYCLE")                                         => /an illegal set: unholdable_item:BICYCLE/
+    }.each do |f, why|
+      verdict, reason = check.(f)
+      assert_equal :refuted, verdict, reason
+      assert_match why, reason
+    end
+    verdict, reason = check.(set.(moves: %w[TACKLE SPORE]))
+    assert_equal [:unprovable, true], [verdict, reason.include?("illegal_move:SPORE")], reason
+    # the six stats only: a key of the client's own is neither a stat nor a verdict's words
+    assert_equal [:ok, nil], check.(set.(iv: STATS.to_h { |s| [s, 10] }.merge("\xFF".b => 99)))
+    assert_equal [:refuted, "player 0 (uid #{ok}): no EXP in the record"], check.(set.(exp: nil))
+    assert_equal [:ok, nil], PEMK::ProofChecks.player_team(@db, @me, team(set.(species: "PIKACHU"))),
+                 "without the battle data: not judged"
+    @db[:monster_blocks].where(uid: ok).update(species: "NOT_IN_THE_DATA")
+    assert_equal :unprovable, check.(set.())[0], "what it was first seen as, the data no longer knows"
+    @db[:monster_blocks].where(uid: ok).update(species: "WARTORTLE")
+    @db[:monster_stats].where(uid: ok).delete
+    assert_equal [:unprovable, "player 0 (uid #{ok}): no EXP the server has seen for it"], check.(set.())
+    assert_equal "a?b", PEMK::ProofChecks.safe_text("a\xFF\u0000b".b)
+  end
+
+  # A trainer record is replayed on its seed row's seed, against the row's trainer -
+  # never on what its body says.
+  def test_a_record_is_its_seed_row_s_battle
+    row = { seed: 77, tr_type: "CAMPER", tr_name: "Liam", tr_version: 0 }
+    rec = { mode: "on", seed: 77, trainers: [["CAMPER", "Liam", 0]], kind: "trainer" }
+    bound, why = PEMK::ProofChecks.bind_to_seed(rec, 77, row)
+    assert_nil why
+    assert_equal [77, "on"], bound.values_at(:seed, :mode)
+    {
+      rec.merge(mode: "shadow")                         => /ran on no seed/,
+      rec.merge(kind: "wild")                           => /not a trainer battle's/,
+      rec.merge(seed: 78)                               => /another seed/,
+      rec.merge(trainers: [["LEADER_Brock", "Brock", 0]]) => /another trainer/,
+      rec.merge(trainers: [["CAMPER", "Liam", 0], ["CAMPER", "Liam", 0]]) => /another trainer/
+    }.each do |r, want|
+      out, reason = PEMK::ProofChecks.bind_to_seed(r, 77, row)
+      assert_nil out
+      assert_match want, reason
+    end
+    assert_match(/another seed/, PEMK::ProofChecks.bind_to_seed(rec, 76, row)[1], "the envelope named another")
+    assert_equal [[:CAMPER, "Liam", 0]].map { |t| t.map { |v| v.is_a?(Symbol) ? v.to_s : v } },
+                 PEMK::ProofChecks.bind_to_seed(rec.merge(trainers: [[:CAMPER, "Liam", 0]]), 77, row)[0][:trainers]
+                                  .map { |t| t.map { |v| v.is_a?(Symbol) ? v.to_s : v } }
+  end
+
   # --- claims and verdicts -----------------------------------------------------------
 
   def seed_row(account, trainer = LIAM, seed: rand(1 << 50) + 1)
@@ -131,7 +195,11 @@ class TrainerProofsTest < Minitest::Test
       { status: "match", prize: 999 }                  => [:refuted, /claimed 176, the replay paid 999/],
       { status: "match", team: "unprovable" }          => [:unprovable, /the player's team/],
       { status: "error" }                              => [:unprovable, /could not be replayed/],
-      { status: "match", prize: nil }                  => [:unprovable, /paid no prize/]
+      { status: "not_replayable", detail: "truncated" } => [:unprovable, /could not be replayed \(not_replayable: truncated/],
+      { status: "match", prize: nil }                  => [:unprovable, /paid no prize/],
+      # a game may edit its trainers as they load: not the player's doing (P4)
+      { status: "mismatch", detail: "the trainer is not the game's data: foe team: the game's data has 2, the record 1" } =>
+        [:unprovable, /\Athe trainer is not the game's data: foe team/]
     }
     cases.each_with_index do |(rec, (want, why)), i|
       trainer = ["CAMPER", "Liam", 0, 10, 100 + i]          # one open seed per placement: one each
@@ -141,16 +209,52 @@ class TrainerProofsTest < Minitest::Test
       _, _, got, reason = @proofs.sweep(now: @now).find { |_, n, _, _| n == i + 1 }
       assert_equal want, got, rec.inspect
       assert_match why, reason
-      assert_equal "open", @db[:trainer_battles].where(id: row).get(:state), "only a proven win spends the seed"
+      # judged without a win: the seed stays (no fresh one for a claim no replay proves),
+      # the claim lets the battle go and the record the seed's one win
+      assert_equal "open", @db[:trainer_battles].where(id: row).get(:state)
+      assert_nil @db[:money_claims].where(nonce: i + 1).get(:trainer_battle_id)
+      assert_empty @db[:battle_records].where(trainer_battle_id: row).all
     end
   end
 
-  def test_a_claim_waits_for_its_record_then_is_unprovable
+  def test_a_claim_waits_for_its_record_then_is_unrecorded
     row, seed = seed_row(@me)
     linked(1, row, seed, at: @now - 60)
     record(row, status: "match", outcome: 2)             # a lost battle proves no prize
     assert_empty @proofs.sweep(now: @now)
-    assert_equal [[@me, 1, :unprovable, "no record of a won battle on its seed"]], @proofs.sweep(now: @now + 700)
+    assert_equal [[@me, 1, :unrecorded, "no record of a won battle on its seed"]], @proofs.sweep(now: @now + 700)
+  end
+
+  # P4: the replay daemon's silence is no verdict - the claim waits, and is counted stale.
+  def test_a_record_waiting_for_its_replay_gets_no_verdict
+    row, seed = seed_row(@me)
+    linked(1, row, seed, at: @now - 60)
+    record(row, status: "walk_ok")
+    assert_empty @proofs.sweep(now: @now)
+    assert_equal 0, @proofs.stale
+    assert_empty @proofs.sweep(now: @now + 3600), "an hour later: still no verdict"
+    assert_equal 1, @proofs.stale
+    assert_nil verdict(1)
+  end
+
+  def test_a_voided_claim_is_not_judged
+    row, seed = seed_row(@me)
+    linked(1, row, seed)
+    record(row, status: "match")
+    @db[:money_claims].where(nonce: 1).update(voided_at: @now)
+    assert_empty @proofs.sweep(now: @now)
+    assert_equal "open", @db[:trainer_battles].where(id: row).get(:state)
+  end
+
+  def test_the_seed_row_of_a_claim
+    row, seed = seed_row(@me)
+    assert_equal row, @proofs.seed_row(@me, seed, [LIAM])[:id]
+    assert_nil @proofs.seed_row(@me, seed, [["CAMPER", "Liam", 0, 10, 5]]), "another placement"
+    assert_nil @proofs.seed_row(@other, seed, [LIAM]), "another account"
+    assert_nil @proofs.seed_row(@me, seed.to_s, [LIAM]), "not a seed"
+    assert_nil @proofs.seed_row(@me, seed, [LIAM, LIAM]), "two trainers"
+    @db[:trainer_battles].where(id: row).update(state: "proven")
+    assert_nil @proofs.seed_row(@me, seed, [LIAM]), "spent"
   end
 
   # One win, one prize: a seed holds one won battle and one claim (migration 044).

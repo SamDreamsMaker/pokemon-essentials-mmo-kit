@@ -61,6 +61,8 @@ module PEMK
         Sync.on_save_reply(msg)          # a pushed save written, or to be sent again
       when :trainer_battle_seed, :trainer_battle_deny
         BattleRng.on_trainer_seed(msg)   # a trainer battle's seed (trainer proof P2)
+      when :battle_record_ack
+        BattleRng.on_record_ack(msg)     # the server has a trainer battle's record (P4)
       when :flag_repair
         Flags.note_repair(msg)           # step 5: owned values back to the server's
       when :inv_correct
@@ -76,6 +78,8 @@ module PEMK
         Shop.on_reply(msg)               # E3: the answer to a :shop_req
       when :money_claim_ack
         PrizeClaim.on_ack(msg)           # money authority M1: a prize claim judged
+      when :money_claim_ready
+        PrizeClaim.on_ready(msg)         # P4: a held prize's proof is in - ask for it again
       when :gift_grant, :gift_deny
         GiftClaim.on_reply(msg)          # step 6: the answer to a :gift_req (keyed by nonce)
       when :pickup_grant, :pickup_deny, :pickups_reset_ok, :pickups_reset_deny

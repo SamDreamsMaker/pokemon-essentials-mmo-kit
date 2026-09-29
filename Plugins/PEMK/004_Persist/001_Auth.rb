@@ -20,7 +20,9 @@ module PEMK
     # inv_correct: it takes back the items the server could not account for (E4).
     # money_claims: it claims its prizes, and holds its money for their verdicts (M3).
     # save_ack: it sends a save again until the server says it was written.
-    CAPS = %w[flag_repair trade_redeliver gift_pos inv_correct money_claims save_ack].freeze
+    # trainer_proof: it keeps a prize held for its battle's proof, and that battle's
+    # record, until the server pays the one and has the other (P4).
+    CAPS = %w[flag_repair trade_redeliver gift_pos inv_correct money_claims save_ack trainer_proof].freeze
     ACCOUNT_FILE       = "mmo_account.dat"
     GUEST_ACCOUNT_FILE = "mmo_account_guest.dat"
 
@@ -192,6 +194,8 @@ module PEMK
       (PEMK::ExpCorrect.adopt_mode(reply[:battle_enforce_exp]) rescue nil)         # M4-D6: EXP mode
       (PEMK::BattleRng.adopt_mode(reply[:battle_enforce_rng]) rescue nil)          # M4-D7: rng/capture mode
       (PEMK::BattleRng.adopt_trainer_seed(reply[:trainer_seed]) rescue nil)      # trainer proof P2: seeds asked first
+      (PEMK::BattleRng.adopt_record_ack(reply[:record_ack]) rescue nil)          # P4: records kept until acknowledged
+      (PEMK::BattleRng.adopt_trainer_proof(reply[:trainer_proof]) rescue nil)    # P4: a prize paid on its replay
       (PEMK::Flags.adopt_mode(reply[:flag_state]) rescue nil)                     # audit item 4: flag shadow
       (PEMK::Flags.adopt_policy(reply[:flag_policy]) rescue nil)   # build-time tier table (absent == local)
       (PEMK::Flags.note_facts(reply[:flag_facts]) rescue nil)      # applied after the save loads
@@ -249,6 +253,8 @@ module PEMK
       (PEMK::ExpCorrect.adopt_mode(reply[:battle_enforce_exp]) rescue nil)         # M4-D6: EXP mode
       (PEMK::BattleRng.adopt_mode(reply[:battle_enforce_rng]) rescue nil)          # M4-D7: rng/capture mode
       (PEMK::BattleRng.adopt_trainer_seed(reply[:trainer_seed]) rescue nil)      # trainer proof P2: seeds asked first
+      (PEMK::BattleRng.adopt_record_ack(reply[:record_ack]) rescue nil)          # P4: records kept until acknowledged
+      (PEMK::BattleRng.adopt_trainer_proof(reply[:trainer_proof]) rescue nil)    # P4: a prize paid on its replay
       (PEMK::Flags.adopt_mode(reply[:flag_state]) rescue nil)                     # audit item 4: flag shadow
       (PEMK::Flags.adopt_policy(reply[:flag_policy]) rescue nil)   # build-time tier table (absent == local)
       (PEMK::Flags.note_facts(reply[:flag_facts]) rescue nil)      # applied after the save loads
@@ -275,6 +281,7 @@ module PEMK
 
       # Money authority M1: the prizes still unanswered go first, after a position, so the
       # server knows them before the money frame that shows them.
+      (PEMK::BattleRng.send_records rescue nil)   # trainer proof P4: the records its claims name, first
       (PEMK::PrizeClaim.flush rescue nil)
       (PEMK::Sync.mark_econ(:money, $player.money) rescue nil)
       (PEMK::Sync.mark_econ(:coins, $player.coins) rescue nil)

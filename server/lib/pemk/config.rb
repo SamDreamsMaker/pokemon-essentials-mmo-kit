@@ -15,7 +15,8 @@ module PEMK
                 :battle_enforce_resim, :resim_min_strikes, :flag_state, :flag_enforce, :anomaly_detection,
                 :gift_enforce, :peer_check, :peer_classes, :trade_redelivery, :item_record,
                 :shop_enforce, :item_authority, :item_local, :item_grace, :money_authority,
-                :money_payday_daily, :money_local_daily, :money_repeat_daily
+                :money_payday_daily, :money_local_daily, :money_repeat_daily, :trainer_proof,
+                :money_unproven_daily
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -228,6 +229,18 @@ module PEMK
                             elsif raw.match?(/\A\d+\z/) then raw.to_i
                             else 20_000
                             end
+      # Trainer proof (docs/TRAINER-PROOF-DESIGN.md): a trainer prize is paid on its
+      # battle's replay. off = nothing; shadow = each claim naming its battle gets the
+      # replay's verdict, logged; on = a claim is held until that verdict, and paid only on
+      # a proven win - where money authority enforces and battle rng is on, else as shadow.
+      pmode = env.fetch("PEMK_TRAINER_PROOF", "off").to_s.strip.downcase
+      @trainer_proof = %w[off shadow on].include?(pmode) ? pmode.to_sym : :off
+      # Under trainer proof `on`, what an account may be paid per day for the prizes no
+      # replay can prove for a cause on the server's side (no seed handed out, a battle the
+      # export cannot rebuild, a record the harness cannot replay) - Sam, 2026-09-29: held,
+      # and paid from a small allowance. A number (0: never). Default 5000.
+      raw = env.fetch("PEMK_MONEY_UNPROVEN_DAILY", "").to_s.strip
+      @money_unproven_daily = raw.match?(/\A\d+\z/) ? raw.to_i : 5_000
 
       caps = YAML.safe_load_file(File.join(root, "config", "economy_caps.yml"))
       @economy_caps = {

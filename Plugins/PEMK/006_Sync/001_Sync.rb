@@ -22,6 +22,7 @@ module PEMK
     SAVE_ACK_WAIT     = 30.0    # seconds for the server to say a pushed save was written
     SAVE_RETRY_FIRST  = 5.0     # a save not written goes out again after this; doubles each time
     SAVE_RETRY_MAX    = 60.0
+    BLOB_CLAIMS_MAX   = 64      # prize claims a save names (the newest; the server keeps as many)
 
     @econ        = {}           # field => latest absolute value (coalesced; badges ride here as a :badges bitmask)
     @econ_sent   = {}           # field => [seq, value] of its latest frame (an answer to an older one is stale)
@@ -37,6 +38,7 @@ module PEMK
     @blob_at     = -1.0e18
     @blob_hash   = nil
     @blob_fseq   = 0        # flags seq the on-disk blob was serialized at
+    @blob_claims = nil      # the prize claim nonces the on-disk blob carries (nil: not known)
     @save_ack     = false   # the server answers each save written or not (login flag)
     @save_unacked = nil     # { :seq, :at } of the last pushed save, until its answer
     @save_retry   = SAVE_RETRY_FIRST
@@ -123,6 +125,10 @@ module PEMK
     # Starts at 0, so before any checkpoint the server promotes nothing.
     def mark_blob_watermark
       @blob_fseq = @seq[:flags]
+      # Trainer proof P4: the prize claims these bytes carry - a claim held for its proof
+      # is kept past a fresh login only by a save that has it. Unchanged by a reconnect
+      # (the file is the same); unknown (nil) for a file from before this session.
+      @blob_claims = (PEMK::PrizeClaim.claims.map(&:first).last(BLOB_CLAIMS_MAX) rescue nil)   # the newest
     end
 
     # Twin for the :flags channel. Without it, reset zeroes the seq on a new socket
@@ -370,7 +376,9 @@ module PEMK
       # The blob's durability watermark rides along (stamped at serialize time, see
       # mark_blob_watermark): the server promotes progression facts up to it and holds
       # anything newer until the next save.
-      c.send_message({ :type => :save, :seq => (@seq[:save] += 1), :flags_seq => @blob_fseq }, raw)
+      msg = { :type => :save, :seq => (@seq[:save] += 1), :flags_seq => @blob_fseq }
+      msg[:claims] = @blob_claims if @blob_claims.is_a?(Array)   # P4: the claims this blob carries
+      c.send_message(msg, raw)
       @blob_hash = h
       @blob_at = now
       @save_wait = nil
