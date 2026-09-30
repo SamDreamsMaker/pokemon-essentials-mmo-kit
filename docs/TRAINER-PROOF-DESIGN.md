@@ -179,6 +179,13 @@ and `repeatable` claims are judged. For P4 it gave a simpler, safer shape:
   than the server has seen (none seen: unprovable). The trainer battles' won records are
   replayed first. A record it fails on is stored as an error (its prize unprovable) and
   stops nothing; what a record says is stored scrubbed.
+- A Pokemon from another trainer gains more EXP and obeys only as far as the badges allow
+  (the game rolls for it every turn): the record says which Pokemon are foreign and how
+  many badges the player has, the replay builds them so, and the checks hold the claim
+  to the server's word - no more badges than its ledger knows, and a Pokemon traded in
+  from another account never recorded as the player's own (an egg takes the trainer who
+  hatches it). Autotest 087: a traded level-14 Squirtle with no badge wins over Liam,
+  disobeying, and the prize is proven.
 - `on` needs the team lock (D1, `PEMK_BATTLE_ENFORCE_TEAMS`) and EXP tracking (D6,
   `PEMK_BATTLE_ENFORCE_EXP`) besides money enforcement and battle rng: without them a
   record's IVs and levels would be its word. It runs as shadow and says so.

@@ -67,6 +67,12 @@ module PEMK
         return [:refuted, shape]
       end
 
+      # The badges set how high a traded Pokemon obeys: no more than the server knows.
+      claimed = record[:init][:badges]
+      if claimed.is_a?(Integer) && claimed > (known = server_badges(db, account_id))
+        return [:refuted, "#{claimed} badges in the record, the server knows #{known}"]
+      end
+
       unprovable = nil
       frames.each_with_index do |f, i|
         uid = f.is_a?(Hash) ? f[:uid] : nil
@@ -88,6 +94,12 @@ module PEMK
       mon = db[:monsters].where(id: uid).first
       return [:refuted, "not this account's"] unless mon && mon[:owner_account_id] == account_id
       return [:refuted, "#{mon[:status]}, not active"] unless mon[:status] == "active"
+      # Traded in from another account, the game saw it as another trainer's (it obeys only
+      # so far): a record saying it is the player's own would spare it that. (An egg takes
+      # the trainer who hatches it.)
+      if frame[:foreign] == false && mon[:issuer_account_id] != account_id && !mon[:egg_at_issue]
+        return [:refuted, "a Pokemon from another account, recorded as the player's own"]
+      end
 
       lock = db[:monster_blocks].where(uid: uid).first
       if lock
@@ -146,6 +158,11 @@ module PEMK
       return "gender changed" if !lock[:gender].nil? && frame[:gender] != lock[:gender]
 
       nil
+    end
+
+    # The badges the server knows the account has: its ledger's mask.
+    def server_badges(db, account_id)
+      db[:economy_balances].where(account_id: account_id, field: "badges").get(:balance).to_i.to_s(2).count("1")
     end
 
     # A record's words, safe to store and print: its bytes may be anything a client sent

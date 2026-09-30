@@ -410,7 +410,10 @@ module PEMK
       def snapshot_init(battle)
         @init ||= {
           :player => (battle.pbParty(0) || []).map { |p| p && mon_frame(p) },
-          :foe    => (battle.pbParty(1) || []).map { |p| p && mon_frame(p) }
+          :foe    => (battle.pbParty(1) || []).map { |p| p && mon_frame(p) },
+          # a Pokemon from another trainer obeys up to a level the badges set: the replay
+          # needs both to roll its disobedience as the game did (trainer proof P4)
+          :badges => (battle.pbPlayer.badge_count rescue nil)
         }
         @settings ||= battle_settings(battle) if @trainers
       end
@@ -543,7 +546,8 @@ module PEMK
           :ability => (p.ability_id.to_s rescue nil), :nature => tr.nature_of(p),
           :item => (p.item_id ? p.item_id.to_s : nil), :shiny => (p.shiny? rescue false),
           :gender => (p.gender rescue nil), :form => (p.form rescue 0),
-          :happiness => (p.happiness rescue nil), :obtain_map => (p.obtain_map rescue nil) }
+          :happiness => (p.happiness rescue nil), :obtain_map => (p.obtain_map rescue nil),
+          :foreign => (p.foreign? ? true : false rescue nil) }
       rescue StandardError
         nil
       end

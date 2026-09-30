@@ -116,6 +116,25 @@ class TrainerProofsTest < Minitest::Test
     assert_equal "a?b", PEMK::ProofChecks.safe_text("a\xFF\u0000b".b)
   end
 
+  # A traded Pokemon obeys only up to the badges' level: the record's badges are no more
+  # than the server knows, and a Pokemon from another account is not the player's own
+  # (an egg takes the trainer who hatches it).
+  def test_what_a_traded_pokemon_is
+    own = mon(@me, ivs: STATS.to_h { |s| [s, 10] }, exp: 6000)
+    traded = mon(@me, ivs: STATS.to_h { |s| [s, 10] }, exp: 6000)
+    @db[:monsters].where(id: traded).update(issuer_account_id: @other)
+    @db[:economy_balances].insert(account_id: @me, field: "badges", balance: 0b11)
+    check = ->(badges, *frames) { PEMK::ProofChecks.player_team(@db, @me, { init: { player: frames, badges: badges } }) }
+    assert_equal [:ok, nil], check.(2, frame(own).merge(foreign: false), frame(traded).merge(foreign: true))
+    assert_equal [:refuted, "3 badges in the record, the server knows 2"], check.(3, frame(own))
+    assert_equal :ok, check.(1, frame(own))[0], "fewer: it only makes a traded Pokemon less obedient"
+    assert_equal [:refuted, "player 0 (uid #{traded}): a Pokemon from another account, recorded as the player's own"],
+                 check.(2, frame(traded).merge(foreign: false))
+    assert_equal :ok, check.(2, frame(traded))[0], "a record from before the mark says nothing"
+    @db[:monsters].where(id: traded).update(egg_at_issue: true)
+    assert_equal :ok, check.(2, frame(traded).merge(foreign: false))[0], "hatched here: the player's own"
+  end
+
   # A team no game fields is refuted whatever each Pokemon is.
   def test_a_team_no_game_fields
     ok = mon(@me, ivs: STATS.to_h { |s| [s, 10] }, exp: 6000)

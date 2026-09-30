@@ -72,6 +72,9 @@ module PEMK
 
       pkmn = Pokemon.new(frame[:species].to_s.to_sym, frame[:level] || 5, owner, false)
       pkmn.personalID = frame[:pid] if frame[:pid].is_a?(Integer)
+      # From another trainer (traded): it obeys only up to the badges' level, as it did
+      # in the game - the record says so (the server checks it against its registry).
+      pkmn.owner = Pokemon::Owner.new(owner.id ^ 1, "#{owner.name}'s trade", 0, owner.language) if owner && frame[:foreign] == true
       { iv: pkmn.iv, ev: pkmn.ev }.each do |key, target|
         src = frame[key]
         next unless src.is_a?(Hash)
@@ -113,6 +116,10 @@ module PEMK
     def build_battle(ctx)
       trainer = Player.new("REPLAY", GameData::TrainerType.keys.first)
       trainer.id = 12_345
+      # the player's badges, as many as the game had: they set how high a traded Pokemon
+      # obeys (the server checks the count against its own)
+      badges = ctx.init[:badges]
+      badges.clamp(0, 64).times { |i| trainer.badges[i] = true } if badges.is_a?(Integer)
       $player = trainer   # internalBattle needs a player (EXP/catch paths read it; to_trainer too)
       player_party = Array(ctx.init[:player]).compact.map { |f| build_mon(f, trainer) }
       foes = ctx.trainer? ? rebuild_trainers(ctx) : nil

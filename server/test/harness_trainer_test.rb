@@ -24,6 +24,12 @@ class HarnessTrainerTest < Minitest::Test
 
     assert_equal "match", got["as recorded"]["verdict"], got["as recorded"]["detail"]
     assert_equal(-160, got["as recorded"]["prize"], "the money the game took for the loss")
+    # A Pokemon from another trainer: it gains more EXP, and obeys only as far as the
+    # badges allow - the replay rolls what the game would have. With one badge (level 20)
+    # it obeys, and only its EXP differs from this battle; with none it disobeys.
+    assert_match(/player\[0\] exp: want 5666, got 5708/, got["traded, one badge"]["detail"].to_s)
+    assert_equal "mismatch", got["traded, no badge"]["verdict"]
+    refute_match(/player\[0\] exp/, got["traded, no badge"]["detail"].to_s, "it disobeyed: the battle itself went otherwise")
     {
       "ai choice"       => /round 2: the trainer's AI chose \["UseItem", "FULLRESTORE"/,
       "ai switch"       => /the trainer's AI sent in party 1, the record says 0/,
