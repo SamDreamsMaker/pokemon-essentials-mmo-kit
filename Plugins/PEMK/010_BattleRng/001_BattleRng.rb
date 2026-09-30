@@ -26,12 +26,25 @@
 #
 # INSTRUMENTATION, not enforcement: nothing here (or server-side) rejects a
 # battle. Rejection is D8's own flag, per the operator contract.
+#
+# Trainer proof (docs/TRAINER-PROOF-DESIGN.md): a trainer battle runs on its placement's
+# seed, and its record is what its prize is paid on (P4) - kept in the save until the
+# server acknowledges it.
 #===============================================================================
+class PokemonGlobalMetadata
+  attr_accessor :pemk_battle_records   # [[rec_nonce, env, body], ...] not yet acknowledged
+end
+
 module PEMK
   module BattleRng
     MAX_ROUNDS = 200    # rounds snapshotted per record (beyond -> truncated flag)
     MAX_DRAWS  = 4096   # per-stream packed-log cap (counts/fps keep counting)
     TRAINER_SEED_WAIT = 2.0   # seconds a trainer battle waits for its seed at the start
+    TRAINER_SEED_WAIT_PROOF = 6.0   # ... when its prize is paid on its replay: a battle
+                                    # without its seed would have its prize refused (P4)
+    RECORDS_KEPT     = 4            # trainer battle records kept until acknowledged (P4)
+    RECORDS_KEPT_MAX = 128 * 1024   # ... and their bytes at most: they ride in the save
+    RECORD_RESEND    = 30.0         # seconds before an unacknowledged record goes out again
 
     @mode      = :off   # server-advertised mode (adopted at login/relogin)
     @pending   = nil    # {seed:, pid:} from the last :encounter_grant build
@@ -39,6 +52,10 @@ module PEMK
     @trainer_seed_ok = false   # the server seeds trainer battles (login flag, P2)
     @trainer_asks    = {}      # nonce => nil (asked) | seed | :denied
     @trainer_nonce   = 0
+    @record_ack  = false   # the server acknowledges trainer battle records (login flag, P4)
+    @proof_on    = false   # a trainer prize is paid on its battle's replay (login flag, P4)
+    @record_sent = {}      # rec_nonce => when this connection last sent it
+    @rec_rng     = nil
 
     module_function
 
@@ -47,17 +64,30 @@ module PEMK
       @pending = nil
       @trainer_seed_ok = false
       @trainer_asks    = {}
+      @record_ack  = false
+      @proof_on    = false
+      @record_sent = {}   # every kept record goes out again on the new connection
     end
 
     def adopt_trainer_seed(v)
       @trainer_seed_ok = v == true
     end
 
+    def adopt_record_ack(v)
+      @record_ack = v == true
+    end
+
+    def adopt_trainer_proof(v)
+      @proof_on = v.to_s == "on"
+    end
+
     # Trainer proof P2 (docs/TRAINER-PROOF-DESIGN.md), from :on_trainer_load: a trainer is
     # about to be fought - ask its placement's seed now, so the answer is back by the
-    # battle's start (the transition hides the round trip).
+    # battle's start (the transition hides the round trip). Only for a battle the recorder
+    # arms (P4): with no seed asked, a battle it cannot record is not one that dropped its
+    # seed.
     def ask_trainer_seed(trainer)
-      return unless @mode == :on && @trainer_seed_ok && online?
+      return unless @mode == :on && @trainer_seed_ok && online? && single_rules?
 
       key = trainer.respond_to?(:pemk_key) ? trainer.pemk_key : nil
       ev  = trainer.respond_to?(:pemk_event) ? trainer.pemk_event : nil
@@ -66,9 +96,21 @@ module PEMK
       nonce = (@trainer_nonce += 1)
       @trainer_asks[nonce] = nil
       trainer.instance_variable_set(:@pemk_seed_nonce, nonce)
+      (PEMK::Presence.emit_now(:pos) rescue nil)   # asked where the server last saw the player
       PEMK.send_message(:type => :trainer_battle_req, :nonce => nonce, :trainers => [key + ev])
     rescue StandardError => e
       PEMK.log("battlerng: trainer seed ask error #{e.class}: #{e.message}")
+    end
+
+    # The battle about to start is a single one, with no partner at the player's side -
+    # the rules its event set, as TrainerBattle reads them (a partner joins when it can).
+    def single_rules?
+      rules = ($game_temp.battle_rules rescue nil) || {}
+      size = rules["size"].to_s.downcase
+      return false unless size.empty? || size == "single" || size == "1v1"
+
+      partner = ($PokemonGlobal.partner rescue nil)
+      !partner || rules["noPartner"] ? true : false
     end
 
     # Dispatch: :trainer_battle_seed / :trainer_battle_deny, by nonce.
@@ -86,7 +128,7 @@ module PEMK
       n = trainer.instance_variable_get(:@pemk_seed_nonce)
       return nil unless n && @trainer_asks.key?(n)
 
-      deadline = mono + TRAINER_SEED_WAIT
+      deadline = mono + (@proof_on ? TRAINER_SEED_WAIT_PROOF : TRAINER_SEED_WAIT)
       while @trainer_asks[n].nil? && mono < deadline && online?
         Graphics.update
         Input.update
@@ -102,6 +144,67 @@ module PEMK
       Process.clock_gettime(Process::CLOCK_MONOTONIC)
     rescue StandardError
       0.0
+    end
+
+    # --- trainer battle records, kept until the server has them (P4) ---------------
+
+    # A trainer battle's record: its prize is paid on its replay, so it waits in the save
+    # until the server acknowledges it (the oldest go past RECORDS_KEPT or
+    # RECORDS_KEPT_MAX). Names it by a nonce the server knows a copy by. The battle's
+    # session decides, as it was armed (Session#keep). -> kept?
+    def keep_record(env, body)
+      return false unless body.is_a?(String)
+
+      nonce = (@rec_rng ||= Random.new).rand(1...(1 << 62))
+      env[:rec_nonce] = nonce
+      list = kept_records
+      list << [nonce, env, body]
+      list.shift while list.length > RECORDS_KEPT || (list.length > 1 && list.sum { |e| e[2].bytesize } > RECORDS_KEPT_MAX)
+      true
+    rescue StandardError => e
+      PEMK.log("battlerng: keep record error #{e.class}: #{e.message}")
+      false
+    end
+
+    def note_record_sent(nonce)
+      @record_sent[nonce] = mono
+    end
+
+    # Dispatch: :battle_record_ack - the server has it.
+    def on_record_ack(msg)
+      n = msg[:rec_nonce]
+      return unless n.is_a?(Integer)
+
+      PEMK.log("battlerng: record #{n} acknowledged") if kept_records.reject! { |e| e[0] == n }
+      @record_sent.delete(n)
+    end
+
+    # Per frame, and before a new connection's claims: a kept record this connection has
+    # not sent, or sent long ago, goes out.
+    def send_records
+      return unless @record_ack && online?
+
+      list = kept_records
+      return if list.empty?
+
+      now = mono
+      list.each do |nonce, env, body|
+        next if now - (@record_sent[nonce] || -1.0e18) < RECORD_RESEND
+
+        @record_sent[nonce] = now if PEMK.send_message(env, body)
+      end
+    rescue StandardError => e
+      PEMK.log("battlerng: record resend error #{e.class}: #{e.message}")
+    end
+
+    def kept_records
+      g = $PokemonGlobal
+      return [] unless g && g.respond_to?(:pemk_battle_records)
+
+      list = g.pemk_battle_records
+      list = g.pemk_battle_records = [] unless list.is_a?(Array)
+      list.select! { |e| e.is_a?(Array) && e.length == 3 && e[0].is_a?(Integer) && e[1].is_a?(Hash) && e[2].is_a?(String) }
+      list
     end
 
     def adopt_mode(v)
@@ -176,6 +279,7 @@ module PEMK
       seed = @mode == :on ? trainer_seed(foes[0]) : nil
       s = Session.new(seed ? :on : :shadow, seed)
       s.trainers = foes.map { |t| t.respond_to?(:pemk_key) && t.pemk_key ? Array(t.pemk_key)[0, 3].map { |v| v.is_a?(Symbol) ? v.to_s : v } : nil }
+      s.keep = @record_ack   # latched: a link lost mid-battle must not lose its record (P4)
       s.watch_forgets(battle)
       s
     rescue StandardError => e
@@ -217,7 +321,7 @@ module PEMK
       M64        = (1 << 64) - 1
 
       attr_reader :mode, :seed
-      attr_accessor :run_context, :trainers
+      attr_accessor :run_context, :trainers, :keep   # keep: its record waits in the save until acknowledged (P4)
 
       def initialize(mode, seed)
         @mode        = mode
@@ -306,7 +410,10 @@ module PEMK
       def snapshot_init(battle)
         @init ||= {
           :player => (battle.pbParty(0) || []).map { |p| p && mon_frame(p) },
-          :foe    => (battle.pbParty(1) || []).map { |p| p && mon_frame(p) }
+          :foe    => (battle.pbParty(1) || []).map { |p| p && mon_frame(p) },
+          # a Pokemon from another trainer obeys up to a level the badges set: the replay
+          # needs both to roll its disobedience as the game did (trainer proof P4)
+          :badges => (battle.pbPlayer.badge_count rescue nil)
         }
         @settings ||= battle_settings(battle) if @trainers
       end
@@ -387,7 +494,9 @@ module PEMK
                 :fp_run => hex(@streams[:r][:fp]),
                 :truncated => @truncated, :desynced => @desynced }
         env[:battle_seed] = @seed if @seed
+        kept = @trainers && @keep ? PEMK::BattleRng.keep_record(env, body) : false   # P4: until the server has it
         sent = PEMK.send_message(env, body)
+        PEMK::BattleRng.note_record_sent(env[:rec_nonce]) if sent && kept
         PEMK.log("battlerng: #{sent ? 'sent' : 'DROPPED (offline)'} #{@mode} record " \
                  "(#{@rounds.length}r, #{@streams[:b][:n]}/#{@streams[:a][:n]}/#{@streams[:r][:n]} draws" \
                  "#{@truncated ? ', truncated' : ''}#{@desynced ? ', DESYNCED' : ''})")
@@ -437,7 +546,8 @@ module PEMK
           :ability => (p.ability_id.to_s rescue nil), :nature => tr.nature_of(p),
           :item => (p.item_id ? p.item_id.to_s : nil), :shiny => (p.shiny? rescue false),
           :gender => (p.gender rescue nil), :form => (p.form rescue 0),
-          :happiness => (p.happiness rescue nil), :obtain_map => (p.obtain_map rescue nil) }
+          :happiness => (p.happiness rescue nil), :obtain_map => (p.obtain_map rescue nil),
+          :foreign => (p.foreign? ? true : false rescue nil) }
       rescue StandardError
         nil
       end
@@ -553,9 +663,11 @@ class Battle
 end
 
 # Trainer proof P2: a trainer loaded for a battle asks its placement's seed at once.
+# P4: a record the server has not acknowledged goes out again.
 if defined?(EventHandlers)
   EventHandlers.add(:on_trainer_load, :pemk_trainer_seed,
     proc { |trainer| PEMK::BattleRng.ask_trainer_seed(trainer) })
+  EventHandlers.add(:on_frame_update, :pemk_battle_records, proc { PEMK::BattleRng.send_records })
 end
 
 class Battle::AI

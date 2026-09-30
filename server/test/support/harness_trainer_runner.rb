@@ -30,7 +30,11 @@ TAMPERS = {
   "bag"             => ->(r) { r[:settings][:items] = [[]] },
   # a trainer the game's data does not have
   "trainer"         => ->(r) { r[:trainers] = [["LEADER_Brock", "Brock", 7]] },
-  "no trainer name" => ->(r) { r[:trainers] = [nil] }
+  "no trainer name" => ->(r) { r[:trainers] = [nil] },
+  # the level-20 Wartortle from another trainer: with no badge it would have disobeyed
+  # (the game rolls for it), with one it obeys up to level 20 - as it did
+  "traded, no badge"  => ->(r) { r[:init][:player].each { |f| f[:foreign] = true }; r[:init][:badges] = 0 },
+  "traded, one badge" => ->(r) { r[:init][:player].each { |f| f[:foreign] = true }; r[:init][:badges] = 1 }
 }.freeze
 
 verdicts = TAMPERS.map do |name, tamper|

@@ -16,7 +16,7 @@
 # Debug setters, for arranging a test quickly. They go through the engine's normal
 # setters, so the PEMK sync and interception see them like any other change:
 #   set_switch ID on|off   set_var ID VALUE   set_selfswitch MAP EVENT LETTER on|off
-#   add_item ITEM [QTY]    add_pokemon SPECIES LEVEL    heal    money AMOUNT    bp AMOUNT
+#   add_item ITEM [QTY]    add_pokemon SPECIES LEVEL [foreign]    heal    money AMOUNT    bp AMOUNT
 # Readers: get_switch ID, get_var ID, get_selfswitch MAP EVENT LETTER, get_item ITEM
 # (how many the bag holds). And save.
 # set_raw_var ID VALUE / set_raw_switch ID on|off change a value without the game's
@@ -393,6 +393,10 @@ module PEMK
             { "item" => item.to_s, "added" => $bag.add(item, [a[1].to_i, 1].max) ? true : false }
           when "add_pokemon"
             ok = pbAddPokemonSilent(a[0].to_s.upcase.to_sym, [a[1].to_i, 1].max)
+            # "foreign": as if traded - another trainer's, it obeys only as the badges allow
+            if ok && a[2].to_s == "foreign" && (pkmn = $player.party.last)
+              pkmn.owner = Pokemon::Owner.new(($player.id ^ 0x5A5A) & 0xFFFFFFFF, "Trader", 0, pkmn.owner.language)
+            end
             { "species" => a[0].to_s.upcase, "added" => ok ? true : false }
           when "heal"
             $player.heal_party

@@ -29,13 +29,19 @@ class ServerTrainerSeedTest < Minitest::Test
                           "trainers" => [
                             { "event_id" => 4, "x" => 5, "y" => 5, "type" => "CAMPER", "name" => "Liam", "version" => 0 },
                             { "event_id" => 3, "x" => 6, "y" => 1, "type" => "LEADER_Brock", "name" => "Brock",
-                              "version" => 0 }
+                              "version" => 0 },
+                            # a double battle: one call names both
+                            { "event_id" => 7, "x" => 8, "y" => 8, "type" => "LASS", "name" => "Amy", "version" => 0,
+                              "calls" => [0] },
+                            { "event_id" => 7, "x" => 9, "y" => 8, "type" => "LASS", "name" => "May", "version" => 0,
+                              "calls" => [0] }
                           ] },
                 "5" => { "name" => "Route", "width" => 20, "height" => 20, "objects" => [] } }
   ))
   FIXTURE.flush
   LIAM  = ["CAMPER", "Liam", 0, 10, 4].freeze
   BROCK = ["LEADER_Brock", "Brock", 0, 10, 3].freeze
+  TWIN_A = ["LASS", "Amy", 0, 10, 7].freeze
 
   def setup
     @db = Sequel.connect(ENV.fetch("DATABASE_URL"))
@@ -54,8 +60,8 @@ class ServerTrainerSeedTest < Minitest::Test
     @db&.disconnect
   end
 
-  def start_server(rng: "on")
-    env = ENV.to_h.merge("PEMK_WORLD" => FIXTURE.path, "PEMK_BATTLE_ENFORCE_RNG" => rng)
+  def start_server(rng: "on", env: {})
+    env = ENV.to_h.merge("PEMK_WORLD" => FIXTURE.path, "PEMK_BATTLE_ENFORCE_RNG" => rng).merge(env)
     @server = PEMK::Server.new(config: PEMK::Config.new(env: env), logger: ->(m) { @logs << m })
     @server.start
     @port = @server.port
@@ -100,6 +106,7 @@ class ServerTrainerSeedTest < Minitest::Test
     start_server
     c, login = authed_conn("ts1@t.co")
     assert_equal true, login[:trainer_seed], "the login says to ask"
+    assert_equal false, login[:record_ack], "trainer proof off: no record kept for it"
     first = ask(c, LIAM, 7)
     assert_equal [:trainer_battle_seed, 7], [first[:type], first[:nonce]]
     assert_kind_of Integer, first[:seed]
@@ -164,8 +171,7 @@ class ServerTrainerSeedTest < Minitest::Test
   # P3: the prize claim names its battle's seed; once the record is replayed, the claim
   # gets the verdict and a proven win spends the placement's seed.
   def test_a_claim_on_the_seed_gets_the_replay_s_verdict
-    ENV["PEMK_MONEY_AUTHORITY"] = "shadow"
-    start_server
+    start_server(env: { "PEMK_MONEY_AUTHORITY" => "shadow", "PEMK_TRAINER_PROOF" => "shadow" })
     c, = authed_conn("ts6@t.co")
     seed = ask(c, LIAM)[:seed]
     row = @db[:trainer_battles].where(seed: seed).get(:id)
@@ -182,8 +188,34 @@ class ServerTrainerSeedTest < Minitest::Test
     assert_equal "proven", @db[:trainer_battles].where(id: row).get(:state)
     refute_equal seed, ask(c, LIAM)[:seed], "the next battle here gets a new seed"
     c.close
-  ensure
-    ENV.delete("PEMK_MONEY_AUTHORITY")
+  end
+
+  # P2 as it was, P4 as a switch: with trainer proof off, a claim on the seed is judged as
+  # M1 judges it and linked to nothing.
+  def test_trainer_proof_off_links_nothing
+    start_server(env: { "PEMK_MONEY_AUTHORITY" => "shadow" })
+    c, = authed_conn("ts8@t.co")
+    seed = ask(c, LIAM)[:seed]
+    send_env(c, { type: :money_claim, nonce: 42, amount: 176, amulet: false, happy_hour: false, map: 10,
+                  trainers: [LIAM], seed: seed })
+    wait_for { @db[:money_claims].where(nonce: 42).get(:verdict) }
+    assert_nil @db[:money_claims].where(nonce: 42).get(:trainer_battle_id)
+    assert(@logs.any? { |l| l.include?("server: trainer proof = off") }, @logs.grep(/trainer proof/).inspect)
+    c.close
+  end
+
+  # P4: a battle this trainer may share with another is never seeded.
+  def test_a_trainer_that_shares_a_battle_gets_no_seed
+    start_server(env: { "PEMK_MONEY_AUTHORITY" => "shadow", "PEMK_TRAINER_PROOF" => "shadow" })
+    c, = authed_conn("ts9@t.co")
+    assert_equal "unprovable", ask(c, TWIN_A)[:reason]
+    assert_kind_of Integer, ask(c, LIAM)[:seed], "one alone in its battle: seeded"
+    c.close
+    @server.stop
+    start_server   # trainer proof off: P2 as it was
+    c, = authed_conn("ts10@t.co")
+    assert_kind_of Integer, ask(c, TWIN_A)[:seed]
+    c.close
   end
 
   def test_each_attempt_on_the_seed_is_bound_and_walked
@@ -196,13 +228,21 @@ class ServerTrainerSeedTest < Minitest::Test
     recs = wait_for { (r = @db[:battle_records].order(:id).all).size == 2 && r }
     assert_equal [row, row], recs.map { |r| r[:trainer_battle_id] }
     assert_equal %w[walk_ok walk_ok], recs.map { |r| r[:replay_status] }
-    send_env(c, *walk_body(seed, [100, 16, 2, 4]))              # the win again: a copy, dropped
+    # won again with no claim on the first win: the seed's one win is the new one (P4)
+    send_env(c, *walk_body(seed, [100, 16, 2, 4]))
+    wait_for { @db[:battle_records].count == 3 }
+    assert_equal [row, nil, row], @db[:battle_records].order(:id).select_map(:trainer_battle_id)
+    # ... but a win a claim holds keeps its place: another is a copy, dropped
+    @db[:money_claims].insert(account_id: @db[:trainer_battles].where(id: row).get(:account_id), nonce: 1, kind: "trainer",
+                              verdict: "held", mode: "on", amount: 176, accepted: 176, map: 10,
+                              trainers: [LIAM].to_json, trainer_battle_id: row, created_at: Time.now)
+    send_env(c, *walk_body(seed, [100, 16, 2, 4]))
     wait_for { @logs.any? { |l| l.include?("duplicate record for the won battle on trainer seed #{row}") } }
     env, body = walk_body(seed, [100, 16], outcome: 2)
     rec = W.decode_primitive(body)
     rec[:draws][:b][:log] = [100, 0, 16, 0].pack("N*")            # the same bounds, values the seed never gave
     send_env(c, env, W.encode_primitive(rec))
-    bad = wait_for { @db[:battle_records].count == 3 && @db[:battle_records].order(:id).last }
+    bad = wait_for { @db[:battle_records].count == 4 && @db[:battle_records].order(:id).last }
     assert_equal "walk_mismatch", bad[:replay_status]
     c.close
   end

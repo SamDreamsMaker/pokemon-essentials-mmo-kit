@@ -21,6 +21,9 @@ truth for money, items and Pokémon (and, on the roadmap, gameplay itself).
 - **Server-authoritative economy** — money, coins, BP and soot live in a
   server-side append-only ledger; the client mirrors changes and the server
   clamps them. Tampering with the local number doesn't stick.
+- **Trainer prizes paid on proof** (opt-in) — a trainer battle runs on a
+  server-issued seed and is replayed headless on the real engine, the trainer's
+  AI included; its prize is paid only once the replay proves the battle happened.
 - **Server-authoritative badges & bag** — badges (bitmask) and the whole bag
   inventory are stored on the server and **restored at login**, not trusted from
   the save file.

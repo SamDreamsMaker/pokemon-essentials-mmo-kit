@@ -27,7 +27,16 @@ module PEMK
 
     class ReplayDivergence < StandardError; end
 
+    # A trainer the game's data does not build as the record has it. The game may edit its
+    # trainers as they load (:on_trainer_load), so a prize is not refused on it: the claim
+    # is unprovable (PEMK::TrainerProofs::NOT_THE_DATA, the same words).
+    NOT_THE_DATA = "the trainer is not the game's data"
+
     module_function
+
+    def not_the_data(why)
+      raise ReplayDivergence, "#{NOT_THE_DATA}: #{why}"
+    end
 
     # record: the decoded primitive record hash (symbol keys). -> result hash:
     #   { verdict: :match | :mismatch | :error, detail: String | nil }
@@ -63,6 +72,9 @@ module PEMK
 
       pkmn = Pokemon.new(frame[:species].to_s.to_sym, frame[:level] || 5, owner, false)
       pkmn.personalID = frame[:pid] if frame[:pid].is_a?(Integer)
+      # From another trainer (traded): it obeys only up to the badges' level, as it did
+      # in the game - the record says so (the server checks it against its registry).
+      pkmn.owner = Pokemon::Owner.new(owner.id ^ 1, "#{owner.name}'s trade", 0, owner.language) if owner && frame[:foreign] == true
       { iv: pkmn.iv, ev: pkmn.ev }.each do |key, target|
         src = frame[key]
         next unless src.is_a?(Hash)
@@ -104,6 +116,10 @@ module PEMK
     def build_battle(ctx)
       trainer = Player.new("REPLAY", GameData::TrainerType.keys.first)
       trainer.id = 12_345
+      # the player's badges, as many as the game had: they set how high a traded Pokemon
+      # obeys (the server checks the count against its own)
+      badges = ctx.init[:badges]
+      badges.clamp(0, 64).times { |i| trainer.badges[i] = true } if badges.is_a?(Integer)
       $player = trainer   # internalBattle needs a player (EXP/catch paths read it; to_trainer too)
       player_party = Array(ctx.init[:player]).compact.map { |f| build_mon(f, trainer) }
       foes = ctx.trainer? ? rebuild_trainers(ctx) : nil
@@ -130,11 +146,11 @@ module PEMK
     def rebuild_trainers(ctx)
       foes = Array(ctx.record[:trainers]).map do |key|
         unless key.is_a?(Array) && key.length == 3 && key[2].is_a?(Integer)
-          raise ReplayDivergence, "a trainer the game's data cannot rebuild (#{key.inspect})"
+          not_the_data "a trainer the game's data cannot rebuild (#{key.inspect})"
         end
 
         data = GameData::Trainer.try_get(key[0].to_s.to_sym, key[1].to_s, key[2])
-        raise ReplayDivergence, "no trainer #{key.inspect} in the game's data" unless data
+        not_the_data "no trainer #{key.inspect} in the game's data" unless data
 
         data.to_trainer
       end
@@ -149,7 +165,7 @@ module PEMK
     def check_foe_team(ctx, party)
       frames = Array(ctx.init[:foe])
       if frames.length != party.length
-        raise ReplayDivergence, "foe team: the game's data has #{party.length}, the record #{frames.length}"
+        not_the_data "foe team: the game's data has #{party.length}, the record #{frames.length}"
       end
 
       party.each_with_index do |pkmn, i|
@@ -158,7 +174,7 @@ module PEMK
         FOE_FIELDS.each do |f|
           next if want[f] == got[f]
 
-          raise ReplayDivergence, "foe #{i} #{f}: the game's data has #{want[f].inspect}, the record #{got[f].inspect}"
+          not_the_data "foe #{i} #{f}: the game's data has #{want[f].inspect}, the record #{got[f].inspect}"
         end
       end
     end
@@ -177,7 +193,7 @@ module PEMK
       s = ctx.record[:settings].is_a?(Hash) ? ctx.record[:settings] : {}
       bags = foes.map { |t| Array(t.items).map(&:to_s) }
       if s[:items].is_a?(Array) && s[:items] != bags
-        raise ReplayDivergence, "the trainers' bag: the game's data has #{bags.inspect}, the record #{s[:items].inspect}"
+        not_the_data "the trainers' bag: the game's data has #{bags.inspect}, the record #{s[:items].inspect}"
       end
 
       battle.items          = foes.map { |t| t.items.clone }

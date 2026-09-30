@@ -24,6 +24,7 @@ module PEMK
     # walk_mismatch / no_log / mode_mismatch / error) or still-pending work and is
     # KEPT. Operators override via PEMK_CORPUS_RETENTION_DAYS (0 = keep forever).
     RETENTION_DAYS = 30
+    CLIENT_NONCE   = (1...(1 << 62)).freeze   # a trainer battle record's nonce (P4)
 
     def initialize(db, mode: :off, logger: nil, trainer_battles: nil)
       @db   = db
@@ -44,20 +45,20 @@ module PEMK
         .delete
     end
 
-    # -> :ok | :desync | :dup | :bad — telemetry only; the client gets no reply either
-    # way (:desync = ingested, but the seed walk refuted the claimed draws).
+    # -> :ok | :desync | :dup | :bad | :later | :error — telemetry; a record naming a client
+    # nonce (a trainer battle's, P4) is acknowledged unless :later or :error (:desync =
+    # ingested, but the seed walk refuted the claimed draws; :later = over the hourly cap;
+    # :error = not stored: both sent again later).
     def ingest(account_id, env, body, now: Time.now)
       return :bad unless body.is_a?(String) && !body.empty? && body.bytesize <= BODY_MAX
 
       mode = env[:mode].to_s
       return :bad unless MODES.include?(mode)
 
-      # storage bound: an account can't grow the corpus faster than honest play
-      recent = @db[:battle_records].where(account_id: account_id)
-                                   .where { created_at > now - 3600 }.count
-      if recent >= HOURLY_CAP
-        @log.call("battlerec: account #{account_id} over the hourly record cap -> dropped")
-        return :bad
+      # Trainer proof P4: the client sends a trainer battle's record until it is acknowledged
+      client_nonce = env[:rec_nonce].is_a?(Integer) && CLIENT_NONCE.cover?(env[:rec_nonce]) ? env[:rec_nonce] : nil
+      if client_nonce && !@db[:battle_records].where(account_id: account_id, client_nonce: client_nonce).empty?
+        return :dup
       end
 
       roll_id = nil
@@ -88,10 +89,22 @@ module PEMK
       # persist as DISTINCT statuses so an evasion (omitting logs) is as visible as
       # a failure (review-caught: :ok and :skipped both landing on "pending" made
       # log-stripping silent).
+      # storage bound: an account can't grow the corpus faster than honest play - a
+      # trainer battle's records apart, so no run of wild battles holds one back (P4)
+      if over_cap?(account_id, !trainer_battle_id.nil?, now)
+        @log.call("battlerec: account #{account_id} over the hourly record cap -> dropped")
+        return client_nonce ? :later : :bad
+      end
+
       walk = :unbound
       if roll_id || trainer_battle_id
         if mode == "on"
           walk = verify_walk(account_id, seed, env, body)
+          # A trainer battle always draws: one that claims none dodged the walk (P4).
+          if walk == :empty && trainer_battle_id
+            walk = :no_log
+            @log.call("battlerec: account #{account_id} trainer record on seed row #{trainer_battle_id} claims no draws (no_log)")
+          end
         elsif @mode == :on
           # A roll-bound record claiming "shadow" under an `on` server: a modified
           # client dodging the walk — or an honest session from before an operator
@@ -102,10 +115,15 @@ module PEMK
         end
       end
 
+      # P4: a seed holds one won battle - the one its claim is judged on. A win no claim
+      # holds (its claim refused before any proof, or never made) gives way to this one.
+      release_unclaimed_win(trainer_battle_id) if trainer_battle_id && int_in(env[:outcome], 0..5) == 1
+
       @db[:battle_records].insert(
         account_id:        account_id,
         encounter_roll_id: roll_id,
         trainer_battle_id: trainer_battle_id,
+        client_nonce:      client_nonce,
         mode:              mode,
         battle_seed:       (seed.is_a?(Integer) && seed.positive? ? seed : nil),
         engine_fp:         str_or_nil(env[:engine_fp], 64),
@@ -128,10 +146,27 @@ module PEMK
       :dup
     rescue StandardError => e
       @log.call("battlerec: ingest failed #{e.class}: #{e.message}")
-      :bad
+      :error
     end
 
     private
+
+    TRAINER_HOURLY_CAP = 60   # trainer battles' records per account per hour (their own count)
+
+    def release_unclaimed_win(trainer_battle_id)
+      return unless @db[:money_claims].where(trainer_battle_id: trainer_battle_id).empty?
+
+      @db[:battle_records].where(trainer_battle_id: trainer_battle_id, outcome: 1).update(trainer_battle_id: nil)
+    end
+
+    def over_cap?(account_id, trainer_bound, now)
+      recent = @db[:battle_records].where(account_id: account_id).where { created_at > now - 3600 }
+      if trainer_bound
+        recent.exclude(trainer_battle_id: nil).count >= TRAINER_HOURLY_CAP
+      else
+        recent.where(trainer_battle_id: nil).count >= HOURLY_CAP
+      end
+    end
 
     # Streams to walk: record-hash key -> [PRNG stream id, env counter key].
     WALK_STREAMS = { b: [Prng::STREAM_BATTLE, :draws_battle],

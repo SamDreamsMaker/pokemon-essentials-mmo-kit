@@ -11,9 +11,10 @@ module Autotest
 
     attr_reader :account_id, :email
 
-    def initialize(port, email:)
+    def initialize(port, email:, caps: nil)
       @port  = port
       @email = email
+      @caps  = caps   # what a modified game says it can do (nil: nothing, as an old one)
       @inbox = []
       @mutex = Mutex.new
     end
@@ -23,7 +24,9 @@ module Autotest
       @reader = Thread.new { read_loop }
       send_env(type: :register, email: @email, password: PASSWORD)
       wait_for(:register_ok, :register_err)
-      send_env(type: :login, email: @email, password: PASSWORD)
+      login = { type: :login, email: @email, password: PASSWORD }
+      login[:caps] = @caps if @caps
+      send_env(login)
       reply = wait_for(:login_ok, :login_err)
       raise Failure, "rogue: login refused (#{reply[:env][:reason]})" unless reply[:env][:type] == :login_ok
 

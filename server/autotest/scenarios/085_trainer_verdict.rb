@@ -11,7 +11,7 @@ require "open3"
 Autotest.scenario "a trainer's prize is proven by its battle's replay",
                   flags: { PEMK_BATTLE_ENFORCE_RNG: "on", PEMK_BATTLE_ENFORCE_ENCOUNTERS: "on",
                            PEMK_MONEY_AUTHORITY: "shadow", PEMK_BATTLE_ENFORCE_TEAMS: "on",
-                           PEMK_BATTLE_ENFORCE_EXP: "on" },
+                           PEMK_BATTLE_ENFORCE_EXP: "on", PEMK_TRAINER_PROOF: "shadow" },
                   budget: 480 do |s|
   a = s.player(:a)
   a.new_game("Proven")
