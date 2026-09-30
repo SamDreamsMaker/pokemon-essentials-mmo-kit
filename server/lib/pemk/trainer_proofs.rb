@@ -68,7 +68,7 @@ module PEMK
         proof, record, reason = judge(claim, now)
         next unless proof
 
-        settle(claim, proof, record, now)
+        next unless settle(claim, proof, record, now)   # voided meanwhile: no verdict
         judged << [claim[:account_id], claim[:nonce], proof, reason]
       end
       judged
@@ -123,10 +123,15 @@ module PEMK
       @db[:battle_records].where(trainer_battle_id: claim[:trainer_battle_id], outcome: 1).first
     end
 
+    # -> settled? A claim a fresh login voided since it was read (the void runs on the
+    # account's mailbox, the sweep on a worker) is left as the void left it.
     def settle(claim, proof, record, now)
       @db.transaction do
-        @db[:money_claims].where(account_id: claim[:account_id], nonce: claim[:nonce], proof: nil)
-                          .update(proof: proof.to_s, proof_record_id: record && record[:id], proof_at: now)
+        settled = @db[:money_claims].where(account_id: claim[:account_id], nonce: claim[:nonce], proof: nil,
+                                           voided_at: nil, trainer_battle_id: claim[:trainer_battle_id])
+                                    .update(proof: proof.to_s, proof_record_id: record && record[:id], proof_at: now)
+        return false if settled.zero?
+
         if proof == :proven   # the seed is spent: the next battle at this placement gets another
           @db[:trainer_battles].where(id: claim[:trainer_battle_id], state: "open")
                                .update(state: "proven", record_id: record[:id], closed_at: now)
@@ -137,6 +142,7 @@ module PEMK
           @db[:money_claims].where(account_id: claim[:account_id], nonce: claim[:nonce]).update(trainer_battle_id: nil)
           @db[:battle_records].where(id: record[:id]).update(trainer_battle_id: nil) if record
         end
+        true
       end
     end
   end

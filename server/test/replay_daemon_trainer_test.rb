@@ -70,15 +70,83 @@ class ReplayDaemonTrainerTest < Minitest::Test
     end
   end
 
-  # No record stops the tool: one it fails on is stored as an error (its prize
-  # unprovable), and the others are replayed.
-  def test_a_record_the_tool_fails_on_stops_nothing
+  # The whole queue, as a pass runs it, with a fault injected on one record.
+  def run_tool(fault_id, fault = nil)
+    env = { "DATABASE_URL" => ENV.fetch("DATABASE_URL"), "PEMK_GAME_ROOT" => @game_root,
+            "REPLAY_FAULT_ID" => fault_id.to_s, "REPLAY_FAULT" => fault.to_s, "PEMK_REPLAY_MARK" => @mark }
+    Open3.capture2e(env, RbConfig.ruby, "-W0", File.join(SERVER_ROOT, "bin", "pemk_replay.rb"), chdir: SERVER_ROOT)
+  end
+
+  def row(id) = @db[:battle_records].where(id: id).first
+
+  # A record passing every check before the replay (its replay then runs).
+  def replayable_body(seed)
     base = W.decode_primitive(File.binread(FIXTURE))
-    init = base[:init].merge(player: base[:init][:player].map { |f| f.merge(uid: 2**70) })   # past any id
-    body = base.merge(mode: "on", seed: 2001, kind: "trainer", trainers: [["LEADER_Brock", "Brock", 0]], init: init)
-    id = record(seed_row(2001, 9), 2001, W.encode_primitive(body))
-    row = replay(id)
-    assert_equal "error", row[:replay_status]
-    assert_match(/the replay tool failed on this record/, row[:replay_detail])
+    W.encode_primitive(base.merge(mode: "on", seed: seed, kind: "trainer", trainers: [["LEADER_Brock", "Brock", 0]]))
+  end
+
+  # No record stops the tool: one it fails on is stored as an error (its prize
+  # unprovable) and the next is replayed. The database away is no record's fault: the
+  # pass stops, the record waits. One the tool died on (no Ruby error to catch) is an
+  # error at the next boot, never replayed first again.
+  def test_a_record_the_tool_fails_on_stops_nothing
+    @mark = File.join(Dir.tmpdir, "pemk_replay_test_#{Process.pid}.mark")
+    shadow = W.encode_primitive(W.decode_primitive(File.binread(FIXTURE)))
+    failing = record(seed_row(2001, 9), 2001, shadow)
+    after   = record(seed_row(2002, 10), 2002, shadow)
+    normal  = record(seed_row(2004, 12), 2004, replayable_body(2004))   # marked, replayed, unmarked
+    out, status = run_tool(failing)
+    assert status.success?, out
+    assert_equal "error", row(failing)[:replay_status]
+    assert_match(/the replay tool failed on this record \(RuntimeError\)/, row(failing)[:replay_detail])
+    assert_equal "mismatch", row(after)[:replay_status], "the next one is replayed"
+    refute_equal "walk_ok", row(normal)[:replay_status]
+    refute File.exist?(@mark), "no record left marked after a pass"
+
+    away = record(seed_row(2003, 11), 2003, replayable_body(2003))
+    _, status = run_tool(away, "db")
+    refute status.success?, "the pass stops"
+    assert_equal "walk_ok", row(away)[:replay_status], "the record waits for the next pass"
+    refute File.exist?(@mark)
+
+    _, status = run_tool(away, "die")
+    refute status.success?
+    assert_equal away, File.read(@mark).to_i, "the record it died on is marked"
+    out, status = run_tool(0)
+    assert status.success?, out
+    assert_equal ["error", "the replay tool died replaying this record"], row(away).values_at(:replay_status, :replay_detail)
+    refute File.exist?(@mark)
+  ensure
+    File.delete(@mark) if @mark && File.exist?(@mark)
+  end
+
+  # A record a verdict let go of, replayed again: still on its seed row's seed, against
+  # its trainer (found by the seed it named).
+  def test_a_record_let_go_is_still_its_seed_s_battle
+    @mark = File.join(Dir.tmpdir, "pemk_replay_test_#{Process.pid}.mark")
+    shadow = W.encode_primitive(W.decode_primitive(File.binread(FIXTURE)))
+    seed_row(4001, 14)
+    id = @db[:battle_records].insert(account_id: @me, mode: "on", record: Sequel.blob(shadow), outcome: 2,
+                                     replay_status: "walk_ok", battle_seed: 4001, created_at: Time.now)
+    out, status = run_tool(0)
+    assert status.success?, out
+    assert_equal "mismatch", row(id)[:replay_status]
+    assert_match(/the record says it ran on no seed/, row(id)[:replay_detail])
+  ensure
+    File.delete(@mark) if @mark && File.exist?(@mark)
+  end
+
+  # A team no game fields is refuted before any replay; a uid past any id is no Pokemon
+  # the server has (not a database error).
+  def test_a_team_no_game_fields
+    base = W.decode_primitive(File.binread(FIXTURE))
+    on = base.merge(mode: "on", kind: "trainer", trainers: [["LEADER_Brock", "Brock", 0]])
+    twice = on.merge(seed: 3001, init: base[:init].merge(player: [base[:init][:player][0].merge(uid: 5)] * 2))
+    row = replay(record(seed_row(3001, 12), 3001, W.encode_primitive(twice)))
+    assert_equal "mismatch", row[:replay_status]
+    assert_match(/one Pokemon twice in the player.s team/, row[:replay_detail])
+    big = on.merge(seed: 3002, init: base[:init].merge(player: base[:init][:player].first(1).map { |f| f.merge(uid: 2**70) }))
+    row = replay(record(seed_row(3002, 13), 3002, W.encode_primitive(big)))
+    refute_equal "error", row[:replay_status], row[:replay_detail]
   end
 end

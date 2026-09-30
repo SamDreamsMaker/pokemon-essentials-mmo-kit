@@ -6,6 +6,7 @@ lib = File.expand_path("../lib", __dir__)
 $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 require "pemk/proof_checks"
 require "pemk/trainer_proofs"
+require "pemk/money_claims"
 require "pemk/battle_data"
 require "pemk/team_audit"
 
@@ -70,7 +71,7 @@ class TrainerProofsTest < Minitest::Test
       frame(ok, gender: 1)                  => /gender changed/,
       frame(ok, exp: 7000)                  => /EXP 7000, more than the 6000 the server has seen/
     }.each do |f, why|
-      verdict, reason = PEMK::ProofChecks.player_team(@db, @me, team(frame(ok), f))
+      verdict, reason = PEMK::ProofChecks.player_team(@db, @me, team(f))   # one each: a team holds each once
       assert_equal :refuted, verdict, reason
       assert_match why, reason
     end
@@ -113,6 +114,21 @@ class TrainerProofsTest < Minitest::Test
     @db[:monster_stats].where(uid: ok).delete
     assert_equal [:unprovable, "player 0 (uid #{ok}): no EXP the server has seen for it"], check.(set.())
     assert_equal "a?b", PEMK::ProofChecks.safe_text("a\xFF\u0000b".b)
+  end
+
+  # A team no game fields is refuted whatever each Pokemon is.
+  def test_a_team_no_game_fields
+    ok = mon(@me, ivs: STATS.to_h { |s| [s, 10] }, exp: 6000)
+    others = Array.new(6) { mon(@me, ivs: STATS.to_h { |s| [s, 10] }, exp: 6000) }
+    {
+      team(*([ok] + others).map { |u| frame(u) })    => "more than 6 Pokemon in the player's team",
+      team(frame(ok), frame(ok))                    => "one Pokemon twice in the player's team",
+      team(frame(ok).merge(moves: %w[A B C D E]))   => "a Pokemon with more than 4 moves"
+    }.each do |t, why|
+      assert_equal [:refuted, why], PEMK::ProofChecks.player_team(@db, @me, t)
+    end
+    assert_equal [:unprovable, "player 0: a Pokemon the server has not registered yet"],
+                 PEMK::ProofChecks.player_team(@db, @me, team(frame(ok).merge(uid: 2**70)))
   end
 
   # A trainer record is replayed on its seed row's seed, against the row's trainer -
@@ -235,6 +251,39 @@ class TrainerProofsTest < Minitest::Test
     assert_empty @proofs.sweep(now: @now + 3600), "an hour later: still no verdict"
     assert_equal 1, @proofs.stale
     assert_nil verdict(1)
+  end
+
+  # A void landing between the sweep's read and its verdict: the claim stays as the void
+  # left it, the seed open.
+  def test_a_claim_voided_while_judged_gets_no_verdict
+    row, seed = seed_row(@me)
+    linked(1, row, seed)
+    rec = record(row, status: "match")
+    claim = @db[:money_claims].where(nonce: 1).first
+    @db[:money_claims].where(nonce: 1).update(voided_at: @now, trainer_battle_id: nil)
+    assert_equal false, @proofs.send(:settle, claim, :proven, @db[:battle_records].where(id: rec).first, @now)
+    assert_nil verdict(1)
+    assert_equal "open", @db[:trainer_battles].where(id: row).get(:state)
+  end
+
+  # Judged without a win, the seed stays open and free: the next battle there, won and
+  # claimed, is judged on its own record.
+  def test_after_an_unprovable_verdict_the_seed_serves_the_next_battle
+    row, seed = seed_row(@me)
+    linked(1, row, seed)
+    record(row, status: "error")
+    assert_equal :unprovable, @proofs.sweep(now: @now).first[2]
+    assert_equal row, linked(2, row, seed), "the next claim on the seed is linked"
+    record(row, status: "match")
+    assert_equal [[@me, 2, :proven, nil]], @proofs.sweep(now: @now)
+    # a held claim its replay refused is not voided at a fresh login: its battle stays paid for
+    row3, seed3 = seed_row(@me, ["CAMPER", "Liam", 0, 10, 99])
+    linked(3, row3, seed3, trainers: [["CAMPER", "Liam", 0, 10, 99]])
+    @db[:money_claims].where(nonce: 3).update(verdict: "held", proof: "refuted")
+    @db[:money_claims].where(nonce: [1, 2]).update(verdict: "held")
+    voided = PEMK::MoneyClaims.new(@db).void_unsealed(@me).map { |c| c[:nonce] }.sort
+    assert_equal [1, 2], voided
+    assert_nil @db[:money_claims].where(nonce: 3).get(:voided_at)
   end
 
   def test_a_voided_claim_is_not_judged

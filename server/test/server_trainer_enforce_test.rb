@@ -192,6 +192,7 @@ class ServerTrainerEnforceTest < Minitest::Test
     assert_equal before + 400, balance(lo), "paid once"
     assert_equal "proven", @db[:trainer_battles].where(seed: sd).get(:state)
     assert(logs.any? { |l| l.include?("prize claim 1 (400) proven: paid 400") })
+    refute_nil @db[:battle_records].where(client_nonce: 77).get(:trainer_battle_id), "a proven win keeps its seed"
   end
 
   def test_what_is_refused
@@ -208,8 +209,11 @@ class ServerTrainerEnforceTest < Minitest::Test
     sl = seed(s, LIAM)[:seed]
     record(s, sl, 78)
     assert_equal "held", claim(s, 3, [LIAM], 176, seed: sl)[:verdict]
+    flags = -> { @db[:player_flags].where(account_id: lo[:account_id], kind: "money_claim").get(:count).to_i }
+    before_flags = flags.call
     replayed(sl, status: "mismatch", detail: "round 2: AI chose move 1, the record move 0")
     recv_type(s, :money_claim_ready)
+    assert wait_for { flags.call > before_flags }, "flagged as the replay refuses it, before any ask"
     assert_equal ["refuted", 0], claim(s, 3, [LIAM], 176, seed: sl).values_at(:verdict, :accepted)
     assert_equal ["event:31:8", "trainer:CAMPER:Liam:0"], keys(lo), "its battle stays paid for, for nothing"
     assert_equal before, balance(lo)
@@ -344,8 +348,7 @@ class ServerTrainerEnforceTest < Minitest::Test
     # a prize paid from the allowance proves no Pay Day - nor is its Pay Day a sign of a cheat
     assert_equal "allowance", claim(s, 3, [LIAM], 176)[:verdict]
     assert_equal "unproven", payday(s, 4, 60, trainer_claim: 3)[:verdict]
-    sleep 0.3   # a flag is counted on a worker
-    assert_nil @db[:player_flags].where(account_id: lo[:account_id], kind: "money_claim").get(:count)
+    refute wait_for(1) { @db[:player_flags].where(account_id: lo[:account_id], kind: "money_claim").get(:count) }
   end
 
   # A claim over its bound is a sign under enforcement too, whatever the gate made of it.
@@ -355,7 +358,14 @@ class ServerTrainerEnforceTest < Minitest::Test
     sd = seed(s, ANNA)[:seed]
     record(s, sd, 96)
     assert_equal "held", claim(s, 1, [ANNA], 900, seed: sd)[:verdict]
-    assert(wait_for { @db[:player_flags].where(account_id: lo[:account_id], kind: "money_suspect").get(:count) })
+    suspect = -> { @db[:player_flags].where(account_id: lo[:account_id], kind: "money_suspect").get(:count) }
+    assert wait_for { suspect.call }
+    assert_equal "held", claim(s, 1, [ANNA], 900, seed: sd)[:verdict]
+    replayed(sd, prize: 900)   # the replay paid what was claimed: proven, paid what the bound allows
+    recv_type(s, :money_claim_ready)
+    assert_equal ["paid", 400], claim(s, 1, [ANNA], 900, seed: sd).values_at(:verdict, :accepted)
+    sleep 0.3
+    assert_equal 1, suspect.call, "one claim, one sign"
   end
 
   # A held claim is void at a fresh login like any unsealed one - unless a save whose blob
@@ -371,7 +381,7 @@ class ServerTrainerEnforceTest < Minitest::Test
     recv_type(s, :econ_ack, :econ_rej)
     send_env(s, { type: :save, seq: 1, claims: [] }, "an older blob")
     recv_type(s, :save_ok)
-    sleep 0.2
+    claim(s, 1, [ANNA], 400, seed: sd)   # answered after the save's own job (the account's queue)
     assert_nil claim_row(lo, 1)[:sealed_at], "neither a money frame nor a save without it seals it"
     shadow = -> { @db[:money_shadow].where(account_id: lo[:account_id]).get(:s) }
     before = shadow.call
@@ -452,6 +462,23 @@ class ServerTrainerEnforceTest < Minitest::Test
     sl = seed(s, LIAM)[:seed]
     assert_equal 93, record(s, sl, 93)[:rec_nonce], "stored: its own hourly count"
     refute_nil @db[:battle_records].where(client_nonce: 93).get(:trainer_battle_id)
+  end
+
+  # A seed's one win is the one its claim is judged on: a win no claim holds gives way to
+  # the next - the battle fought again after a claim refused before any proof.
+  def test_a_win_no_claim_holds_gives_way
+    start_server
+    s, lo = login
+    sd = seed(s, ANNA)[:seed]
+    record(s, sd, 97)
+    record(s, sd, 98)
+    assert_nil @db[:battle_records].where(client_nonce: 97).get(:trainer_battle_id)
+    refute_nil @db[:battle_records].where(client_nonce: 98).get(:trainer_battle_id)
+    assert_equal "held", claim(s, 1, [ANNA], 400, seed: sd)[:verdict]
+    replayed(sd)
+    recv_type(s, :money_claim_ready)
+    assert_equal "paid", claim(s, 1, [ANNA], 400, seed: sd)[:verdict]
+    assert_equal @db[:battle_records].where(client_nonce: 98).get(:id), claim_row(lo, 1)[:proof_record_id]
   end
 
   # A record the server could not store is not acknowledged: the client sends it again.

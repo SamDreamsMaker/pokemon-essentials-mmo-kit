@@ -37,16 +37,40 @@ module PEMK
       [record.merge(seed: seed_row[:seed], mode: "on"), nil]
     end
 
+    PARTY_MAX = 6
+    MOVES_MAX = 4
+    UID_MAX   = (1 << 63) - 1   # a registry id is a bigint
+
+    # A team no game fields: more than six, one Pokemon twice, more than four moves.
+    # -> why, or nil
+    def team_shape(record)
+      frames = player_frames(record)
+      return "more than #{PARTY_MAX} Pokemon in the player's team" if frames.size > PARTY_MAX
+
+      uids = frames.map { |f| f.is_a?(Hash) ? f[:uid] : nil }.compact
+      return "one Pokemon twice in the player's team" if uids.uniq.size != uids.size
+      return "a Pokemon with more than #{MOVES_MAX} moves" if frames.any? { |f| f.is_a?(Hash) && Array(f[:moves]).size > MOVES_MAX }
+
+      nil
+    end
+
+    def player_frames(record)
+      Array(record.is_a?(Hash) && record[:init].is_a?(Hash) ? record[:init][:player] : nil).compact
+    end
+
     # -> [:ok | :unprovable | :refuted, reason | nil]. +audit+: a TeamAudit on the game's
     # battle data.
     def player_team(db, account_id, record, audit: nil)
-      frames = Array(record.is_a?(Hash) && record[:init].is_a?(Hash) ? record[:init][:player] : nil).compact
+      frames = player_frames(record)
       return [:unprovable, "no player team in the record"] if frames.empty?
+      if (shape = team_shape(record))
+        return [:refuted, shape]
+      end
 
       unprovable = nil
       frames.each_with_index do |f, i|
         uid = f.is_a?(Hash) ? f[:uid] : nil
-        unless uid.is_a?(Integer)
+        unless uid.is_a?(Integer) && uid.between?(1, UID_MAX)
           unprovable ||= "player #{i}: a Pokemon the server has not registered yet"
           next
         end

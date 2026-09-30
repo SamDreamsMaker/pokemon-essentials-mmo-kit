@@ -2075,9 +2075,7 @@ module PEMK
       case verdict
       when "paid" then @log.call("#{what} proven: paid #{accepted}")
       when "allowance" then @log.call("#{what} unprovable: paid #{accepted} from the day's allowance")
-      else
-        @log.call("#{what} REFUSED: #{proof}")
-        flag_anomaly(account_id, :money_claim)
+      else @log.call("#{what} REFUSED: #{proof}")   # flagged as the sweep refused it
       end
     end
 
@@ -2950,6 +2948,8 @@ module PEMK
           else
             @log.call("trainerproof: account #{account_id} claim #{nonce} WOULD-HOLD (#{proof}): #{reason}")
           end
+          # a refused battle is a sign as it is judged - not only once its client asks again
+          flag_anomaly(account_id, :money_claim) if MoneyClaims::REFUSED_PROOFS.include?(proof.to_s)
         end
         note_stale_replays(@trainer_proofs.stale, now)
       rescue StandardError => e

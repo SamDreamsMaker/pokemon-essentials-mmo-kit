@@ -228,13 +228,21 @@ class ServerTrainerSeedTest < Minitest::Test
     recs = wait_for { (r = @db[:battle_records].order(:id).all).size == 2 && r }
     assert_equal [row, row], recs.map { |r| r[:trainer_battle_id] }
     assert_equal %w[walk_ok walk_ok], recs.map { |r| r[:replay_status] }
-    send_env(c, *walk_body(seed, [100, 16, 2, 4]))              # the win again: a copy, dropped
+    # won again with no claim on the first win: the seed's one win is the new one (P4)
+    send_env(c, *walk_body(seed, [100, 16, 2, 4]))
+    wait_for { @db[:battle_records].count == 3 }
+    assert_equal [row, nil, row], @db[:battle_records].order(:id).select_map(:trainer_battle_id)
+    # ... but a win a claim holds keeps its place: another is a copy, dropped
+    @db[:money_claims].insert(account_id: @db[:trainer_battles].where(id: row).get(:account_id), nonce: 1, kind: "trainer",
+                              verdict: "held", mode: "on", amount: 176, accepted: 176, map: 10,
+                              trainers: [LIAM].to_json, trainer_battle_id: row, created_at: Time.now)
+    send_env(c, *walk_body(seed, [100, 16, 2, 4]))
     wait_for { @logs.any? { |l| l.include?("duplicate record for the won battle on trainer seed #{row}") } }
     env, body = walk_body(seed, [100, 16], outcome: 2)
     rec = W.decode_primitive(body)
     rec[:draws][:b][:log] = [100, 0, 16, 0].pack("N*")            # the same bounds, values the seed never gave
     send_env(c, env, W.encode_primitive(rec))
-    bad = wait_for { @db[:battle_records].count == 3 && @db[:battle_records].order(:id).last }
+    bad = wait_for { @db[:battle_records].count == 4 && @db[:battle_records].order(:id).last }
     assert_equal "walk_mismatch", bad[:replay_status]
     c.close
   end

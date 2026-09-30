@@ -115,6 +115,10 @@ module PEMK
         end
       end
 
+      # P4: a seed holds one won battle - the one its claim is judged on. A win no claim
+      # holds (its claim refused before any proof, or never made) gives way to this one.
+      release_unclaimed_win(trainer_battle_id) if trainer_battle_id && int_in(env[:outcome], 0..5) == 1
+
       @db[:battle_records].insert(
         account_id:        account_id,
         encounter_roll_id: roll_id,
@@ -148,6 +152,12 @@ module PEMK
     private
 
     TRAINER_HOURLY_CAP = 60   # trainer battles' records per account per hour (their own count)
+
+    def release_unclaimed_win(trainer_battle_id)
+      return unless @db[:money_claims].where(trainer_battle_id: trainer_battle_id).empty?
+
+      @db[:battle_records].where(trainer_battle_id: trainer_battle_id, outcome: 1).update(trainer_battle_id: nil)
+    end
 
     def over_cap?(account_id, trainer_bound, now)
       recent = @db[:battle_records].where(account_id: account_id).where { created_at > now - 3600 }

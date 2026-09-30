@@ -247,6 +247,16 @@ records; a record without EXP chose its level; a proven prize not paid yet let i
 Day go unproven; the suspect flag was lost under the gate and a Pay Day after an
 unproven prize was flagged.
 
+A third verification found no double pay, and these, fixed: the database away for a
+moment marked the record in hand as an error for good - now the pass stops and the
+record waits, and only a record the tool dies on (a mark on disk, not a status) becomes
+an error at the next boot; a team no game fields (more than six, one Pokemon twice, more
+than four moves, an id past any) went to the replay; a won record no claim held kept its
+seed's one win from the next battle; a void landing while the sweep judged; a refusal
+flagged only once its client asked again, and a refused held claim voided at a fresh
+login; a record a verdict let go of, replayed again, ran on its body's seed. Each replay
+is bounded in time, and a pass takes at most 100 records besides the trainer wins.
+
 ## 4. What stays open
 
 - Lookahead: a client knows its seed before it plays, so it can simulate the battle ahead

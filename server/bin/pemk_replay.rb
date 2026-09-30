@@ -17,6 +17,8 @@ $LOAD_PATH.unshift(File.join(server_root, "lib"))
 $LOAD_PATH.unshift(File.expand_path("../protocol", server_root))
 
 require "sequel"
+require "timeout"
+require "tmpdir"
 require "pemk_wire"
 require "pemk_prng"
 require "pemk/proof_checks"
@@ -47,7 +49,41 @@ puts "replay: no battle data at #{bd_path} - trainer teams checked without it" u
 REPLAYABLE = %w[pending walk_ok walk_skipped].freeze
 STATUS = { match: "match", mismatch: "mismatch", error: "error", skipped: "not_replayable" }.freeze
 
+REPLAY_SEC = 20         # one replay takes milliseconds; a record that holds the tool longer is not replayed
+OTHER_PER_PASS = 100    # records not a trainer battle's won one, per pass: a prize waits at most one short pass
+# The record being replayed, on disk: one the tool died on (no Ruby error to catch - a
+# stack overflow, a kill) is an error at the next boot, never replayed first again. A
+# database away is no death: the mark goes, the record waits for the next pass.
+MARK = ENV["PEMK_REPLAY_MARK"] || File.join(Dir.tmpdir, "pemk_replay.current")
+
 def safe_text(value) = PEMK::ProofChecks.safe_text(value)
+
+def mark!(id) = File.write(MARK, id.to_s)
+def unmark! = (File.delete(MARK) if File.exist?(MARK))
+
+# At boot: the record the tool died replaying took it down - an error now.
+def clear_replaying(db)
+  return unless File.exist?(MARK)
+
+  id = File.read(MARK).to_i
+  n = db[:battle_records].where(id: id, replay_status: REPLAYABLE)
+                         .update(replay_status: "error", verdict_at: Time.now,
+                                 replay_detail: "the replay tool died replaying this record")
+  puts "replay: record ##{id} took the tool down - marked as an error" if n.positive?
+  unmark!
+end
+
+# Tests make the tool fail on one record: REPLAY_FAULT_ID names it, REPLAY_FAULT the way
+# (a Ruby error by default; db: the database away; die: the tool dies mid-replay).
+def fault!(row)
+  return unless ENV["REPLAY_FAULT_ID"].to_i == row[:id]
+
+  case ENV["REPLAY_FAULT"]
+  when "db"  then raise Sequel::DatabaseDisconnectError, "a fault injected: the database away"
+  when "die" then raise SystemStackError, "a fault injected: the tool dies"
+  else raise "a fault injected for record #{row[:id]}"
+  end
+end
 
 # One pass over the queue. -> tally hash (also the loop's liveness signal).
 def replay_pass(db, dry:, limit:)
@@ -58,31 +94,45 @@ def replay_pass(db, dry:, limit:)
     else
       db[:battle_records].where(replay_status: REPLAYABLE)
     end
-  # A trainer battle's won record first - a prize waits on it -, then its other records,
-  # then the rest: no queue of other records holds a prize back.
+  # A trainer battle's won record first - a prize waits on it -, then a few of the rest:
+  # no queue of other records holds a prize back.
   rows = ds.exclude(trainer_battle_id: nil).where(outcome: 1).order(:id).limit(limit).all
   if rows.size < limit
     rows += ds.exclude(id: rows.map { |r| r[:id] })
-              .order(Sequel.case({ { trainer_battle_id: nil } => 1 }, 0), :id).limit(limit - rows.size).all
+              .order(Sequel.case({ { trainer_battle_id: nil } => 1 }, 0), :id)
+              .limit([limit - rows.size, OTHER_PER_PASS].min).all
   end
   tally = Hash.new(0)
   rows.each do |row|
     verdict =
       begin
         replay_row(db, row, dry: dry)
+      rescue Sequel::DatabaseError, Sequel::PoolTimeout
+        unmark!
+        raise   # the database, not the record: the pass stops, the record waits for the next one
       rescue StandardError => e
         # Never the record that broke the tool again: an error (its prize unprovable).
         puts "  ##{row[:id]}: the replay tool failed on it (#{e.class})"
         unless dry
-          (db[:battle_records].where(id: row[:id])
-             .update(replay_status: "error", verdict_at: Time.now,
-                     replay_detail: "the replay tool failed on this record (#{e.class})") rescue nil)
+          db[:battle_records].where(id: row[:id])
+            .update(replay_status: "error", verdict_at: Time.now,
+                    replay_detail: "the replay tool failed on this record (#{e.class})")
         end
         :error
       end
+    unmark!   # done with it (a death skips this: the mark stays for the next boot)
     tally[verdict] += 1
   end
   tally
+end
+
+# Trainer proof P4: the seed row a trainer record is replayed on - the one it is bound
+# to, or (a record a verdict let go of, replayed again) the account's row of its seed.
+def seed_row_of(db, row, rec)
+  return db[:trainer_battles].where(id: row[:trainer_battle_id]).first if row[:trainer_battle_id]
+  return nil unless rec[:kind] == "trainer" && row[:battle_seed]
+
+  db[:trainer_battles].where(account_id: row[:account_id], seed: row[:battle_seed]).first
 end
 
 # -> the verdict stored for +row+.
@@ -90,12 +140,20 @@ def replay_row(db, row, dry:)
   rec = PEMK::Wire.decode_primitive(row[:record].to_s)
   result = nil
   # Trainer proof P4: a record bound to a seed row is replayed on that row's seed and
-  # against its trainer, whatever its body says.
-  if rec.is_a?(Hash) && row[:trainer_battle_id] && (seed_row = db[:trainer_battles].where(id: row[:trainer_battle_id]).first)
+  # against its trainer, whatever its body says; its team first judged whole.
+  if rec.is_a?(Hash) && (seed_row = seed_row_of(db, row, rec))
     rec, why = PEMK::ProofChecks.bind_to_seed(rec, row[:battle_seed], seed_row)
+    why ||= PEMK::ProofChecks.team_shape(rec)
     result = { verdict: :mismatch, detail: why } if why
   end
-  result ||= rec.is_a?(Hash) ? PEMK::Harness.replay(rec) : { verdict: :error, detail: "record body undecodable" }
+  mark!(row[:id]) unless dry || result
+  fault!(row)   # tests only (REPLAY_FAULT_ID)
+  result ||=
+    if rec.is_a?(Hash)
+      Timeout.timeout(REPLAY_SEC) { PEMK::Harness.replay(rec) }
+    else
+      { verdict: :error, detail: "record body undecodable" }
+    end
   # Trainer proof P3: a trainer battle's player team must be the server's own (owned,
   # locked, no more EXP than seen) - the replay alone takes the record's word for it.
   team, team_why = rec.is_a?(Hash) && rec[:kind] == "trainer" ? PEMK::ProofChecks.player_team(db, row[:account_id], rec, audit: $audit) : nil
@@ -114,6 +172,8 @@ def replay_row(db, row, dry:)
   puts line
   result[:verdict]
 end
+
+clear_replaying(db) unless dry
 
 # PEMK_REPLAY_LOOP=<seconds>: the DAEMON form — boot the engine ONCE (the 1.7s
 # amortizes), then poll the queue on the interval. This is what a real operator

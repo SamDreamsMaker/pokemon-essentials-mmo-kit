@@ -11,6 +11,7 @@ module PEMK
     # Trainer proof P4: a claim held for its battle's proof reserves the battle's keys, and
     # one paid from the day's allowance for prizes no replay proves pays for the battle too.
     KEYED       = %w[paid suspect held allowance].freeze
+    REFUSED_PROOFS = %w[refuted unrecorded].freeze   # P4: a replay's refusals
     PAYDAY_SPENDS = %w[paid suspect capped].freeze   # Pay Day verdicts that use up their proof
 
     def initialize(db)
@@ -131,6 +132,8 @@ module PEMK
     # kept, sealed. -> the claims voided
     def void_unsealed(account_id, now: Time.now)
       rows = @db[:money_claims].where(account_id: account_id, sealed_at: nil, voided_at: nil, verdict: KEYED).all
+      # a held claim its replay refused keeps its battle paid for, as once asked it would (P4)
+      rows.reject! { |c| c[:verdict] == "held" && REFUSED_PROOFS.include?(c[:proof]) }
       rows.select do |c|
         undone = block_given? ? yield(c) : true
         if undone
