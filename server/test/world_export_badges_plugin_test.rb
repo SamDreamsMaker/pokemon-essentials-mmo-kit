@@ -37,7 +37,13 @@ class WorldExportBadgesPluginTest < Minitest::Test
     ])])
     npc = Ev.new(5, 2, 2, [Page.new(nil, [c.(355, ["$player.badges[1] = true"]), c.(0, [])]),
                            Page.new(nil, [c.(355, ["$player.badges[n] = true"]), c.(0, [])])])
-    print PEMK::WorldExport.badge_sources([[10, gym], [11, pair], [12, npc]]).inspect
+    # the loss's branch of a negated call is no win
+    lost = Ev.new(6, 3, 3, [Page.new(nil, [
+      c.(111, [12, %q{!TrainerBattle.start(:LEADER_C, "C")}]),
+      c.(355, ["pbPlayer.badges[5] = true"], 1),
+      c.(412, [], 0), c.(0, [])
+    ])])
+    print PEMK::WorldExport.badge_sources([[10, gym], [11, pair], [12, npc], [13, lost]]).inspect
   RUBY
 
   def test_what_gives_each_badge
@@ -50,7 +56,8 @@ class WorldExportBadgesPluginTest < Minitest::Test
     assert_equal({ badge: 4, map: 11, event: 4, page: 0, trainers: [["LEADER_A", "A", 0], ["LEADER_B", "B", 1]] },
                  list[2], "a double battle: either leader's win")
     assert_equal({ badge: 1, map: 12, event: 5, page: 0 }, list[3], "given by talking: no battle")
-    assert_equal 4, list.size, "a test of a badge is no source"
+    assert_equal({ badge: 5, map: 13, event: 6, page: 0 }, list[4], "a negated battle's branch is the loss's")
+    assert_equal 5, list.size, "a test of a badge is no source"
     assert_equal [{ map: 12, event: 5, page: 1, script: "$player.badges[n] = true" }], got[:unknown]
   end
 end

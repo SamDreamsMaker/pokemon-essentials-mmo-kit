@@ -752,8 +752,11 @@ module PEMK
 
     # === badges (docs/BADGE-AUTHORITY-DESIGN.md, B0) ==========================
 
-    BADGE_SET = /\$(?:player|Trainer)\.badges\[\s*(\d+)\s*\]\s*=\s*true\b/.freeze
-    BADGE_ANY = /\$(?:player|Trainer)\.badges\[[^\]]*\]\s*=[^=]/.freeze
+    BADGE_SET = /(?:\$player|\$Trainer|pbPlayer)\.badges\[\s*(\d+)\s*\]\s*=\s*true\b/.freeze
+    BADGE_ANY = /(?:\$player|\$Trainer|pbPlayer)\.badges\[[^\]]*\]\s*=[^=]/.freeze
+    # A win branch's condition: the battle call itself, nothing around it (a "!" would make
+    # the branch the loss's).
+    WIN_CONDITION = /\A\s*TrainerBattle\.start\([^()]*\)\s*\z/.freeze
 
     # Where each badge is given. -> { :list => [{ :badge, :map, :event, :page, :trainers }
     # | { :badge, :common_event }], :unknown => [{ where, :script }] }. A badge set at the
@@ -809,7 +812,7 @@ module PEMK
       won = {}
       list.each_with_index do |cmd, i|
         params = cmd.respond_to?(:parameters) ? cmd.parameters : nil
-        next unless cmd.code == 111 && params && params[0] == 12 && params[1].to_s.include?("TrainerBattle.start(")
+        next unless cmd.code == 111 && params && params[0] == 12 && params[1].to_s.match?(WIN_CONDITION)
 
         trainers = battle_calls(params[1].to_s).flatten(1)
         next if trainers.empty?
