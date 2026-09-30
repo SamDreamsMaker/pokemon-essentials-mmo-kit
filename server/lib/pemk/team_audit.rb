@@ -66,7 +66,39 @@ module PEMK
       { checked: true, legal: legal, team_violations: team_v, mons: mons }
     end
 
+    # Trainer proof (docs/TRAINER-PROOF-DESIGN.md): the hard violations of one mon
+    # (String-keyed, as #check takes them) - no log, no mode.
+    def hard_violations(mon)
+      check_mon(mon).reject { |v| soft_violation?(v) }
+    end
+
+    # Is +species+ +ancestor+ or one of its evolutions, forms aside (the base species and
+    # its prev_species chain)? nil when the battle data cannot say.
+    def evolves_from?(species, ancestor)
+      return nil unless @bd.species(ancestor.to_s)   # the data no longer knows what it was
+
+      target = base_species(ancestor)
+      cur = species.to_s
+      seen = {}
+      while cur && !cur.empty?
+        return nil if seen[cur]   # a loop in the data: it cannot say
+
+        seen[cur] = true
+        sp = @bd.species(cur)
+        return nil unless sp
+        return true if sp["species"].to_s == target
+
+        cur = sp["prev_species"]&.to_s
+      end
+      false
+    end
+
     private
+
+    def base_species(id)
+      sp = @bd.species(id.to_s)
+      sp ? sp["species"].to_s : id.to_s.sub(/_\d+\z/, "")
+    end
 
     def check_mon(m)
       return ["not_an_object"] unless m.is_a?(Hash)

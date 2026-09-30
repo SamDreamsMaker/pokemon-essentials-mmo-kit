@@ -279,6 +279,27 @@ module PEMK
         "versions" => versions }
     end
 
+    # Trainer proof P4: does a battle at this placement face this trainer alone? No other
+    # trainer of the event shares a battle call naming it (a double battle's pair does). A
+    # placement without calls (a phone rematch, an older export) is taken as alone.
+    def trainer_alone?(map_id, event_id, type, name, version)
+      places = (@trainer_places[map_id] || {})[event_id.to_i] || []
+      hit = places.find { |t| t[0] == type.to_s && t[1] == name.to_s && t[2] == version.to_i }
+      return false unless hit
+      return true unless hit[7]
+
+      places.none? { |t| !t.equal?(hit) && t[7] && !(t[7] & hit[7]).empty? }
+    end
+
+    # -> [[map, event, type, name, version], ...]: the placements that share a battle.
+    def trainers_not_alone
+      @trainer_places.sort.flat_map do |map_id, events|
+        events.sort.flat_map do |event_id, list|
+          list.reject { |t| trainer_alone?(map_id, event_id, *t[0, 3]) }.map { |t| [map_id, event_id, *t[0, 3]] }
+        end
+      end
+    end
+
     # Does the export say which trainers share a battle (the calls naming each)?
     def battle_calls_known?
       @trainer_places.any? { |_, events| events.any? { |_, list| list.any? { |t| t[7] } } }

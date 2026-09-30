@@ -274,6 +274,165 @@ class PrizeClaimPluginTest < Minitest::Test
     print out.inspect
   RUBY
 
+  # Trainer proof P4: a prize held for its battle's proof stays in the list with its money
+  # out of the game - the money frames and a Mart do not wait on it - and is asked again,
+  # at once when the server says its verdict is in; that ask brings what was paid.
+  P4_RUNNER = <<~'RUBY'
+    $sent = []; $now = 0.0; $event = 7
+    module PBEffects; AmuletCoin = 1; HappyHour = 2; PayDay = 3; end
+    module Settings; MAX_MONEY = 999_999; end
+    class Player; attr_accessor :money; end
+    $player = Player.new; $player.money = 1000
+    class NPCTrainer
+      attr_reader :trainer_type, :name, :version, :base_money
+      def initialize(type, name, version, money); @trainer_type = type; @name = name; @version = version; @base_money = money; end
+    end
+    module GameData
+      class Trainer
+        def initialize(type, name, version); @trainer_type = type; @real_name = name; @version = version; end
+        def to_trainer; NPCTrainer.new(@trainer_type, @real_name, @version, 20); end
+      end
+    end
+    Field = Struct.new(:effects)
+    class Battle
+      attr_reader :opponent, :field
+      attr_accessor :internalBattle, :moneyGain
+      def initialize(opp, levels); @opponent = opp; @levels = levels; @field = Field.new({ 1 => false, 2 => false, 3 => 0 }); @internalBattle = true; @moneyGain = true; end
+      def trainerBattle?; true; end
+      def pbMaxLevelInTeam(_side, i); @levels[i]; end
+      def pbGainMoney   # the engine: the prize and Pay Day's coins
+        $player.money += @levels.each_with_index.sum { |l, i| l * @opponent[i].base_money } + @field.effects[3].to_i
+      end
+    end
+    class PokemonGlobalMetadata; attr_accessor :partner; end
+    Map = Struct.new(:map_id)
+    $game_map = Map.new(31)
+    def pbMapInterpreterRunning?; true; end
+    Self = Struct.new(:id)
+    def pbMapInterpreter; Struct.new(:x) { def get_self; Self.new($event); end }.new(1); end
+    module Graphics; def self.update; $now += 1.0; end; end
+    module Input; def self.update; end; end
+    module PEMK
+      def self.enabled?; true; end
+      def self.self_id; 7; end
+      def self.client; Struct.new(:c) { def connected?; true; end }.new(1); end
+      def self.log(_m); end
+      def self.send_message(m); $sent << m; end
+      module Presence; def self.emit_now(_t); end; end
+    end
+    load File.join(ARGV[0], "009_BattleData", "007_PrizeClaim.rb")
+    P = PEMK::PrizeClaim
+    def P.mono; $now; end
+    $PokemonGlobal = PokemonGlobalMetadata.new
+    anna = -> { GameData::Trainer.new(:LASS, "Anna", 0).to_trainer }
+    fight = -> { Battle.new([anna.call], [20]).pbGainMoney; $sent.select { |m| m.is_a?(Hash) }.last[:nonce] }
+    ack = ->(n, verdict, paid) { { :type => :money_claim_ack, :nonce => n, :verdict => verdict, :accepted => paid } }
+    listed = -> { $PokemonGlobal.pemk_prize_claims.map(&:first) }
+    asked = -> { $sent.select { |m| m.is_a?(Hash) }.map { |m| m[:nonce] } }
+    out = {}
+
+    P.adopt_mode("on")
+    n = fight.call                                   # the engine added 400
+    P.on_ack(ack.(n, "held", 0))
+    out[:held] = [$player.money, P.holding?, listed.call == [n]]
+    out[:mart] = P.settle(8.0)
+    $sent.clear
+    P.tick
+    out[:not_yet] = asked.call
+    P.on_ready({ :nonce => n })
+    P.tick
+    out[:ready] = asked.call == [n]
+    P.on_ack(ack.(n, "held", 0))
+    out[:still] = $player.money
+    P.on_ack(ack.(n, "paid", 400).merge(:first => true))
+    out[:paid] = [$player.money, listed.call]
+    # refused after its hold: nothing comes back
+    n = fight.call
+    P.on_ack(ack.(n, "held", 0))
+    P.on_ack(ack.(n, "refuted", 0).merge(:first => true))
+    out[:refuted] = $player.money
+    # released into a frame the server refused before its hold: taken out once
+    n = fight.call
+    $now += 61
+    P.holding?
+    P.frame_refused
+    $player.money = 1400                             # the server's balance
+    P.on_ack(ack.(n, "held", 0))
+    out[:released_held] = $player.money
+    P.on_ack(ack.(n, "paid", 400).merge(:first => true))
+    out[:released_paid] = $player.money
+    # a fresh login while it is held: the ledger's balance, then what it was paid
+    n = fight.call
+    P.on_ack(ack.(n, "held", 0))
+    P.adopted
+    P.on_ack(ack.(n, "held", 0))
+    P.on_ack(ack.(n, "allowance", 300).merge(:first => true))
+    out[:login_paid] = $player.money
+    # Pay Day in a trainer battle: held with its prize, asked again with it
+    before = $player.money
+    b = Battle.new([anna.call], [20])
+    b.field.effects[3] = 50
+    b.pbGainMoney
+    prize, coins = listed.call.last(2)
+    P.on_ack(ack.(prize, "held", 0))
+    P.on_ack(ack.(coins, "held", 0))
+    out[:payday_held] = [$player.money - before, P.holding?]
+    $sent.clear
+    P.on_ready({ :nonce => prize })
+    P.tick
+    out[:payday_ready] = asked.call.sort == [prize, coins].sort
+    P.on_ack(ack.(prize, "paid", 400).merge(:first => true))
+    P.on_ack(ack.(coins, "paid", 50).merge(:first => true))
+    # held, then paid once enforcement was turned off: its money comes back, once
+    n = fight.call
+    P.on_ack(ack.(n, "held", 0))
+    P.adopt_mode("shadow")
+    before = $player.money
+    P.on_ack(ack.(n, "paid", 400).merge(:first => true, :held => true))
+    out[:shadow_back] = $player.money - before
+    # ... but not money that never left: its "held" answer never came
+    P.adopt_mode("on")
+    n = fight.call
+    P.adopt_mode("shadow")
+    before = $player.money
+    P.on_ack(ack.(n, "paid", 400).merge(:first => true, :held => true))
+    out[:never_left] = $player.money - before
+    P.adopt_mode("on")
+    # held for room in the day's allowance: asked again when the server says
+    n = fight.call
+    P.on_ack(ack.(n, "held", 0).merge(:wait => 3600))
+    $sent.clear
+    $now += 11
+    P.tick
+    out[:waits] = asked.call
+    $now += 3600
+    P.tick
+    out[:waited] = asked.call == [n]
+    print out.inspect
+  RUBY
+
+  def test_a_prize_held_for_its_proof
+    out = IO.popen([RbConfig.ruby, "-W0", "-e", P4_RUNNER, PEMK_DIR], err: %i[child out], &:read)
+    assert $?.success?, "P4 runner crashed:\n#{out}"
+    o = eval(out) # rubocop:disable Security/Eval -- our own runner's inspect output
+    assert_equal [1000, false, true], o[:held], "its money out of the game, nothing held back, still listed"
+    assert_equal true, o[:mart], "a Mart does not wait on it"
+    assert_equal [], o[:not_yet], "asked again after RESEND_AFTER, not before"
+    assert o[:ready], "the server says its verdict is in: asked at once"
+    assert_equal 1000, o[:still]
+    assert_equal [1400, []], o[:paid], "the ask that pays brings it"
+    assert_equal 1400, o[:refuted]
+    assert_equal 1400, o[:released_held], "the refused frame took it out already"
+    assert_equal 1800, o[:released_paid]
+    assert_equal 2100, o[:login_paid], "after a fresh login: what it was paid"
+    assert_equal [0, false], o[:payday_held]
+    assert o[:payday_ready], "its Pay Day is asked again with it"
+    assert_equal 400, o[:shadow_back], "enforcement off since: what it is paid comes back"
+    assert_equal 0, o[:never_left], "money the engine added and never took out is not added twice"
+    assert_equal [], o[:waits], "not asked again every ten seconds"
+    assert o[:waited], "asked again when the server said"
+  end
+
   def test_enforced_the_money_becomes_what_the_server_paid
     out = IO.popen([RbConfig.ruby, "-W0", "-e", M3_RUNNER, PEMK_DIR], err: %i[child out], &:read)
     assert $?.success?, "M3 runner crashed:\n#{out}"

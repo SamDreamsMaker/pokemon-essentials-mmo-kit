@@ -69,8 +69,8 @@ module Autotest
 
     # A hand-driven client on a fresh account of its own: an attacker, or a player
     # whose game was modified (see Rogue).
-    def rogue(key)
-      @rogues[key] ||= Rogue.new(@server.port, email: "#{@run_ctx.run_id}-#{@index}-#{key}@rogue.local").connect
+    def rogue(key, caps: nil)
+      @rogues[key] ||= Rogue.new(@server.port, email: "#{@run_ctx.run_id}-#{@index}-#{key}@rogue.local", caps: caps).connect
     end
 
     # Runs the blocks side by side, one window each (two intros at once), and hands

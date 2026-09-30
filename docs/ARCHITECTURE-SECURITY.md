@@ -688,6 +688,21 @@ minute at most), corrects the money to what the server paid, lets a Mart wait fo
 verdicts, and does not buy Triple Triad cards back. Autotest 079 has Camper Liam's prize
 paid by the server and a memory edit refused.
 
+#### A trainer's prize paid on its battle's replay (`PEMK_TRAINER_PROOF`)
+
+Off by default (docs/TRAINER-PROOF-DESIGN.md). Under `PEMK_BATTLE_ENFORCE_RNG=on` a
+trainer battle runs on its placement's seed and its record is replayed on the real engine,
+the trainer's AI re-run, the player's team checked against the server's own. `shadow`
+gives each prize claim the replay's verdict and logs what `on` would hold. `on` (with
+money enforcement) holds a prize until its battle is proven and pays it at the client's
+next ask; refuses a claim whose battle's draws, choices or team the replay refutes (the
+replay runs on the server's seed and trainer, never the record's word; each Pokemon must
+be the server's, of its species line, with a legal set), and one that names another
+battle's seed; pays what no replay can prove (no seed, a double battle, a partner, a
+record the harness cannot replay) from `PEMK_MONEY_UNPROVEN_DAILY` a day (default
+$5,000), the rest waiting for the next day. It needs the replay daemon
+(`PEMK_REPLAY_LOOP`); while a record waits for it the prize stays held. Autotest 086.
+
 ### A traded Pokemon is not lost (`PEMK_TRADE_REDELIVERY`)
 
 On by default (`off` turns it off). The swap is the server's, but the Pokemon itself

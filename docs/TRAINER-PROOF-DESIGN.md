@@ -152,6 +152,118 @@ and `repeatable` claims are judged. For P4 it gave a simpler, safer shape:
   a new connection.
 - **Old clients are refused at login** (capability `trainer_proof`), as M3 does.
 
+### P4 (2026-09-29): enforcement, as built
+
+- `PEMK_TRAINER_PROOF` off | shadow | on (default off). `shadow` is P3; `on` enforces where
+  money authority enforces and battle rng is `on`, else runs as shadow and says why. The
+  boot names the battles with more than one trainer (never proven) and asks for the
+  replay daemon. Old clients are refused at login (capability `trainer_proof`).
+- A payable prize goes through the proof gate:
+  - its claim names its battle's open seed: **held** - nothing credited, its battle's
+    payout keys reserved, the seed row linked (`money_claims.trainer_battle_id`);
+  - it names another seed (not this account's, not this placement's, spent, or a battle
+    another claim holds): **refused** (`proof = wrong_seed`), flagged;
+  - it names none (a battle fought offline, a seed that came late, a battle against
+    several trainers or with a partner - or a client that never asks), or its placement
+    shares a battle call: paid from the day's allowance (`PEMK_MONEY_UNPROVEN_DAILY`,
+    default $5,000; `money_daily.unproven_paid`, migration 045). With no room left today
+    it stays held and is paid the next UTC day (the answer says when to ask again); a
+    prize over the whole allowance gets the allowance on a day nothing was paid from it.
+- The replay tool replays a record bound to a seed row on that row's seed and against
+  that row's trainer, whatever the record's body says (a body not a trainer battle's, on
+  another seed, in shadow, or against another trainer is refuted before any replay); a
+  trainer record that claims no draws is `no_log`. It checks the player's team with the
+  game's battle data too: each Pokemon the species it was first seen as or an evolution
+  of it, and a legal set (D1's checks; a move or an ability no data explains may come
+  from an event: unprovable); its EXP stated (the replay's level follows it) and no more
+  than the server has seen (none seen: unprovable). The trainer battles' won records are
+  replayed first. A record it fails on is stored as an error (its prize unprovable) and
+  stops nothing; what a record says is stored scrubbed.
+- A Pokemon from another trainer gains more EXP and obeys only as far as the badges allow
+  (the game rolls for it every turn): the record says which Pokemon are foreign and how
+  many badges the player has, the replay builds them so, and the checks hold the claim
+  to the server's word - no more badges than its ledger knows, and a Pokemon traded in
+  from another account never recorded as the player's own (an egg takes the trainer who
+  hatches it). Autotest 087: a traded level-14 Squirtle with no badge wins over Liam,
+  disobeying, and the prize is proven.
+- `on` needs the team lock (D1, `PEMK_BATTLE_ENFORCE_TEAMS`) and EXP tracking (D6,
+  `PEMK_BATTLE_ENFORCE_EXP`) besides money enforcement and battle rng: without them a
+  record's IVs and levels would be its word. It runs as shadow and says so.
+- The sweep only decides (`proof`): **proven**; **refuted**; **unrecorded** (no won record
+  in ten minutes - the client keeps it until acknowledged, so it is the client's doing);
+  **unprovable** (a record the harness cannot replay, a trainer that is not the game's data
+  - the game may edit its trainers as they load -, a team the server cannot check yet). A
+  record still waiting for its replay gives no verdict: the claim stays held and the
+  server warns that the daemon is silent. A proven win spends the seed row; any other
+  verdict lets the claim and its record go of it, the seed staying (a claim no replay
+  proves never buys a fresh seed). Each verdict tells the online client
+  (`:money_claim_ready`).
+- The client's next ask pays, on the account's mailbox and in that answer's transaction:
+  proven is paid what was held, unprovable comes from the allowance, refuted and
+  unrecorded get nothing (the battle stays paid for). A refusal stands in every mode;
+  with enforcement turned off since, a held claim without one is paid as M3 pays it, and
+  its money comes back to the game (`held: true`).
+- A held claim is sealed only by a save whose blob carries it (the save frame names the
+  newest 64 claims the client wrote into it), so a fresh login voids it - its keys, its
+  seed row and the seed's one win free, the battle fought again judged on its own record
+  - unless the save that loads has it. Voiding it takes nothing out of the shadow
+  balance, which it never reached.
+- A trainer battle's Pay Day waits while its prize waits for its replay, or for the ask
+  that pays it once proven (`held`, not recorded), and counts only a proven prize; after
+  a prize no replay proves it is not paid, and not flagged. A claim over its bound is
+  flagged whatever the gate made of it.
+- The client: a held prize leaves the game's money until it is paid (no money frame and
+  no Mart waits on it), stays in the list and is asked again every ten seconds, at once on
+  `:money_claim_ready`. A seed is asked only for a battle the recorder arms (no size rule
+  but a single battle's, no partner that could join); under `on` the battle's start waits
+  up to six seconds for it. A trainer battle's record carries a nonce and stays in the
+  save (four at most, 128 KB) until `:battle_record_ack` - kept as the battle was armed,
+  so a link lost mid-battle loses nothing -, sent again on a new connection and every 30
+  seconds. The server knows a copy by its nonce (`battle_records.client_nonce`), counts
+  trainer records apart from the wild ones' hourly cap, and acknowledges none it could
+  not store.
+- Autotest 086: Camper Liam's prize held (the ledger and the game without it), replayed,
+  proven, paid at the next ask (both with it); a modified client that claims Brock's prize
+  without its seed is paid from the allowance at most, and one that makes his battle up
+  on the seed is held, then refused.
+- `docker-compose.yml` now passes the money knobs (`PEMK_MONEY_*`, `PEMK_TRAINER_PROOF`),
+  which it did not.
+
+### P4's review (2026-09-29)
+
+An adversarial review of P4 as built found, all fixed before merge: the replay took its
+seed and trainer from the record's body (a client could replay a win found on another
+seed); a link lost mid-battle lost the record, so the honest prize was refused; a voided
+or unproven claim kept its seed row, so the battle fought again was refused; a stale save
+(a reconnect pushes the file on disk) sealed held claims it did not carry; a record the
+database failed to store was acknowledged; the hourly record cap was shared with wild
+battles; voiding a held claim took money out of the shadow balance; an exhausted
+allowance used up the battle for nothing; a stored refusal was forgotten when
+enforcement was turned off; a partner doubled a seeded battle's bound. It also showed
+that refusing a claim for dropping a seed its connection was handed only ever caught
+honest players (a cheater simply never asks), so such a claim is paid from the allowance
+like any other without a seed.
+
+Its verification found, also fixed: a record whose Pokemon carried a stat key of its own
+(with bytes the database refuses) crashed the replay daemon on every restart, holding
+every prize - the checks read the six stats only, what a record says is stored scrubbed,
+and a record the tool fails on becomes an error; a save named its oldest 64 claims, not
+its newest; a battle fought again after a void was judged on the first fight's record;
+closing the seed row on any verdict let a client buy fresh seeds with unprovable
+records; a record without EXP chose its level; a proven prize not paid yet let its Pay
+Day go unproven; the suspect flag was lost under the gate and a Pay Day after an
+unproven prize was flagged.
+
+A third verification found no double pay, and these, fixed: the database away for a
+moment marked the record in hand as an error for good - now the pass stops and the
+record waits, and only a record the tool dies on (a mark on disk, not a status) becomes
+an error at the next boot; a team no game fields (more than six, one Pokemon twice, more
+than four moves, an id past any) went to the replay; a won record no claim held kept its
+seed's one win from the next battle; a void landing while the sweep judged; a refusal
+flagged only once its client asked again, and a refused held claim voided at a fresh
+login; a record a verdict let go of, replayed again, ran on its body's seed. Each replay
+is bounded in time, and a pass takes at most 100 records besides the trainer wins.
+
 ## 4. What stays open
 
 - Lookahead: a client knows its seed before it plays, so it can simulate the battle ahead
@@ -159,7 +271,21 @@ and `repeatable` claims are judged. For P4 it gave a simpler, safer shape:
   player's choices close it, at one round trip per turn.
 - A bot that fights for real is not a cheat this can see; caps and cadence still bound it.
 - Placements the export cannot rebuild (a trainer built by a script, edited in
-  `:on_trainer_load`) are marked unprovable.
+  `:on_trainer_load`) are unprovable: their prizes come from the allowance.
+- The allowance is the bound for everything unproven: a client that never asks for a
+  seed, or sends a record the harness cannot replay, gets at most
+  `PEMK_MONEY_UNPROVEN_DAILY` a day.
+- The player's team is checked for what each Pokemon can be (owned, locked traits, EXP
+  seen, species line, a legal set) - not for the exact set it has: a nature, a legal move
+  or a holdable item it does not have would pass, and so would a battle-only form from
+  the first turn. The EXP seen is what D6 took from the client's reports, within its caps.
+- The battle's weather, terrain and environment are the record's word (the export does
+  not say what each map's battles get).
+- Money authority turned off entirely leaves held prizes where they are (their money out
+  of the game) until it comes back; a Pay Day held with its prize, paid after
+  enforcement was turned off, does not give its coins back.
+- The replay runs the server's copy of the game: a server whose game files differ from
+  the players' refutes honest battles. Run `shadow` first and read its `WOULD-HOLD` lines.
 
 ## 5. Sam's decisions (2026-09-29)
 

@@ -15,6 +15,10 @@
 # where the server last saw the player. The claim waits in the save until the server
 # answers it, and goes out again on a new connection; the econ flush is held during
 # battles, so it always reaches the server before the frame that shows its money.
+#
+# Trainer proof P4: a prize the server holds until its battle's replay proves it stays in
+# the list, its money out of the game, and is asked again - at once when the server says
+# its verdict is in (:money_claim_ready). That ask is the one that pays.
 #===============================================================================
 class PokemonGlobalMetadata
   attr_accessor :pemk_prize_claims   # [[nonce, trainers, amount, amulet, happy_hour, map, partner], ...]
@@ -103,6 +107,7 @@ module PEMK
       now = mono
       held = false
       @local.each_value do |e|
+        next if e[4]   # held for its battle's proof (P4): out of the game until it is paid
         if now - e[1] < HOLD_MAX
           held = true
         else
@@ -130,12 +135,17 @@ module PEMK
     # server's balance on its own - unless that frame was refused before this verdict,
     # which took it all out. A claim left over from before a fresh login, judged only now
     # (+first+), was never in the balance the login brought.
-    def correct(nonce, accepted, first = false)
+    # P4: +held+ - the claim was held for its proof, its money out of the game meanwhile.
+    def correct(nonce, accepted, first = false, held = false)
       e = @local.delete(nonce)
       late = @late.delete(nonce)
-      return unless enforced? && $player
+      return unless $player
 
       paid = accepted.is_a?(Integer) ? accepted : 0
+      return back_after_hold(nonce, paid, e, late) if !enforced? && held == true && first == true
+
+      return unless enforced?
+
       delta = if e && e[3] then paid
               elsif e && e[2] then 0
               elsif e then paid - e[0]
@@ -146,6 +156,17 @@ module PEMK
 
       $player.money = [$player.money + delta, 0].max
       PEMK.log("prize: claim #{nonce} paid #{paid}: money #{delta.positive? ? '+' : ''}#{delta}")
+    end
+
+    # P4: a prize held while enforcement ran, paid after it was turned off - its money went
+    # out of the game (held out, or taken by a refused frame, or not in the balance a fresh
+    # login adopted) and comes back once.
+    def back_after_hold(nonce, paid, e, late)
+      taken = e ? (e[4] && !e[2]) || e[3] : late
+      return unless taken && paid.positive?
+
+      $player.money = $player.money + paid
+      PEMK.log("prize: claim #{nonce} held, then paid #{paid} without enforcement: money +#{paid}")
     end
 
     # M3: the server refused a money frame - the game is back at its balance, and the
@@ -225,16 +246,51 @@ module PEMK
     end
 
     # Dispatch routes :money_claim_ack here. "wait": the server had no position for this
-    # connection yet - asked again on a later tick.
+    # connection yet - asked again on a later tick. "held" (trainer proof P4): the prize
+    # waits for its battle's replay - kept, and asked again until it is paid.
     def on_ack(msg)
       n = msg && msg[:nonce]
       return unless n.is_a?(Integer)
       return if msg[:verdict].to_s == "wait"
 
+      if msg[:verdict].to_s == "held"
+        # held for room in the day's allowance: asked again when the server says
+        wait = msg[:wait]
+        @asked[n] = mono + wait - RESEND_AFTER if wait.is_a?(Integer) && wait > RESEND_AFTER && @asked.key?(n)
+        return hold_out(n)
+      end
+
       claims.reject! { |e| e[0] == n }
       @asked.delete(n)
       PEMK.log("prize: claim #{n} judged #{msg[:verdict]} (#{msg[:accepted]})")
-      correct(n, msg[:accepted], msg[:first])
+      correct(n, msg[:accepted], msg[:first], msg[:held])
+    end
+
+    # P4: a prize held for its battle's proof. The money the engine added leaves the game
+    # until the server pays it, so the money frames go on meanwhile (a Mart does not wait
+    # on it). Money already released into a frame leaves with that frame's refusal.
+    def hold_out(nonce)
+      e = @local[nonce]
+      return unless e && !e[4]
+
+      e[4] = true
+      return if e[2] || !$player || e[0] <= 0
+
+      $player.money = [$player.money - e[0], 0].max
+      PEMK.log("prize: claim #{nonce} held for its battle's proof: money -#{e[0]} until it is paid")
+      e[0] = 0
+    end
+
+    # Dispatch: :money_claim_ready - a held claim has its verdict: asked again now (that ask
+    # pays it), with the Pay Day that waits on it.
+    def on_ready(msg)
+      n = msg && msg[:nonce]
+      return unless n.is_a?(Integer)
+
+      @asked.delete(n)
+      claims.each do |e|
+        @asked.delete(e[0]) if e[1] == :payday && e[6].is_a?(Hash) && e[6]["trainer_claim"] == n
+      end
     end
 
     # :on_start_battle, before the battle sets in_battle (which holds every flush): the

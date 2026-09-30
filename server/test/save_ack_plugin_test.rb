@@ -112,4 +112,48 @@ class SaveAckPluginTest < Minitest::Test
     assert_equal [0, 8, 0], got[:offline], "no retry of its own: it waits for the reconnect"
     assert_equal 0, got[:old_server]
   end
+
+  # Trainer proof P4: a pushed save names the prize claims its bytes carry (a claim held
+  # for its proof survives a fresh login only if the save that loads has it) - known once
+  # this session wrote the file, and still the file's after a reconnect.
+  CLAIMS_RUNNER = <<~'RUBY'
+    $sent = []; $claims = []
+    def _INTL(s, *_a); s; end
+    module Graphics; def self.frame_count; 0; end; end
+    class FakeClient; def connected?; true; end; def send_message(m, _b = nil); $sent << m; end; end
+    module PEMK
+      def self.client; @client ||= FakeClient.new; end
+      def self.log(_m); end
+      module PrizeClaim; def self.claims; $claims; end; end
+    end
+    $game_temp = Struct.new(:in_battle).new(false)
+    load ARGV[0]
+    file = File.join(ARGV[1], "Game.rxdata")
+    sync = PEMK::Sync
+    push = ->(bytes) { File.binwrite(file, bytes); sync.push_blob(file, force: true); $sent.last }
+    out = {}
+    out[:unknown] = push.("from an older session").key?(:claims)
+    $claims = [[11, [], 400, false, false, 31, nil, 5], [12, :payday, 60, false, false, 31, {}]]
+    sync.mark_blob_watermark   # this session writes the file
+    $claims = []               # ... then the claims are answered
+    out[:named] = push.("written")[:claims]
+    sync.reset
+    out[:after_reconnect] = push.("written, again")[:claims]
+    $claims = (1..70).map { |n| [n, [], 1, false, false, 31, nil] }
+    sync.mark_blob_watermark
+    out[:newest] = push.("many")[:claims]
+    print out.inspect
+  RUBY
+
+  def test_a_save_names_the_claims_it_carries
+    out = Dir.mktmpdir do |dir|
+      IO.popen([RbConfig.ruby, "-W0", "-e", CLAIMS_RUNNER, SYNC, dir], err: %i[child out], &:read)
+    end
+    assert $?.success?, "runner crashed:\n#{out}"
+    got = eval(out) # rubocop:disable Security/Eval - our own runner's inspect
+    assert_equal false, got[:unknown], "a file from before this session: nothing named"
+    assert_equal [11, 12], got[:named], "the claims the file was written with, not the list now"
+    assert_equal [11, 12], got[:after_reconnect]
+    assert_equal (7..70).to_a, got[:newest], "the 64 newest: the battles just won"
+  end
 end
