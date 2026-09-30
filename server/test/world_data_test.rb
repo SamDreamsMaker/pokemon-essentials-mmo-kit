@@ -198,6 +198,27 @@ class WorldDataTest < Minitest::Test
     assert_nil load(doc).partner_versions("POKEMONTRAINER", "May"), "a partner computed at runtime: any"
   end
 
+  # Badge authority B0: what gives each badge.
+  def test_badge_sources
+    doc = sample
+    w = load(doc)
+    assert_equal false, w.badge_marks?
+    assert_nil w.badge_sources(0), "an export before the badges says nothing"
+    doc["badge_sources"] = {
+      "list" => [{ "badge" => 0, "map" => 10, "event" => 3, "page" => 0, "trainers" => [["LEADER_Brock", "Brock", 0]] },
+                 { "badge" => 1, "map" => 12, "event" => 5, "page" => 1 },
+                 { "badge" => 1, "common_event" => 7 },
+                 { "badge" => -1, "map" => 1, "event" => 1 }, "junk"],
+      "unknown" => [{ "map" => 12, "event" => 5, "page" => 2, "script" => "$player.badges[n] = true" }]
+    }
+    w = load(doc)
+    assert w.badge_marks?
+    assert_equal [{ map: 10, event: 3, page: 0, trainers: [["LEADER_Brock", "Brock", 0]] }], w.badge_sources(0)
+    assert_equal [{ map: 12, event: 5, page: 1, trainers: nil }, { common_event: 7 }], w.badge_sources(1)
+    assert_equal [], w.badge_sources(2), "nothing the export read gives badge 2"
+    assert_equal 1, w.badge_unknown.size
+  end
+
   def test_prize_events
     doc = sample
     doc["maps"]["7"]["objects"] = [{ "kind" => "prize", "item" => "MASTERBALL", "items" => %w[MASTERBALL PPUP],

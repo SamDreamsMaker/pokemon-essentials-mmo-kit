@@ -1,0 +1,56 @@
+require "minitest/autorun"
+require "rbconfig"
+
+# Badge authority B0 (docs/BADGE-AUTHORITY-DESIGN.md): the world export says what gives
+# each badge. A badge set at the own level of a trainer battle's win branch names that
+# battle's trainers (the demo's Brock gives badge 0 so); one set anywhere else names none;
+# a set the export cannot read is listed as unknown.
+class WorldExportBadgesPluginTest < Minitest::Test
+  EXPORT = File.expand_path("../../Plugins/PEMK/008_World/002_Export.rb", __dir__)
+
+  RUNNER = <<~'RUBY'
+    module PEMK; def self.log(_m); end; end
+    module Settings; PHONE_REMATCHES_POSSIBLE_FROM_BEGINNING = false; end
+    module GameData; module Trainer; def self.each; end; end; end
+    load ARGV[0]
+
+    Cmd  = Struct.new(:code, :parameters, :indent)
+    Page = Struct.new(:condition, :list)
+    Ev   = Struct.new(:id, :x, :y, :pages)
+    c = ->(code, params, indent = 0) { Cmd.new(code, params, indent) }
+    gym = Ev.new(3, 6, 5, [Page.new(nil, [
+      c.(111, [12, %q{TrainerBattle.start(:LEADER_Brock, "Brock")}]),
+      c.(101, ["You've earned the Boulder Badge."], 1),
+      c.(355, ["$stats.set_time_to_badge(0)"], 1),
+      c.(655, ["$player.badges[0] = true"], 1),
+      c.(411, [], 0),
+      c.(355, ["$player.badges[7] = true"], 1),        # the loss's side: no win gives it
+      c.(412, [], 0),
+      c.(111, [12, "$player.badges[2] == true"]),      # a test, not a set
+      c.(412, [], 0),
+      c.(0, [])
+    ])])
+    pair = Ev.new(4, 1, 1, [Page.new(nil, [
+      c.(111, [12, %q{TrainerBattle.start(:LEADER_A, "A", :LEADER_B, "B", 1)}]),
+      c.(355, ["$Trainer.badges[4]=true"], 1),
+      c.(412, [], 0), c.(0, [])
+    ])])
+    npc = Ev.new(5, 2, 2, [Page.new(nil, [c.(355, ["$player.badges[1] = true"]), c.(0, [])]),
+                           Page.new(nil, [c.(355, ["$player.badges[n] = true"]), c.(0, [])])])
+    print PEMK::WorldExport.badge_sources([[10, gym], [11, pair], [12, npc]]).inspect
+  RUBY
+
+  def test_what_gives_each_badge
+    out = IO.popen([RbConfig.ruby, "-W0", "-e", RUNNER, EXPORT], err: %i[child out], &:read)
+    assert $?.success?, "runner crashed:\n#{out}"
+    got = eval(out) # rubocop:disable Security/Eval - our own runner's inspect
+    list = got[:list]
+    assert_equal({ badge: 0, map: 10, event: 3, page: 0, trainers: [["LEADER_Brock", "Brock", 0]] }, list[0])
+    assert_equal({ badge: 7, map: 10, event: 3, page: 0 }, list[1], "on the loss's side: no battle gives it")
+    assert_equal({ badge: 4, map: 11, event: 4, page: 0, trainers: [["LEADER_A", "A", 0], ["LEADER_B", "B", 1]] },
+                 list[2], "a double battle: either leader's win")
+    assert_equal({ badge: 1, map: 12, event: 5, page: 0 }, list[3], "given by talking: no battle")
+    assert_equal 4, list.size, "a test of a badge is no source"
+    assert_equal [{ map: 12, event: 5, page: 1, script: "$player.badges[n] = true" }], got[:unknown]
+  end
+end

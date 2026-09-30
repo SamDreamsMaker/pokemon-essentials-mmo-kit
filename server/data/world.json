@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "generated_at": "2026-09-29T13:36:08",
+  "generated_at": "2026-09-30T23:24:41",
   "maps": {
     "1": {
       "name": "Intro",
@@ -4556,5 +4556,13 @@
       ["POKEMONTRAINER_May", "May", 0]
     ],
     "computed": false
+  },
+  "badge_sources": {
+    "list": [
+      {"badge": 0, "map": 10, "event": 3, "page": 0, "trainers": [["LEADER_Brock", "Brock", 0]]}
+    ],
+    "unknown": [
+      {"map": 3, "event": 7, "page": 0, "script": "$player.badges[i] = true"}
+    ]
   }
 }

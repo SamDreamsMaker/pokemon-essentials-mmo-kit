@@ -57,6 +57,8 @@ module PEMK
       @trainer_places  = {} # map_id => { event_id => frozen Array of [type, name, version, rematch, repeatable] } (M1a)
       @trainer_marks   = false # does the export say which battles can be fought again?
       @partners        = nil   # frozen Array of [type, name, version] the game registers as partners
+      @badge_sources   = nil   # badge => frozen Array of sources (badge authority B0); nil: not exported
+      @badge_unknown   = []    # the badge sets the export could not read
       @gifts        = {}    # [map,event_id] => frozen gift/prize object (step 6 payout gate)
       @shops        = {}    # [map,event_id] => frozen mart / bp_shop object (item authority)
       @loaded       = false
@@ -310,6 +312,23 @@ module PEMK
       @trainer_places.any? { |_, events| events.any? { |_, list| list.any? { |t| t[3] } } }
     end
 
+    # Badge authority B0: does the export say what gives each badge?
+    def badge_marks?
+      !@badge_sources.nil?
+    end
+
+    # -> the sources of +badge+: [{ map:, event:, page:, trainers: [[type, name, version]] | nil }
+    # | { common_event: }] - a source with trainers is their battle's win; one without is no
+    # battle's. [] when nothing the export read gives it (nil: not exported).
+    def badge_sources(badge)
+      return nil unless @badge_sources
+
+      @badge_sources.fetch(badge.to_i, [])
+    end
+
+    # The badge sets the export could not read (a computed index): [{ where..., script: }].
+    attr_reader :badge_unknown
+
     # Money authority: the versions of +type+ / +name+ the game registers as a partner
     # trainer (pbRegisterPartner), whose party may hold an Amulet Coin. nil when the export
     # cannot say: from before it, or a partner computed at runtime.
@@ -389,6 +408,7 @@ module PEMK
       # ... and whether its maps mark water.
       @water_marks = doc["water_marks"] == true
       @partners = load_partners(doc["partners"])
+      @badge_sources, @badge_unknown = load_badge_sources(doc["badge_sources"])
       @connections = freeze_connections(doc["connections"])
       @home  = coord_array(doc["home"], 4) || coord_array(doc["home"], 3)
       @start = coord_array(doc["start"], 3)
@@ -526,6 +546,29 @@ module PEMK
 
     # { "list" => [[type, name, version], ...], "computed" => bool } -> the list, or nil
     # when a partner is computed at runtime (or the export predates the list).
+    # -> [{ badge => [source, ...] } | nil, [unknown, ...]]
+    def load_badge_sources(doc)
+      return [nil, [].freeze] unless doc.is_a?(Hash) && doc["list"].is_a?(Array)
+
+      by_badge = Hash.new { |h, k| h[k] = [] }
+      doc["list"].each do |e|
+        next unless e.is_a?(Hash) && e["badge"].is_a?(Integer) && e["badge"] >= 0
+
+        source = if e["common_event"].is_a?(Integer)
+                   { common_event: e["common_event"] }
+                 elsif [e["map"], e["event"]].all? { |v| v.is_a?(Integer) }
+                   trainers = Array(e["trainers"]).filter_map do |t|
+                     [t[0].to_s, t[1].to_s, t[2]].freeze if t.is_a?(Array) && t.length == 3 && t[2].is_a?(Integer)
+                   end
+                   { map: e["map"], event: e["event"], page: e["page"].is_a?(Integer) ? e["page"] : 0,
+                     trainers: trainers.empty? ? nil : trainers.freeze }
+                 end
+        by_badge[e["badge"]] << source.freeze if source
+      end
+      unknown = Array(doc["unknown"]).select { |u| u.is_a?(Hash) }.map { |u| deep_freeze(u) }
+      [by_badge.transform_values(&:freeze).to_h.freeze, unknown.freeze]
+    end
+
     def load_partners(doc)
       return nil unless doc.is_a?(Hash) && doc["computed"] != true && doc["list"].is_a?(Array)
 

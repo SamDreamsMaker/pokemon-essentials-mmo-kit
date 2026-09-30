@@ -119,6 +119,8 @@ module PEMK
       doc[:water_marks] = true     # the maps say where a surfer may be (none: no water there)
       partners = (partner_registrations(all_events) rescue nil)
       doc[:partners] = partners if partners
+      badges = (badge_sources(all_events) rescue nil)   # badge authority B0: what gives each badge
+      doc[:badge_sources] = badges if badges
 
       File.open(File.expand_path(OUT_PATH), "w") { |f| f.write(pretty(doc, 0) + "\n") }
       counts.merge(:maps => maps.size, :connections => conns.size)
@@ -746,6 +748,79 @@ module PEMK
         held << (value.is_a?(Integer) && value >= cond.variable_value)
       end
       !held.empty? && held.all?
+    end
+
+    # === badges (docs/BADGE-AUTHORITY-DESIGN.md, B0) ==========================
+
+    BADGE_SET = /\$(?:player|Trainer)\.badges\[\s*(\d+)\s*\]\s*=\s*true\b/.freeze
+    BADGE_ANY = /\$(?:player|Trainer)\.badges\[[^\]]*\]\s*=[^=]/.freeze
+
+    # Where each badge is given. -> { :list => [{ :badge, :map, :event, :page, :trainers }
+    # | { :badge, :common_event }], :unknown => [{ where, :script }] }. A badge set at the
+    # own level of a trainer battle's win branch names that battle's trainers; one set
+    # anywhere else names none (no battle gives it); a set the export cannot read (a
+    # computed index) is unknown.
+    def badge_sources(all_events)
+      list = []
+      unknown = []
+      all_events.each do |map_id, event|
+        next unless event && event.respond_to?(:pages) && event.pages
+
+        event.pages.each_with_index do |pg, k|
+          next unless pg && pg.list
+
+          won = badge_win_branches(pg.list)
+          badge_scripts(pg.list) do |i, text|
+            where = { :map => map_id, :event => event.id, :page => k }
+            if (m = text.match(BADGE_SET))
+              entry = { :badge => m[1].to_i }.merge(where)
+              entry[:trainers] = won[i] if won[i]
+              list << entry
+            else
+              unknown << where.merge(:script => text.strip[0, 80])
+            end
+          end
+        end
+      end
+      Array((load_data("Data/CommonEvents.rxdata") rescue nil)).each do |ce|
+        next unless ce && ce.respond_to?(:list) && ce.list
+
+        badge_scripts(ce.list) do |_i, text|
+          m = text.match(BADGE_SET)
+          m ? list << { :badge => m[1].to_i, :common_event => ce.id } : unknown << { :common_event => ce.id, :script => text.strip[0, 80] }
+        end
+      end
+      { :list => list, :unknown => unknown }
+    end
+
+    # Yields each script line (355, 655) of +list+ that sets a badge: [index, text].
+    def badge_scripts(list)
+      list.each_with_index do |cmd, i|
+        next unless [355, 655].include?(cmd.code)
+
+        text = cmd.parameters[0].to_s
+        yield i, text if text.match?(BADGE_ANY)
+      end
+    end
+
+    # -> { command index => [[type, name, version], ...] } for the commands at the own
+    # level of each trainer battle's win branch (up to its else or its end).
+    def badge_win_branches(list)
+      won = {}
+      list.each_with_index do |cmd, i|
+        params = cmd.respond_to?(:parameters) ? cmd.parameters : nil
+        next unless cmd.code == 111 && params && params[0] == 12 && params[1].to_s.include?("TrainerBattle.start(")
+
+        trainers = battle_calls(params[1].to_s).flatten(1)
+        next if trainers.empty?
+
+        list[(i + 1)..-1].each_with_index do |c, j|
+          break if c.indent <= cmd.indent
+
+          won[i + 1 + j] = trainers if c.indent == cmd.indent + 1
+        end
+      end
+      won
     end
 
     # Money authority: the partner trainers the game registers (pbRegisterPartner), whose
