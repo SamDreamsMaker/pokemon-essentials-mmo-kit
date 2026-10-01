@@ -10,6 +10,36 @@ module PEMK
   module Presence
     @last_key = nil
     @hb = 0
+    @v2   = false   # the server keeps idle players to itself and sends leaves (login flag)
+    @sync = false   # the remotes were cleared: the next frame asks who is on the map
+    @since = 0      # frames since the last presence frame left
+
+    # A frame now and then even while moving (presence v2): a forced walk sends no step,
+    # and a map member silent for 15 s leaves it on the server.
+    KEEPALIVE_FRAMES = 300
+
+    def self.adopt_v2(value)
+      @v2 = value == true
+    end
+
+    def self.v2?
+      @v2
+    end
+
+    def self.request_sync
+      @sync = true
+    end
+
+    # Every presence frame leaves through here: the first after a clear asks for the
+    # server's snapshot of the map.
+    def self.send_frame(h)
+      if @sync && @v2
+        h[:sync] = true
+        @sync = false
+      end
+      @since = 0
+      PEMK.send_message(h)
+    end
 
     # Mirrors the priority in Game_Player#pbUpdateVehicle (008_Game_Player.rb:575);
     # "run" has no persistent flag, it's inferred from move_speed > 3.
@@ -54,7 +84,7 @@ module PEMK
       k = key_of(h)
       return if k == @last_key
       @last_key = k
-      PEMK.send_message(h)
+      send_frame(h)
     end
 
     # A position the server must have now (a prize claim is judged by it): sent even
@@ -75,16 +105,21 @@ module PEMK
 
     # Periodic re-announce so late joiners see idle players. Only fires while the
     # local player is standing still, so it never fights the per-step updates
-    # that drive smooth remote walking.
+    # that drive smooth remote walking - but under presence v2 one goes out every
+    # KEEPALIVE_FRAMES even while moving: a forced walk sends no step.
     def self.heartbeat
       return unless can_emit?
-      return if $game_player.moving?
-      @hb += 1
-      return if @hb < Config::HEARTBEAT_FRAMES
+      @since += 1
+      if $game_player.moving?
+        return unless @v2 && @since >= KEEPALIVE_FRAMES
+      else
+        @hb += 1
+        return if @hb < Config::HEARTBEAT_FRAMES
+      end
       @hb = 0
       h = build(:pos)
       @last_key = key_of(h)
-      PEMK.send_message(h)
+      send_frame(h)
     end
   end
 end

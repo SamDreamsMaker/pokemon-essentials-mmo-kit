@@ -94,6 +94,24 @@ class ReactorTest < Minitest::Test
     sock.close
   end
 
+  # A closing socket whose output never drains (a dead link, its send buffer full) is
+  # closed once CLOSE_GRACE has passed - its map would keep it until then.
+  def test_the_sweep_closes_a_closing_socket_that_never_drains
+    sock = connected
+    now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    open = Queue.new
+    @reactor.post do
+      @last_conn.closing = true
+      @last_conn.outbuf << "stuck".b                  # what a dead link never takes
+      @reactor.send(:sweep_idle, now)                  # the grace starts
+      open << @reactor.instance_variable_get(:@conns).key?(@last_conn.io)
+      @reactor.send(:sweep_idle, now + PEMK::Reactor::CLOSE_GRACE + 1)
+      open << @reactor.instance_variable_get(:@conns).key?(@last_conn.io)
+    end
+    assert_equal [true, false], [Timeout.timeout(3) { open.pop }, Timeout.timeout(3) { open.pop }]
+    sock.close
+  end
+
   def test_two_frames_in_one_write
     sock = TCPSocket.new("127.0.0.1", @reactor.port)
     sock.write(W.encode_split({ type: :ping, t: 1 }) + W.encode_split({ type: :ping, t: 2 }))

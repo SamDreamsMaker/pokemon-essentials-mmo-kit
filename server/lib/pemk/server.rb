@@ -152,6 +152,8 @@ module PEMK
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
       @zones    = Hash.new { |h, k| h[k] = Set.new }   # map_id => Set(conn); reactor-thread only
+      @zone_legacy = {}                                 # map_id => Set(conn) without presence_v2; reactor-thread only
+      @presence_swept_at = nil
       @online   = {}                                    # account_id => conn; reactor-thread only
       @pending_trades = {}                              # trade_id => rendezvous; reactor-thread only
       @peer_sessions  = {}                              # account_id => partner id (mutual); reactor-thread only
@@ -255,6 +257,9 @@ module PEMK
       @log.call("server: pickup enforcement = #{@config.pickup_enforce ? 'on' : 'off'} (M4 Layer C server-mint)")
       @log.call("server: WARNING pickup reset ALLOWED (PEMK_ALLOW_PICKUP_RESET=on) — DEV ONLY, disable in production") if @config.pickup_reset_allowed
       log_client_debug
+      @log.call("server: presence dedup = #{@config.presence_dedup ? 'on' : 'off'} " \
+                "(#{@config.presence_dedup ? "an idle player's repeats reach only older clients; " \
+                                             "a member silent #{PRESENCE_SILENCE.to_i}s leaves its map" : 'every frame to everyone'})")
       @pool.start
       @reactor.start
       @thread = Thread.new { @reactor.run_loop }
@@ -307,7 +312,7 @@ module PEMK
       # after login before this (audit): one socket could spam DB-touching frames until
       # the mailbox/pool queues ate the host. Honest clients send these at human,
       # debounced cadence, so the budgets are generous.
-      if authed && !frame_budget_ok?(conn, type)
+      if authed && !(frame_budget_ok?(conn, type) && (!PRESENCE_TYPES.include?(type) || frame_budget_ok?(conn, :presence)))
         @log.call("server: account #{authed} over budget on #{type.inspect} -> drop")
         claim_sent(conn, env[:nonce]) if type == :money_claim   # a Pay Day after it waits for it
         return
@@ -330,9 +335,13 @@ module PEMK
       flags: [10, 1.0], flag_delta: [20, 4], gift_claim: [20, 4], gift_req: [10, 1.0], gift_applied: [10, 1.0],
       encounter_req: [10, 2], catch_req: [20, 6], battle_record: [6, 1], trade_commit: [6, 2], trainer_battle_req: [10, 2],
       team_check: [10, 2], pickup_req: [20, 6], interact_claim: [30, 10], trade_applied: [6, 2], trade_owed: [4, 0.2], shop_req: [10, 2], money_claim: [10, 2],
-      pos: [40, 20], dir: [40, 20], step: [40, 20], spawn: [10, 2]
+      pos: [40, 20], dir: [40, 20], step: [40, 20], spawn: [10, 2],
+      # all presence types together: a bike is 10 steps/s - alternating types must not
+      # triple the fan-out a script can force on its map
+      presence: [40, 20]
     }.freeze
     FRAME_BUDGET_DEFAULT = [30, 10].freeze
+    PRESENCE_TYPES = %i[pos dir step spawn].freeze
 
     def frame_budget_ok?(conn, type)
       burst, rate = FRAME_BUDGETS.fetch(type, FRAME_BUDGET_DEFAULT)
@@ -3255,8 +3264,12 @@ module PEMK
     ANOMALY_SWEEP_SEC = 60
     RESIM_SWEEP_SEC   = 60
 
+    PRESENCE_SILENCE   = 15.0   # a map member silent this long has left it (presence v2)
+    PRESENCE_SWEEP_SEC = 1.0
+
     def on_tick
       sweep_trades
+      maybe_presence_sweep
       maybe_ban_sweep
       maybe_proof_sweep
       maybe_anomaly_sweep
@@ -3531,6 +3544,7 @@ module PEMK
         pickup_enforce: @config.pickup_enforce,     # M4 Layer C: client gates pickups only when on
         pickup_reset_allowed: @config.pickup_reset_allowed,    # dev-only F9 reset offered only when on
         client_debug: @config.client_debug.to_s,               # debug mode stays off (deny/autopilot) or not
+        presence_v2: @config.presence_dedup,                   # peers kept until a leave; idle repeats not sent
         battle_enforce_teams: @config.battle_enforce_teams.to_s,   # M4 Layer D D1 team-legality mode
         battle_enforce_encounters: @config.battle_enforce_encounters.to_s,   # M4 Layer D D2 encounter mode
         battle_enforce_catches: @config.battle_enforce_catches.to_s,         # M4 Layer D D3 catch mode
@@ -3626,6 +3640,12 @@ module PEMK
     # update out ONLY to same-map connections (the 500-CCU lever). Runs inline on
     # the reactor thread — cheap, in-memory, no DB. Identity is the server-trusted
     # account_id, not the client-provided :id (anti-spoof).
+    #
+    # Presence v2 (PEMK_PRESENCE_DEDUP): an idle repeat - the same allowlisted frame
+    # again - reaches only the zone's older clients (their 3 s timeout needs it). A
+    # client that keeps its peers until a leave (presence_v2) gets each change once,
+    # every peer's last frame as it enters a map (or asks: :sync), and a leave when a
+    # peer goes - or falls silent for PRESENCE_SILENCE.
     def handle_presence(conn, env, account_id)
       map = env[:map]
       return unless map.is_a?(Integer)
@@ -3641,20 +3661,88 @@ module PEMK
         return
       end
 
+      conn.data[:presence_seen] = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       old = conn.data[:map_id]
       if old && old != map
-        @zones[old].delete(conn)
-        broadcast_zone(old, conn, Wire.encode_split({ type: :leave, id: account_id }))
-        @zones.delete(old) if @zones[old].empty?   # reap AFTER the broadcast (audit: unbounded growth)
+        zone_leave(conn, old, account_id)
         conn.data[:left_map] = [old, Process.clock_gettime(Process::CLOCK_MONOTONIC)]   # gift_place
       end
-      @zones[map].add(conn)
+      joined = old != map
+      zone_join(conn, map) if joined
       conn.data[:map_id] = map
 
       # ALLOWLIST the fan-out frame instead of echoing the client's envelope: env.merge
       # would relay every extra key the client attached (up to the 64 KiB envelope cap)
       # to every peer on the map — a broadcast amplifier, and an injection surface.
-      broadcast_zone(map, conn, Wire.encode_split(presence_frame(env, account_id, map)))
+      frame   = presence_frame(env, account_id, map)
+      content = frame.reject { |k, _| k == :type }
+      dedup   = @config.presence_dedup
+      send_snapshot(conn, map) if dedup && (joined || env[:sync] == true)
+      body = Wire.encode_split(frame)
+      if dedup && !joined && conn.data[:presence_content] == content
+        broadcast_legacy(map, conn, body)   # an idle repeat
+      else
+        conn.data[:presence_content] = content
+        conn.data[:presence_body]    = body
+        broadcast_zone(map, conn, body)
+      end
+    end
+
+    # Presence zones (reactor thread). A client without presence_v2 is also in its
+    # zone's legacy set: the only members an idle repeat still reaches.
+    def zone_join(conn, map)
+      @zones[map].add(conn)
+      (@zone_legacy[map] ||= Set.new).add(conn) unless conn.data[:presence_v2]
+    end
+
+    # +conn+ leaves +map+'s zone, and its peers are told - unless the same account is
+    # still on that map through a newer session (a replaced one closing late: bind and
+    # the silence sweep clear its map first, this is the backstop).
+    def zone_leave(conn, map, account_id)
+      zone = @zones.fetch(map, nil)
+      return unless zone
+
+      zone.delete(conn)
+      if (legacy = @zone_legacy[map])
+        legacy.delete(conn)
+        @zone_legacy.delete(map) if legacy.empty?
+      end
+      live  = account_id && @online[account_id]
+      stays = live && !live.equal?(conn) && live.data[:map_id] == map
+      broadcast_zone(map, conn, Wire.encode_split({ type: :leave, id: account_id })) if account_id && !stays
+      @zones.delete(map) if zone.empty?   # reap AFTER the broadcast (audit: unbounded growth)
+    end
+
+    # Every peer's last frame on +map+, for +conn+ entering it (or asking): a v2 client
+    # sees idle players at once - no heartbeat to wait for.
+    def send_snapshot(conn, map)
+      @zones.fetch(map, nil)&.each do |peer|
+        next if peer.equal?(conn) || peer.closing
+
+        body = peer.data[:presence_body]
+        @reactor.send_frame(conn, body) if body
+      end
+    end
+
+    # A zone member silent for PRESENCE_SILENCE (a dead link the socket has not shown
+    # yet, a frozen client) leaves its map: a v2 peer would keep it for good. Its next
+    # frame brings it back, with a snapshot. At most every PRESENCE_SWEEP_SEC, O(members).
+    def maybe_presence_sweep
+      return unless @config.presence_dedup
+
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      return if @presence_swept_at && now - @presence_swept_at < PRESENCE_SWEEP_SEC
+
+      @presence_swept_at = now
+      stale = []
+      @zones.each do |map, zone|
+        zone.each { |c| stale << [c, map] if now - (c.data[:presence_seen] || now) > PRESENCE_SILENCE }
+      end
+      stale.each do |c, map|
+        c.data.delete(:map_id)
+        c.data.delete(:presence_content)
+        zone_leave(c, map, c.data[:account_id])
+      end
     end
 
     # The only fields a presence frame may carry to peers. Peers draw the player from
@@ -3670,7 +3758,11 @@ module PEMK
     end
 
     def broadcast_zone(map, sender, frame)
-      @zones[map].each { |c| @reactor.send_frame(c, frame) unless c.equal?(sender) }
+      @zones.fetch(map, nil)&.each { |c| @reactor.send_frame(c, frame) unless c.equal?(sender) }
+    end
+
+    def broadcast_legacy(map, sender, frame)
+      @zone_legacy[map]&.each { |c| @reactor.send_frame(c, frame) unless c.equal?(sender) }
     end
 
     # Relay an addressed frame to ONLY the :to account's connection, re-stamping
@@ -3780,9 +3872,13 @@ module PEMK
       previous = @online[account_id]
       if previous && !previous.equal?(conn)
         reply(previous, type: :session_replaced)
+        # its map sees the player leave now, not when its socket finally drains: a late
+        # leave would hide the new session from its peers
+        (pmap = previous.data.delete(:map_id)) && zone_leave(previous, pmap, account_id)
         @reactor.finish(previous)
       end
       conn.data[:account_id] = account_id
+      conn.data[:presence_v2] = @config.presence_dedup && Array(conn.data[:caps]).include?("presence_v2")
       @online[account_id] = conn
       @log.call("server: authed #{conn.addr} as account #{account_id}")
       return if @config.client_debug == :allow || Array(conn.data[:caps]).include?("debug_lock")
@@ -3829,9 +3925,7 @@ module PEMK
       return unless map
 
       @last_maps[aid] = map if aid && @last_maps   # M1a: a claim re-sent after a reconnect may name it
-      @zones[map].delete(conn)
-      broadcast_zone(map, conn, Wire.encode_split({ type: :leave, id: aid })) if aid
-      @zones.delete(map) if @zones[map].empty?   # reap AFTER the broadcast
+      zone_leave(conn, map, aid)
     end
 
     # A dropped account cancels any rendezvous it was part of. If a LONE committer

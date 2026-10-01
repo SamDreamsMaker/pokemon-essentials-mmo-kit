@@ -19,6 +19,7 @@ module PEMK
     IDLE_SWEEP_SEC   = 15.0   # how often the idle/pre-auth sweep runs
     PREAUTH_DEADLINE = 30.0   # seconds a socket may sit unauthenticated
     IDLE_TIMEOUT     = 300.0  # seconds an authed socket may go silent (client heartbeats ~0.5-30s)
+    CLOSE_GRACE      = 10.0   # seconds a closing socket may keep unsent output
     READ_CHUNK = 64 * 1024
     LEN_BYTES  = 4
     MAX_FRAME  = PEMK::Wire::MAX_MESSAGE_BYTES
@@ -203,9 +204,12 @@ module PEMK
     def sweep_idle(now)
       @conns.values.each do |conn|
         # A socket marked closing with nothing left to write closed only on its next
-        # read or write: a silent one (a replaced session) stayed open for good.
+        # read or write: a silent one (a replaced session) stayed open for good. One
+        # whose output never drains (a dead link, its send buffer full) goes after
+        # CLOSE_GRACE - until then its map would keep it.
         if conn.closing
-          close_conn(conn) if conn.outbuf.empty?
+          conn.data[:closing_at] ||= now
+          close_conn(conn) if conn.outbuf.empty? || now - conn.data[:closing_at] > CLOSE_GRACE
           next
         end
 
