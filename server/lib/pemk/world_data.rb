@@ -346,7 +346,7 @@ module PEMK
       return ["the exports predate the badge sources (one debug launch regenerates them)"] unless @badge_sources
 
       out = @badge_unknown.map { |u| "a badge set the export cannot read: #{badge_where(u)} (#{u['script']})" }
-      wins = Hash.new { |h, k| h[k] = [] }   # [map, event, trainer] => badges its win gives
+      wins = Hash.new { |h, k| h[k] = [] }   # [map, event, trainer] => [[badge, its page and call], ...]
       @badge_sources.sort.each do |badge, sources|
         out << "badge #{badge} is over the cap of #{badges_max}" if badges_max && badge >= badges_max
         sources.each do |s|
@@ -357,17 +357,37 @@ module PEMK
             out << "badge #{badge} is a battle against several trainers (#{where}): no replay proves it"
           elsif s[:no_money]
             out << "badge #{badge}'s battle pays nothing (#{where}): no claim proves it"
+          elsif (why = unseeded(s))
+            out << "badge #{badge}'s battle gets no seed (#{where}): #{why}"
           else
-            wins[[s[:map], s[:event], s[:trainers][0]]] << badge
+            wins[[s[:map], s[:event], s[:trainers][0]]] << [badge, [s[:page], s[:call]]]
           end
         end
       end
-      wins.each do |(map, event, t), badges|
-        next if badges.uniq.length < 2
+      # one battle giving two badges gives both; two battles with one trainer giving
+      # different badges: a win cannot say which it was
+      wins.each do |(map, event, t), given|
+        badges = given.map(&:first).uniq
+        next if badges.length < 2 || given.map(&:last).uniq.length < 2
 
-        out << "#{t[0]} #{t[1]} v#{t[2]} (map #{map} event #{event}) gives badges #{badges.uniq.join(', ')}: which, the win cannot say"
+        out << "#{t[0]} #{t[1]} v#{t[2]} (map #{map} event #{event}) gives badges #{badges.join(', ')} in different battles: " \
+               "which, the win cannot say"
       end
       out
+    end
+
+    # Why a win source's battle is fought with no seed - so no replay proves it - or nil.
+    # The server seeds a trainer it places, alone in its call; the client asks no seed
+    # with a partner at the player's side (the game registers one, or computes one).
+    def unseeded(source)
+      type, name, version = source[:trainers][0]
+      return "the export does not place #{type} #{name}" unless trainer_place(source[:map], source[:event], type, name, version)
+      return "#{type} #{name} shares a battle call" unless trainer_alone?(source[:map], source[:event], type, name, version)
+      return "it is a #{source[:size]} battle" if source[:size]
+      return nil if source[:no_partner]
+      return "a partner may join it (the export cannot list the game's partners)" if @partners.nil?
+
+      "a partner may join it (#{@partners.map { |t| t.first(2).join(' ') }.join(', ')})" unless @partners.empty?
     end
 
     def badge_where(u)
@@ -609,7 +629,9 @@ module PEMK
                      [t[0].to_s, t[1].to_s, t[2]].freeze if t.is_a?(Array) && t.length == 3 && t[2].is_a?(Integer)
                    end
                    { map: e["map"], event: e["event"], page: e["page"].is_a?(Integer) ? e["page"] : 0,
-                     trainers: trainers.empty? ? nil : trainers.freeze, no_money: e["no_money"] == true }
+                     trainers: trainers.empty? ? nil : trainers.freeze, no_money: e["no_money"] == true,
+                     no_partner: e["no_partner"] == true, size: e["size"].is_a?(String) ? e["size"].freeze : nil,
+                     call: e["call"].is_a?(Integer) ? e["call"] : nil }
                  end
         by_badge[e["badge"]] << source.freeze if source
       end

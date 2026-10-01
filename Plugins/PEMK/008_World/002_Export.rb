@@ -712,6 +712,7 @@ module PEMK
     end
 
     NO_MONEY = /setBattleRule\([^)]*["']nomoney["']/i.freeze
+    NO_PARTNER = /setBattleRule\([^)]*["']nopartner["']/i.freeze
 
     # -> [once, page, no_money, the calls naming it]
     def note_battle(seen, id, page, won, free, call)
@@ -753,7 +754,16 @@ module PEMK
     # === badges (docs/BADGE-AUTHORITY-DESIGN.md, B0) ==========================
 
     BADGE_SET = /(?:\$player|\$Trainer|pbPlayer)\.badges\[\s*(\d+)\s*\]\s*=\s*true\b/.freeze
-    BADGE_ANY = /(?:\$player|\$Trainer|pbPlayer)\.badges\[[^\]]*\]\s*=[^=]/.freeze
+    # A write to the badges: one (any index, any value) or all at once (assigned, filled,
+    # pushed...). "=(?!=)" counts "badges[1]=$player.badges[2]=true" as two writes.
+    BADGE_WRITE = /\s*(?:\[[^\]]*\]\s*=(?!=)|=(?!=)|\|\|=|<<|\.(?:fill|push|unshift|insert|concat|replace|map!|collect!|clear|delete_at|store)\b)/.freeze
+    BADGE_ANY = /(?:\$player|\$Trainer|pbPlayer)\.badges#{BADGE_WRITE}/.freeze
+    # ... and in the game's code, the player's own too (@badges, self.badges) - but not the
+    # engine's new game, which sets them all false.
+    CODE_BADGE_ANY = /(?:(?:\$player|\$Trainer|pbPlayer|self)\.badges|@badges)#{BADGE_WRITE}/.freeze
+    BADGE_RESET = /\A@badges\s*=\s*\[\s*false\s*\]\s*\*\s*\d+\z/.freeze
+    # The sizes a battle rule sets; a battle that is not a single one asks no seed.
+    SIZES = %w[single 1v1 1v2 2v1 1v3 3v1 double 2v2 2v3 3v2 triple 3v3].freeze
     # A win branch's condition: the battle call itself, nothing around it (a "!" would make
     # the branch the loss's).
     WIN_CONDITION = /\A\s*TrainerBattle\.start\([^()]*\)\s*\z/.freeze
@@ -775,16 +785,18 @@ module PEMK
           won = badge_win_branches(pg.list)
           badge_scripts(pg.list) do |i, text|
             where = { :map => map_id, :event => event.id, :page => k }
-            if (m = text.match(BADGE_SET))
-              entry = { :badge => m[1].to_i }.merge(where)
+            badge_sets(text) do |badge|
+              entry = { :badge => badge }.merge(where)
               if won[i]
                 entry[:trainers] = won[i][0]
-                entry[:no_money] = true if won[i][1]   # no prize, so no claim to prove it
+                entry[:call] = won[i][4]                 # the page's battle command that gives it
+                entry[:no_money] = true if won[i][1]     # no prize, so no claim to prove it
+                entry[:no_partner] = true if won[i][2]   # fought alone: a partner never joins
+                entry[:size] = won[i][3] if won[i][3]    # not a single battle: no seed is asked
               end
               list << entry
-            else
-              unknown << where.merge(:script => text.strip[0, 80])
             end
+            unknown << where.merge(:script => text.strip[0, 80]) unless badge_read?(text)
           end
         end
       end
@@ -792,27 +804,74 @@ module PEMK
         next unless ce && ce.respond_to?(:list) && ce.list
 
         badge_scripts(ce.list) do |_i, text|
-          m = text.match(BADGE_SET)
-          m ? list << { :badge => m[1].to_i, :common_event => ce.id } : unknown << { :common_event => ce.id, :script => text.strip[0, 80] }
+          badge_sets(text) { |badge| list << { :badge => badge, :common_event => ce.id } }
+          unknown << { :common_event => ce.id, :script => text.strip[0, 80] } unless badge_read?(text)
         end
       end
       { :list => list, :unknown => unknown + badge_code_writes }
     end
 
-    # Yields each script line (355, 655) of +list+ that sets a badge: [index, text].
+    # Yields the badge of each literal set on a script line (a line may set several).
+    def badge_sets(text)
+      badge_code(text).scan(BADGE_SET) { |m| yield m[0].to_i }
+    end
+
+    # Is every badge write on the line a literal set? (else the export cannot say which)
+    def badge_read?(text)
+      code = badge_code(text)
+      code.scan(BADGE_ANY).length == code.scan(BADGE_SET).length
+    end
+
+    # Yields each script line (355, 655) of +list+ that writes the badges: [index, text].
     def badge_scripts(list)
       list.each_with_index do |cmd, i|
         next unless [355, 655].include?(cmd.code)
 
         text = cmd.parameters[0].to_s
-        yield i, text if text.match?(BADGE_ANY)
+        yield i, text if badge_code(text).match?(BADGE_ANY)
       end
+    end
+
+    # The code of a script line: its comment cut, its strings emptied - a badge a message
+    # or a comment names sets nothing.
+    def badge_code(text)
+      out = +""
+      quote = nil
+      escaped = false
+      text.each_char do |ch|
+        if quote
+          if escaped
+            escaped = false
+          elsif ch == "\\"
+            escaped = true
+          elsif ch == quote
+            quote = nil
+            out << ch
+          end
+          next
+        end
+        break if ch == "#"
+
+        quote = ch if ch == '"' || ch == "'"
+        out << ch
+      end
+      out
+    end
+
+    # The size the rules set for the next battle when it is not a single one, else nil
+    # (the last size set wins).
+    def battle_size(rules)
+      size = rules.scan(/setBattleRule\(([^)]*)\)/).flat_map { |(args)| args.scan(/["']([^"']+)["']/).flatten }
+                  .map(&:downcase).select { |r| SIZES.include?(r) }.last
+      size && !%w[single 1v1].include?(size) ? size : nil
     end
 
     # -> { command index => [[type, name, version], ...] } for the commands at the own
     # level of each trainer battle's win branch (up to its else or its end).
     # ... with whether that battle pays nothing (a "noMoney" rule since the page's last
-    # battle): -> { index => [trainers, no_money] }
+    # battle), is fought alone (a "noPartner" rule), its size when not a single one, and
+    # the index of its battle command:
+    # -> { index => [trainers, no_money, no_partner, size, call] }
     def badge_win_branches(list)
       won = {}
       rules = +""   # the scripts since the last battle: the next one's rules
@@ -824,6 +883,8 @@ module PEMK
         next unless cmd.code == 111 && params[0] == 12 && params[1].to_s.include?("TrainerBattle.start(")
 
         free = rules.match?(NO_MONEY)
+        alone = rules.match?(NO_PARTNER)
+        size = battle_size(rules)
         rules = +""
         next unless params[1].to_s.match?(WIN_CONDITION)
 
@@ -833,35 +894,46 @@ module PEMK
         list[(i + 1)..-1].each_with_index do |c, j|
           break if c.indent <= cmd.indent
 
-          won[i + 1 + j] = [trainers, free] if c.indent == cmd.indent + 1
+          won[i + 1 + j] = [trainers, free, alone, size, i] if c.indent == cmd.indent + 1
         end
       end
       won
     end
 
-    # The game's own code that sets a badge (plugins, edited engine scripts): unknown to the
-    # server. PEMK's own and the debug menu aside. -> [{ :file, :line, :script }]
+    # The game's own code that writes the badges (plugins, edited engine scripts): unknown
+    # to the server. -> [{ :file, :line, :script }]
     def badge_code_writes
-      files = Dir.glob("Plugins/**/*.rb").reject { |f| f.start_with?("Plugins/PEMK/") } +
-              Dir.glob("Data/Scripts/**/*.rb").reject { |f| f.include?("020_Debug") }
-      files.sort.flat_map do |f|
-        File.readlines(f).each_with_index.filter_map do |text, i|
-          next if text.lstrip.start_with?("#") || !text.match?(BADGE_ANY)
+      code_lines.filter_map do |f, n, text|
+        code = badge_code(text).strip
+        next if !code.match?(CODE_BADGE_ANY) || code.match?(BADGE_RESET)
 
-          { :file => f, :line => i + 1, :script => text.strip[0, 80] }
-        end
+        { :file => f, :line => n, :script => text.strip[0, 80] }
       end
     rescue StandardError
       []
     end
 
+    # The game's own code - its plugins and engine scripts, PEMK's own and the debug menu
+    # aside: [file, line number, text] for each line that is not a comment.
+    def code_lines
+      files = Dir.glob("Plugins/**/*.rb").reject { |f| f.start_with?("Plugins/PEMK/") } +
+              Dir.glob("Data/Scripts/**/*.rb").reject { |f| f.include?("020_Debug") }
+      files.sort.flat_map do |f|
+        File.readlines(f).each_with_index.filter_map { |text, i| [f, i + 1, text] unless text.lstrip.start_with?("#") }
+      end
+    end
+
     # Money authority: the partner trainers the game registers (pbRegisterPartner), whose
-    # party may hold an Amulet Coin that doubles a prize - in map events and common events.
+    # party may hold an Amulet Coin that doubles a prize - in map events, common events and
+    # the game's own code (the engine's definition aside). A partner at the player's side
+    # also means a battle with no seed (badge authority).
     def partner_registrations(maps_events)
       scripts = maps_events.filter_map { |_, event| event && event.respond_to?(:pages) && event.pages && event_script(event) }
       Array((load_data("Data/CommonEvents.rxdata") rescue nil)).each do |ce|
         scripts << list_script(ce.list) if ce && ce.respond_to?(:list) && ce.list
       end
+      code = (code_lines rescue []).filter_map { |_, _, text| text if text.include?("pbRegisterPartner") && !text.match?(/\bdef\s+pbRegisterPartner\b/) }
+      scripts << code.join("\n") unless code.empty?
       partners_in(scripts.compact)
     end
 

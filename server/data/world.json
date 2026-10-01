@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "generated_at": "2026-09-30T23:24:41",
+  "generated_at": "2026-10-01T13:49:38",
   "maps": {
     "1": {
       "name": "Intro",
@@ -4559,7 +4559,7 @@
   },
   "badge_sources": {
     "list": [
-      {"badge": 0, "map": 10, "event": 3, "page": 0, "trainers": [["LEADER_Brock", "Brock", 0]]}
+      {"badge": 0, "map": 10, "event": 3, "page": 0, "trainers": [["LEADER_Brock", "Brock", 0]], "call": 3}
     ],
     "unknown": [
       {"map": 3, "event": 7, "page": 0, "script": "$player.badges[i] = true"}
