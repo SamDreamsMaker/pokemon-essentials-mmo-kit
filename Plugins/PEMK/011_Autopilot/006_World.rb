@@ -21,6 +21,8 @@
 # (how many the bag holds). And save.
 # set_raw_var ID VALUE / set_raw_switch ID on|off change a value without the game's
 # setter (what a memory edit does), to test that the server repairs it.
+# partner TYPE NAME VERSION | none puts a trainer at the player's side (pbRegisterPartner);
+# set_debug on|off sets $DEBUG as an event's script does (a locking server undoes it).
 #===============================================================================
 module PEMK
   module Autopilot

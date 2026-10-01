@@ -417,4 +417,22 @@ check(results, "setters_refuse_before_a_game_is_loaded") do
   r && r["ok"] == false
 end
 
+# Where the server denies debug mode (PEMK::DebugLock, 003_Game), the game's own text
+# entry runs: the autopilot could not answer it.
+module PEMK
+  module DebugLock
+    @allowed = true
+    def self.autopilot_allowed?; @allowed; end
+    def self.allowed=(value); @allowed = value; end
+  end
+end
+
+check(results, "a_denied_autopilot_leaves_text_entry_to_the_game") do
+  PEMK::DebugLock.allowed = false
+  got = [pbEnterText("Your name?", 1, 7, ""), pbMessageFreeText("Hi", "", false, 10),
+         PokemonBagScreen.new(FakeBag.new([nil, [[:POTION, 1]]])).pbChooseItemScreen(nil)]
+  PEMK::DebugLock.allowed = true
+  got == %i[ui ui bag_ui] && PEMK::Autopilot::TextEntry.awaiting.nil? && PEMK::Autopilot::ItemChoice.awaiting.nil?
+end
+
 puts JSON.generate(results)

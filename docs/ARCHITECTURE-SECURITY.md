@@ -338,7 +338,8 @@ item balls:
   **new account** whose pickup rows are empty (FK cascade on account delete). So
   enforcement is safe to default on — real players never hit a stale-dup wall. The
   only wipe path is a **dev/QA F9 tool** (`PEMK: Reset my pickups`), honored **only**
-  when the server was booted with `PEMK_ALLOW_PICKUP_RESET=on` (off in production);
+  when the server was booted with `PEMK_ALLOW_PICKUP_RESET=on` (off in production) -
+  and reachable only where debug mode is allowed (`PEMK_CLIENT_DEBUG=allow`);
   a client-obeyed reset is deliberately *not* offered — it would be an infinite
   item re-farm.
 

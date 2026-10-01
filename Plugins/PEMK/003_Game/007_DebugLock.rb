@@ -33,7 +33,9 @@ module PEMK
       return unless level
 
       first = @level.nil?
+      denied = level == :deny && @level != :deny
       @level = level if first || level == :deny   # deny wins: the autopilot stays read-only
+      (PEMK::Autopilot.disarm if PEMK::Autopilot.active?) if denied && defined?(PEMK::Autopilot)
       return unless first
 
       trace_var(:$DEBUG) { |on| turn_off if on }
@@ -58,6 +60,10 @@ module PEMK
       @noticed = true
       map = ($game_map ? $game_map.map_id : nil) rescue nil
       PEMK.log("debug: turned off#{map ? " on map #{map}" : ''} - this server keeps debug mode off")
+      # the player is told on a server that denies it (the autotest's level says nothing:
+      # a message box would wait for a key after each relaunch)
+      return unless @level == :deny
+
       (PEMK::NetStatus.notify(:debug_off, _INTL("Debug mode is off on this server.")) rescue nil)
     end
   end

@@ -33,7 +33,11 @@ module PEMK
       module_function
 
       def advance?
-        @advance || BattleControl.mode != :keys
+        Autopilot.driving? && (@advance || BattleControl.mode != :keys)
+      end
+
+      def advance=(on)
+        @advance = on ? true : false
       end
 
       # --- conditions ---------------------------------------------------------
@@ -355,6 +359,8 @@ if PEMK::Autopilot.active? && defined?(PokemonBagScreen) &&
     alias_method :pemk_ap_orig_pbChooseItemScreen, :pbChooseItemScreen
 
     def pbChooseItemScreen(proc = nil)
+      return pemk_ap_orig_pbChooseItemScreen(proc) unless PEMK::Autopilot.driving?
+
       PEMK::Autopilot::ItemChoice.ask(@bag, proc)
     end
   end
@@ -367,7 +373,7 @@ if PEMK::Autopilot.active? && defined?(PokemonMart_Scene) &&
     alias_method :pemk_ap_orig_pbChooseSellItem, :pbChooseSellItem
 
     def pbChooseSellItem
-      return pemk_ap_orig_pbChooseSellItem unless @subscene && $bag
+      return pemk_ap_orig_pbChooseSellItem unless @subscene && $bag && PEMK::Autopilot.driving?
 
       PEMK::Autopilot::ItemChoice.ask($bag, nil)
     end
@@ -377,14 +383,20 @@ end
 if PEMK::Autopilot.active?
   if defined?(pbEnterText) && !defined?(pemk_ap_orig_pbEnterText)
     alias pemk_ap_orig_pbEnterText pbEnterText
-    def pbEnterText(helptext, minlength, maxlength, initialText = "", _mode = 0, _pokemon = nil, _nofadeout = false)
+    def pbEnterText(helptext, minlength, maxlength, initialText = "", mode = 0, pokemon = nil, nofadeout = false)
+      unless PEMK::Autopilot.driving?
+        return pemk_ap_orig_pbEnterText(helptext, minlength, maxlength, initialText, mode, pokemon, nofadeout)
+      end
+
       PEMK::Autopilot::TextEntry.ask(helptext, minlength, maxlength, initialText)
     end
   end
 
   if defined?(pbMessageFreeText) && !defined?(pemk_ap_orig_pbMessageFreeText)
     alias pemk_ap_orig_pbMessageFreeText pbMessageFreeText
-    def pbMessageFreeText(message, currenttext, passwordbox, maxlength, _width = 240)
+    def pbMessageFreeText(message, currenttext, passwordbox, maxlength, width = 240)
+      return pemk_ap_orig_pbMessageFreeText(message, currenttext, passwordbox, maxlength, width) unless PEMK::Autopilot.driving?
+
       PEMK::Autopilot::TextEntry.ask(message, 0, maxlength, currenttext, passwordbox)
     end
   end

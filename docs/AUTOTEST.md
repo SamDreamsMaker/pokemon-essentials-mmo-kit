@@ -98,6 +98,7 @@ Then, from Git Bash or WSL: `tools/autopilot/ap.sh autopilot/ap1 <verb> [args]`.
 | `set_raw_var`, `set_raw_switch`, `hold_saves on\|off` | change a value the way a memory edit does; keep the save from reaching the server, to kill the game before it lands |
 | `pc_deposit`, `pc_withdraw`, `get_pc`, `give_held`, `take_held`, `get_held` | move items between the bag, the PC and a party Pokemon the way the engine does, and read them back |
 | `partner TYPE NAME VERSION`, `partner none` | put a trainer at the player's side the way an event does (`pbRegisterPartner`), or take them away |
+| `set_debug on\|off` | set `$DEBUG` the way an event's script does (the stock demo's house helper): a server that keeps debug mode off undoes it at once |
 | `fast`, `advance`, `abort` | skip animations and key-wait windows, cancel a running command |
 
 `verbs` lists them all.

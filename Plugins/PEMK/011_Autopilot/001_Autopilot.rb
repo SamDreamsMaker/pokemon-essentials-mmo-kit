@@ -54,6 +54,28 @@ module PEMK
       !@dir.nil?
     end
 
+    # Active, and not denied by the server (PEMK::DebugLock): it may drive the game -
+    # keys, battles, text entry, item choice. Denied, the game is the player's alone.
+    def driving?
+      active? && (!defined?(PEMK::DebugLock) || PEMK::DebugLock.autopilot_allowed?)
+    end
+
+    # The server denied it (DebugLock, at login): the running command ends, and every
+    # setting a command left on goes - held keys, a battle mode, auto-advance, held saves.
+    def disarm
+      if @job
+        respond(@job_id, "ok" => false, "error" => "locked by the server (PEMK_CLIENT_DEBUG=deny)")
+        @job = nil
+      end
+      VInput.release_all
+      (BattleControl.mode = :keys) if defined?(BattleControl)
+      (Actions.advance = false) if defined?(Actions)
+      (SaveHold.on = false) if defined?(SaveHold) && SaveHold.on
+      PEMK.log("autopilot: disarmed - the server denies debug mode; it only reads now")
+    rescue StandardError => e
+      PEMK.log("autopilot: disarm error #{e.class}: #{e.message}")
+    end
+
     def dir
       @dir
     end

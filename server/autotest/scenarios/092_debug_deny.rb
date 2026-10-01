@@ -7,7 +7,8 @@ Autotest.scenario "where the server denies debug mode, the autopilot only reads"
                   flags: { PEMK_CLIENT_DEBUG: "deny" }, budget: 240 do |s|
   s.check("the server says so at boot") { s.server.grep(/client debug = deny/).any? }
   a = s.player(:a)
-  # past the title to the load screen, where the client logs in (keys work until then)
+  # a debug launch skips the title; the load screen logs in with the configured account
+  # (a key is harmless until then, refused after)
   st = s.wait_for("the login", seconds: 120) do
     now = a.state
     next now if now.dig("online", "logged_in")

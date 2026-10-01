@@ -547,4 +547,29 @@ check(results, "wait_accepts_seconds") do
   r && r["ok"] && Graphics.ticks - start >= 60
 end
 
+# Where the server denies debug mode (PEMK::DebugLock, 003_Game): disarmed at login, the
+# autopilot leaves the battles, the keys and the messages to the player.
+module PEMK
+  module DebugLock
+    @allowed = true
+    def self.autopilot_allowed?; @allowed; end
+    def self.allowed=(value); @allowed = value; end
+  end
+end
+
+check(results, "a_disarmed_autopilot_leaves_the_game_alone") do
+  ap = PEMK::Autopilot
+  ap::BattleControl.mode = :auto
+  ap::Actions.advance = true
+  ap::VInput.hold(ap::VInput.key("USE"), nil)
+  driving = ap.driving? && ap::Actions.advance? && !ap::VInput.held_names.empty?
+  PEMK::DebugLock.allowed = false
+  gated = !ap::Actions.advance?     # denied: no auto-advance, even before the disarm
+  ap.disarm
+  after = [ap.driving?, ap::Actions.advance?, ap::BattleControl.mode, ap::VInput.held_names]
+  PEMK::DebugLock.allowed = true
+  after[1] = ap::Actions.advance?   # its own setting is off too, not only the gate
+  driving && gated && after == [false, false, :keys, []]
+end
+
 puts JSON.generate(results)
