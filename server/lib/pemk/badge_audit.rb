@@ -73,21 +73,28 @@ module PEMK
       end.flat_map { |c| wins_in(c) }.uniq.sum { |b| 1 << b }
     end
 
-    # -> the badges the account's grants own (badge_grants)
+    # -> the badges the account's grants own (badge_grants; a revoked one owns nothing)
     def granted_bits(account_id)
-      @db[:badge_grants].where(account_id: account_id).select_map(:badge).uniq.sum { |b| 1 << b }
+      @db[:badge_grants].where(account_id: account_id).exclude(evidence: "revoked").select_map(:badge).uniq
+                        .sum { |b| 1 << b }
     end
 
     # B2's boot pass for one account whose ledger holds +held+: what it owns, at the first
-    # cutover (+cutover+) its badges from before the authority too. -> { owned:, legacy:,
-    # proof: { badge => claim nonce }, pending:, refused:, unprovable:, waiting: [[badge,
-    # why], ...] } - waiting: a claim whose record is not in yet
+    # cutover (+cutover+) its badges from before the authority too - none the operator
+    # revoked, nor a win proven before the revocation. -> { owned:, legacy:, proof: { badge
+    # => claim nonce }, pending:, refused:, unprovable:, waiting: [[badge, why], ...] } -
+    # waiting: a claim whose record is not in yet
     def plan(account_id, held, cutover:)
       granted = granted_bits(account_id)
-      legacy = cutover ? legacy_of(account_id, held) & ~granted : 0
+      revoked = @db[:badge_grants].where(account_id: account_id, evidence: "revoked").select_hash(:badge, :granted_at)
+      legacy = cutover ? legacy_of(account_id, held) & ~granted & ~revoked.keys.sum { |b| 1 << b } : 0
       proof = {}
       proven_claims(account_id).each do |c|
-        wins_in(c).each { |b| proof[b] ||= c[:nonce] if (granted | legacy)[b].zero? }
+        wins_in(c).each do |b|
+          next if revoked[b] && !(c[:proof_at] && c[:proof_at] > revoked[b])
+
+          proof[b] ||= c[:nonce] if (granted | legacy)[b].zero?
+        end
       end
       owned = granted | legacy | proof.keys.sum { |b| 1 << b }
       pending = pending_bits(account_id) & ~owned
@@ -202,7 +209,7 @@ module PEMK
     def proven_claims(account_id)
       @db[:money_claims].where(account_id: account_id, kind: KINDS, verdict: MoneyClaims::KEYED, proof: "proven",
                                map: @world.badge_maps)
-                        .select(:nonce, :trainers).all
+                        .select(:nonce, :trainers, :proof_at).all
     end
 
     # The badges the account held before the authority judged it: its baseline - a bit a

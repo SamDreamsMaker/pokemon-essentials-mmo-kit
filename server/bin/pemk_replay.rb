@@ -42,15 +42,24 @@ bd_path = ENV["PEMK_BATTLE_DATA"] || File.join(server_root, "data", "battle_data
 battle_data = (PEMK::BattleData.new(bd_path) rescue nil)
 $audit = battle_data&.loaded? ? PEMK::TeamAudit.new(battle_data) : nil
 puts "replay: no battle data at #{bd_path} - trainer teams checked without it" unless $audit
-# Badge authority B2 (PEMK_BADGE_AUTHORITY=on, as the server's): the badges a record may
-# say the player had - the owned ones, and past them its earlier wins waiting for their
-# replay, or that no replay could prove (the badge sources). Otherwise: no more than owned.
+# Badge authority B2 - PEMK_BADGE_AUTHORITY=on as the server's, or (unset) the server has cut
+# over to owning the badges: the badges a record may say the player had are the owned ones,
+# and past them its earlier wins no replay could prove or still waiting for their replay
+# (the badge sources). Otherwise: no more than owned (P4).
+badge_mode = ENV["PEMK_BADGE_AUTHORITY"].to_s.strip.downcase
+owns = badge_mode.empty? ? (db.table_exists?(:badge_cutover) && !db[:badge_cutover].empty?) : badge_mode == "on"
 $badges = nil
-if ENV["PEMK_BADGE_AUTHORITY"].to_s.strip.downcase == "on"
+if owns
   world = (PEMK::WorldData.new(ENV["PEMK_WORLD"] || File.join(server_root, "data", "world.json")) rescue nil)
   $badges = world&.badge_marks? ? PEMK::BadgeAudit.new(db, world) : :unknown
 end
-$waiting = {}   # record ids said to wait, this run (said once)
+puts "replay: a record's badges - " +
+     case $badges
+     when nil      then "no more than the server owns"
+     when :unknown then "WARNING the server owns them, but the world export has no badge sources: any past the owned unprovable"
+     else               "the owned, then earlier wins unprovable or waiting for their replay (badge authority)"
+     end
+$waiting = {}   # record id => when it began waiting, this run (said once)
 
 # Replayable statuses only. walk_mismatch / no_log / mode_mismatch are TRIAGE
 # evidence — never silently overwritten; REPLAY_ID alone still respects that
@@ -158,13 +167,14 @@ def replay_row(db, row, dry:)
     result = { verdict: :mismatch, detail: why } if why
   end
   # Badge authority B2: a record saying the player had badges that earlier wins, still
-  # waiting for their replay, will give waits for them - judged on a count that is decided.
-  badge_facts = { badges: $badges, record_id: row[:id], record_at: row[:created_at] }
+  # waiting for their replay, will give waits for them - judged on a count that is decided,
+  # at most ten minutes from when it began waiting.
+  badge_facts = { badges: $badges, record_id: row[:id], record_at: $waiting[row[:id]] || Time.now }
   if !result && rec.is_a?(Hash) && rec[:kind] == "trainer" && rec[:init].is_a?(Hash)
     excess = PEMK::ProofChecks.badge_excess(db, row[:account_id], rec[:init][:badges], **badge_facts)
     if excess&.first == :defer
       puts "  ##{row[:id]}: waits - #{excess[1]}" unless $waiting[row[:id]]
-      $waiting[row[:id]] = true
+      $waiting[row[:id]] ||= badge_facts[:record_at]
       return :deferred
     end
   end

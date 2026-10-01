@@ -79,4 +79,8 @@ Autotest.scenario "the server owns the badges",
     answer[:type] == :econ_rej && answer[:value].zero? &&
       s.db[:economy_balances].where(account_id: rogue.account_id, field: "badges").get(:balance).to_i.zero?
   end
+ensure
+  # the autotest database's other scenarios run a server that does not own the badges: its
+  # replay tool, told nothing, follows the cutover mark
+  s.db[:badge_cutover].delete
 end

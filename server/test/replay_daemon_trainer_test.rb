@@ -26,6 +26,7 @@ class ReplayDaemonTrainerTest < Minitest::Test
     @db[:battle_records].delete
     @db[:trainer_battles].delete
     @db[:money_claims].delete
+    @db[:badge_cutover].delete
     @db[:monster_transfers].delete rescue nil
     @db[:monsters].delete
     @db[:enforcement_events].delete rescue nil
@@ -105,6 +106,10 @@ class ReplayDaemonTrainerTest < Minitest::Test
     id = counting.(2002, 4)
     assert_equal "walk_ok", replay(id, on)[:replay_status], "no verdict yet"
     assert_match(/##{id}: waits - 1 badges in the record, the server knows 0, 1 more wait for their replay/, @out)
+    @db[:badge_cutover].insert(id: 1, at: Time.now)   # the server owns the badges: the daemon told nothing follows it
+    assert_equal "walk_ok", replay(id)[:replay_status]
+    assert_match(/the owned, then earlier wins unprovable or waiting for their replay/, @out)
+    @db[:badge_cutover].delete
     refute_equal "walk_ok", replay(id)[:replay_status], "the authority off: nothing waits (no more than owned, P4)"
     @db[:money_claims].where(nonce: 1).update(proof: "proven")   # its win proven: the badge owned
     @db[:economy_balances].insert(account_id: @me, field: "badges", balance: 0b1, last_seq: 0)

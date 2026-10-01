@@ -2371,20 +2371,23 @@ module PEMK
       nil
     end
 
-    # The accounts the boot pass looks at: at the cutover, every one holding or granted a
-    # badge; after it, those whose ledger is not their grants (a period with the authority
-    # off) and those with a win proven since the last whole pass (a proof settled while
-    # the authority did not enforce) - each with any proven win at the cutover.
+    # The accounts the boot pass looks at: at the cutover, every one holding, granted or
+    # with a baseline of a badge (a stale frame may have zeroed its ledger); after it, those
+    # whose ledger is not their grants (a period with the authority off) and those with a
+    # win proven since the last whole pass (a proof settled while it did not enforce) -
+    # each with any proven win at the cutover.
     def badge_boot_accounts(cutover, since)
       held = @db[:economy_balances].where(field: "badges").select_hash(:account_id, :balance)
       granted = Hash.new(0)
-      @db[:badge_grants].select(:account_id, :badge).each { |g| granted[g[:account_id]] |= 1 << g[:badge] }
+      @db[:badge_grants].exclude(evidence: "revoked").select(:account_id, :badge)
+                        .each { |g| granted[g[:account_id]] |= 1 << g[:badge] }
       proven = @db[:money_claims].where(kind: BadgeAudit::KINDS, verdict: MoneyClaims::KEYED, proof: "proven",
                                         map: @world.badge_maps)
       proven = proven.where { proof_at > since } if since && !cutover
       ids = proven.distinct.select_map(:account_id)
       ids += if cutover
-               held.select { |_, b| b.to_i != 0 }.keys + granted.keys
+               held.select { |_, b| b.to_i != 0 }.keys + granted.keys +
+                 @db[:badge_baselines].exclude(mask: 0).select_map(:account_id)
              else
                (held.keys | granted.keys).select { |id| held[id].to_i != granted[id] }
              end
@@ -2450,7 +2453,9 @@ module PEMK
 
     # A refusal flags the account once per frame, when nothing keeps the server from owning
     # the badges (else the game itself may give one); a win no replay can prove, too, from
-    # a client that asks for its battles' seeds - an honest one waits for them.
+    # a client that asks for its battles' seeds - an honest one waits for them while
+    # online, so a link lost as a gym battle begins is its one honest case (two flags open
+    # a review, and the operator grants it).
     def badge_flags(account_id, verdicts, seeds: true)
       return unless @badge_sure
 

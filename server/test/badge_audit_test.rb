@@ -172,7 +172,8 @@ class BadgeAuditTest < Minitest::Test
     claim(2, trainers: [liam], seeded: false)   # Liam's, claimed with no seed: never shown
     assert_equal :refuted, excess.(3), "a win claimed with no seed covers nothing"
     claim(3, trainers: [liam], proof: "unprovable", record: true)   # Liam's, shown, then not replayable
-    assert_equal :unprovable, excess.(3)
+    assert_equal :unprovable, excess.(2), "covered by the unprovable win alone"
+    assert_equal :defer, excess.(3), "a win waiting for its replay needed too: its verdict decides"
     assert_equal :refuted, excess.(3, id: @db[:battle_records].max(:id)), "a win recorded after it covers nothing"
     assert_equal :refuted, excess.(4)
     assert_equal :unprovable, excess.(2, :unknown), "no badge sources to tell"
@@ -209,6 +210,24 @@ class BadgeAuditTest < Minitest::Test
     claim(3, trainers: [liam], seeded: false)   # ... and Liam claimed with no seed
     @db[:money_claims].where(nonce: 1).delete
     assert_equal [[2, "the win over CAMPER Liam was claimed with no seed"]], audit.plan(@me, 0b100, cutover: false)[:unprovable]
+  end
+
+  # The operator's revocation stands at the next boot pass: no legacy, no proof made before
+  # it - a win proven after it grants the badge again.
+  def test_a_revocation_stands
+    world2 = world("list" => [*SOURCES["list"], { "badge" => 2, "map" => 10, "event" => 4, "page" => 0,
+                                                   "trainers" => [["CAMPER", "Liam", 0]] }], "unknown" => [])
+    audit = PEMK::BadgeAudit.new(@db, world2)
+    liam = ["CAMPER", "Liam", 0, 10, 4]
+    claim(1, trainers: [liam], proof: "proven", seeded: false)
+    @db[:money_claims].where(nonce: 1).update(proof_at: Time.now - 60)
+    @db[:badge_grants].insert(account_id: @me, badge: 2, evidence: "revoked", granted_at: Time.now - 30)
+    @db[:badge_grants].insert(account_id: @me, badge: 0, evidence: "revoked", granted_at: Time.now - 30)
+    plan = audit.plan(@me, 0b101, cutover: true)
+    assert_equal 0, plan[:owned], "revoked: neither its legacy bit nor its earlier proof"
+    @db[:money_claims].where(nonce: 1).update(proof_at: Time.now)
+    assert_equal 0b100, audit.plan(@me, 0, cutover: false)[:owned], "proven after the revocation: granted again"
+    assert_equal 0, audit.granted_bits(@me), "a revoked grant owns nothing"
   end
 
   # B2 grants a badge at its win's proof: a fresh login voiding the claim after takes it not.

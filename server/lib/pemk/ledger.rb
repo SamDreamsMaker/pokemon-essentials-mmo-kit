@@ -133,24 +133,26 @@ module PEMK
       set_badges(account_id, reason: reason, grants: grants, now: now) { |cur| cur | mask }
     end
 
-    # The badges the ledger holds become exactly +mask+. -> the mask after
-    def set_badge_bits(account_id, mask, reason:, grants: [], now: Time.now)
-      set_badges(account_id, reason: reason, grants: grants, now: now) { |_cur| mask }
-    end
-
     # The boot pass: +add+ set and +remove+ cleared, under the lock - a bit granted since
     # the plan was made (its row there) stays. -> the mask after
     def rebase_badge_bits(account_id, add:, remove:, reason:, grants: [], now: Time.now)
       set_badges(account_id, reason: reason, grants: grants, now: now) do |cur|
-        granted = @db[:badge_grants].where(account_id: account_id).select_map(:badge).sum { |b| 1 << b }
+        granted = @db[:badge_grants].where(account_id: account_id).exclude(evidence: "revoked")
+                                    .select_map(:badge).sum { |b| 1 << b }
         (cur | add) & ~(remove & ~granted)
       end
     end
 
-    # The operator takes badges back: their bits and their grants. -> the mask after
-    def revoke_bits(account_id, mask, reason:, now: Time.now)
+    # The operator takes badges back: their bits, their grants kept as revoked - a win
+    # proven before grants them no more (a restart's boot pass with it), one proven after
+    # does. -> the mask after
+    def revoke_bits(account_id, mask, reason:, source: nil, now: Time.now)
       set_badges(account_id, reason: reason, now: now) do |cur|
-        @db[:badge_grants].where(account_id: account_id, badge: (0...mask.bit_length).select { |b| mask[b] == 1 }).delete
+        (0...mask.bit_length).select { |b| mask[b] == 1 }.each do |b|
+          @db[:badge_grants].insert_conflict(target: %i[account_id badge],
+                                             update: { evidence: "revoked", source: source, claim_nonce: nil, granted_at: now })
+                            .insert(account_id: account_id, badge: b, evidence: "revoked", source: source, granted_at: now)
+        end
         cur & ~mask
       end
     end
@@ -192,8 +194,13 @@ module PEMK
         cur = rows.for_update.get(:balance).to_i
         value = yield(cur)
         grants.each do |g|
-          @db[:badge_grants].insert_conflict(target: %i[account_id badge])
-                            .insert(g.merge(account_id: account_id, granted_at: g[:granted_at] || now))
+          row = { evidence: nil, source: nil, claim_nonce: nil }.merge(g).merge(account_id: account_id,
+                                                                                granted_at: g[:granted_at] || now)
+          # a grant stands; a revoked one gives way to a new grant
+          @db[:badge_grants].insert_conflict(target: %i[account_id badge],
+                                             update: row.slice(:evidence, :source, :claim_nonce, :granted_at),
+                                             update_where: { Sequel[:badge_grants][:evidence] => "revoked" })
+                            .insert(row)
         end
         if value != cur
           low = @db[:economy_ledger].where(account_id: account_id, field: "badges").min(:seq) || 0

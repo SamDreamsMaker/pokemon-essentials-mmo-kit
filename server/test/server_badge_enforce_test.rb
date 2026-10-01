@@ -280,8 +280,11 @@ class ServerBadgeEnforceTest < Minitest::Test
     proven_claim(b, LIAM, 5, voided: true)
     c = account("c@t.co")   # granted badge 1, lost in a period the authority was off
     @db[:badge_grants].insert(account_id: c, badge: 1, evidence: "operator", granted_at: Time.now)
+    h = account("h@t.co")   # badge 0 held before the authority judged it - a stale save's frame zeroed it since
+    put_badges(h, 0)
+    @db[:badge_baselines].insert(account_id: h, mask: 0b1, taken_at: Time.now)
     start_server({}, enforce: false)
-    assert(logs.any? { |l| l.include?("(dry run) boot pass (the cutover): 3 account(s)") }, "a shadow boot only says it")
+    assert(logs.any? { |l| l.include?("(dry run) boot pass (the cutover): 4 account(s)") }, "`on` held back only says it")
     assert_equal 0b11, @db[:economy_balances].where(account_id: a, field: "badges").get(:balance)
 
     @server.instance_variable_set(:@money_enforce, true)
@@ -289,7 +292,7 @@ class ServerBadgeEnforceTest < Minitest::Test
     @server.send(:badge_boot_pass)
     held = ->(id) { @db[:economy_balances].where(account_id: id, field: "badges").get(:balance).to_i }
     grants = ->(id) { @db[:badge_grants].where(account_id: id).order(:badge).select_map(%i[badge evidence]) }
-    assert_equal [0b11, 0b11, 0b10], [held.(a), held.(b), held.(c)]
+    assert_equal [0b11, 0b11, 0b10, 0b1], [held.(a), held.(b), held.(c), held.(h)]
     assert_equal [[0, "legacy"], [1, "legacy"]], grants.(a)
     assert_equal [[0, "legacy"], [1, "proof"]], grants.(b)
     assert_equal [[1, "operator"]], grants.(c)

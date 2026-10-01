@@ -62,7 +62,13 @@ class LedgerTest < Minitest::Test
     assert_equal [[-1, 0b10, "badge:proof:7"], [5, 0b1, "unattributed"]], rows.map { |r| r.values_at(:seq, :delta, :reason) }
     assert_equal 5, @db[:economy_balances].where(account_id: @acct, field: "badges").get(:last_seq), "the client's seq stays"
     assert_equal [[1, "proof", 7]], @db[:badge_grants].where(account_id: @acct).select_map(%i[badge evidence claim_nonce])
-    assert_equal 0b1, @led.set_badge_bits(@acct, 0b1, reason: "cutover")
+    grant = -> { @db[:badge_grants].where(account_id: @acct, badge: 1).get(%i[evidence claim_nonce]) }
+    assert_equal 0b1, @led.revoke_bits(@acct, 0b10, reason: "badge:revoked", source: "op: a mistake")
+    assert_equal ["revoked", nil], grant.(), "kept as revoked"
+    @led.grant_bits(@acct, 0b10, reason: "proof", grants: [{ badge: 1, evidence: "proof", claim_nonce: 8 }])
+    assert_equal ["proof", 8], grant.(), "a new grant takes a revoked one's place"
+    @led.grant_bits(@acct, 0b10, reason: "again", grants: [{ badge: 1, evidence: "operator" }])
+    assert_equal ["proof", 8], grant.(), "a grant stands"
   end
 
   # Two grants at once, each reading before the other writes: the row's lock makes the
@@ -84,7 +90,7 @@ class LedgerTest < Minitest::Test
   # The boot pass's write: what it adds and removes, under the lock - a bit granted since
   # its plan was made stays.
   def test_rebase_keeps_a_grant_made_since
-    @led.set_badge_bits(@acct, 0b0110, reason: "before")
+    @led.grant_bits(@acct, 0b0110, reason: "before")
     @db[:badge_grants].insert(account_id: @acct, badge: 2, evidence: "operator", granted_at: Time.now)
     assert_equal 0b1101, @led.rebase_badge_bits(@acct, add: 0b1001, remove: 0b0110, reason: "badge:boot"),
                  "badge 1 removed, 0 and 3 added - badge 2 granted meanwhile stays"

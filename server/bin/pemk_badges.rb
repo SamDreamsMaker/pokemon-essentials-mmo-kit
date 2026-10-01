@@ -59,7 +59,7 @@ when "grant", "revoke"
                                                     grants: [{ badge: badge, evidence: "operator", source: source }])
     puts "granted badge #{badge} to #{label.(acct)} - it owns #{bits.(after)}"
   else
-    after = ledger.revoke_bits(acct[:id], 1 << badge, reason: "badge:revoked:#{source}"[0, 64])
+    after = ledger.revoke_bits(acct[:id], 1 << badge, reason: "badge:revoked:#{operator}"[0, 64], source: source)
     puts "revoked badge #{badge} of #{label.(acct)} - it owns #{bits.(after)}"
   end
 

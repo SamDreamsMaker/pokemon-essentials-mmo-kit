@@ -170,9 +170,10 @@ module PEMK
     # The badges a record says the player had (+claimed+), past the ones the server owns
     # (badge authority B2: what the client showed may hold wins not proven yet). +badges+:
     # a BadgeAudit - past the owned, the wins recorded before this record (+record_id+, its
-    # own never) waiting for their replay (:defer: judged once decided, at most DEFER_MAX
-    # after +record_at+), or shown and no replay could prove since (:unprovable); :unknown
-    # (no badge sources to tell) - unprovable; nil - refuted. -> nil (within) | [verdict, why]
+    # own never) shown and no replay could prove since (:unprovable), or still waiting for
+    # their replay (:defer: judged once decided, at most DEFER_MAX after +record_at+, when
+    # the record began waiting); :unknown (no badge sources to tell) - unprovable; nil -
+    # refuted. -> nil (within) | [verdict, why]
     def badge_excess(db, account_id, claimed, badges: nil, record_id: nil, record_at: nil, now: Time.now)
       return nil unless claimed.is_a?(Integer)
 
@@ -184,17 +185,18 @@ module PEMK
       return [:unprovable, "#{why} (no badge sources to tell)"] if badges == :unknown
       return [:refuted, why] unless badges
 
-      pending = badges.pending_bits(account_id, before: record_id) & ~mask
-      more = pending.to_s(2).count("1")
-      if claimed <= owned + more
-        return [:defer, "#{why}, #{more} more wait for their replay"] unless record_at && now - record_at > DEFER_MAX
+      lost = badges.unprovable_bits(account_id, before: record_id) & ~mask
+      unproven = lost.to_s(2).count("1")
+      return [:unprovable, "#{why}; past them, wins no replay can prove"] if claimed <= owned + unproven
 
-        return [:unprovable, "#{why}; past them, wins whose replay never came"]
-      end
-      lost = badges.unprovable_bits(account_id, before: record_id) & ~mask & ~pending
-      return [:unprovable, "#{why}; past them, wins no replay can prove"] if claimed <= owned + more + lost.to_s(2).count("1")
+      # the rest needs wins still waiting for their replay: their verdict decides (a made-up
+      # one refuted would have covered nothing) - at most DEFER_MAX after +record_at+ (when
+      # the record began waiting), then unprovable
+      more = (badges.pending_bits(account_id, before: record_id) & ~mask & ~lost).to_s(2).count("1")
+      return [:refuted, why] if claimed > owned + unproven + more
+      return [:defer, "#{why}, #{more} more wait for their replay"] unless record_at && now - record_at > DEFER_MAX
 
-      [:refuted, why]
+      [:unprovable, "#{why}; past them, wins whose replay never came"]
     end
 
     # A record's words, safe to store and print: its bytes may be anything a client sent

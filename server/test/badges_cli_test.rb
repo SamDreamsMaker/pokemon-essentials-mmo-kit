@@ -54,7 +54,8 @@ class BadgesCliTest < Minitest::Test
     assert ok, out
     assert_match(/revoked badge 2 of account #{@id} \(gym@t\.co\) - it owns none/, out)
     assert_equal 0, @db[:economy_balances].where(account_id: @id, field: "badges").get(:balance)
-    assert_empty @db[:badge_grants].where(account_id: @id).all
+    assert_equal [[2, "revoked", "tester: granted by mistake"]],
+                 @db[:badge_grants].where(account_id: @id).select_map(%i[badge evidence source]), "kept as revoked"
   end
 
   def test_unowned
