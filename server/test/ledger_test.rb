@@ -94,6 +94,10 @@ class LedgerTest < Minitest::Test
     @db[:badge_grants].insert(account_id: @acct, badge: 2, evidence: "operator", granted_at: Time.now)
     assert_equal 0b1101, @led.rebase_badge_bits(@acct, add: 0b1001, remove: 0b0110, reason: "badge:boot"),
                  "badge 1 removed, 0 and 3 added - badge 2 granted meanwhile stays"
+    @led.revoke_bits(@acct, 0b100, reason: "revoked")
+    @led.grant_bits(@acct, 0b100, reason: "a frame's bit, as a period off left it")
+    assert_equal 0b1001, @led.rebase_badge_bits(@acct, add: 0, remove: 0b100, reason: "badge:boot"),
+                 "a revoked grant keeps nothing"
   end
 
   def test_a_held_frame_moves_nothing

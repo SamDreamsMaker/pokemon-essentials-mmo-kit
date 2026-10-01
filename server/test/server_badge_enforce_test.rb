@@ -302,6 +302,9 @@ class ServerBadgeEnforceTest < Minitest::Test
 
     d = account("d@t.co")   # a badge gained while the authority was off, after the cutover
     put_badges(d, 0b1)
+    r = account("r@t.co")   # a badge the operator revoked: its ledger and its grants agree
+    put_badges(r, 0)
+    @db[:badge_grants].insert(account_id: r, badge: 0, evidence: "revoked", granted_at: Time.now)
     audit = @server.instance_variable_get(:@badge_audit)
     real = audit.method(:plan)
     planned = []
