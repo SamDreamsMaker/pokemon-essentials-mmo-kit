@@ -101,11 +101,11 @@ class ReactorTest < Minitest::Test
     now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     open = Queue.new
     @reactor.post do
-      @last_conn.closing = true
       @last_conn.outbuf << "stuck".b                  # what a dead link never takes
-      @reactor.send(:sweep_idle, now)                  # the grace starts
+      def (@last_conn.io).write_nonblock(*) = :wait_writable   # and never will
+      @reactor.finish(@last_conn)                      # the grace starts here
       open << @reactor.instance_variable_get(:@conns).key?(@last_conn.io)
-      @reactor.send(:sweep_idle, now + PEMK::Reactor::CLOSE_GRACE + 1)
+      @reactor.send(:sweep_idle, Process.clock_gettime(Process::CLOCK_MONOTONIC) + PEMK::Reactor::CLOSE_GRACE + 1)
       open << @reactor.instance_variable_get(:@conns).key?(@last_conn.io)
     end
     assert_equal [true, false], [Timeout.timeout(3) { open.pop }, Timeout.timeout(3) { open.pop }]

@@ -11,7 +11,7 @@ module PEMK
     @last_key = nil
     @hb = 0
     @v2   = false   # the server keeps idle players to itself and sends leaves (login flag)
-    @sync = false   # the remotes were cleared: the next frame asks who is on the map
+    @sync = 0       # the remotes were cleared: the next frames ask who is on the map
     @since = 0      # frames since the last presence frame left
 
     # A frame now and then even while moving (presence v2): a forced walk sends no step,
@@ -26,16 +26,20 @@ module PEMK
       @v2
     end
 
+    # The next frames ask who is on the map - three, as the server may drop one (its
+    # rate budget) or refuse it (a snap-back); it answers one at most every few seconds.
+    SYNC_FRAMES = 3
+
     def self.request_sync
-      @sync = true
+      @sync = SYNC_FRAMES
     end
 
-    # Every presence frame leaves through here: the first after a clear asks for the
-    # server's snapshot of the map.
+    # Every presence frame leaves through here: the first ones after a clear ask for
+    # the server's snapshot of the map.
     def self.send_frame(h)
-      if @sync && @v2
+      if @sync > 0 && @v2
         h[:sync] = true
-        @sync = false
+        @sync -= 1
       end
       @since = 0
       PEMK.send_message(h)

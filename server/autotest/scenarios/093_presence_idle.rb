@@ -17,15 +17,15 @@ Autotest.scenario "a player standing still stays drawn and costs nothing", budge
       a.remote_names.include?("Bob") && b.remote_names.include?("Alice")
     end
   end
-  a.ap!("wait 600", timeout: 30)   # ten seconds, nobody moves
+  a.ap!("wait 10s", timeout: 30)   # nobody moves
   s.check("ten seconds standing still later, still drawn") do
     a.remote_names.include?("Bob") && b.remote_names.include?("Alice")
   end
-  b.warp!(7, 20, 10)               # elsewhere on the same map
+  b.warp!(7, 20, 11)               # elsewhere on the same map (a walkable tile)
   s.check("a step elsewhere on the map is seen") do
     s.wait_for("Bob's new tile", seconds: 15) do
       r = Array(a.state["remotes"]).find { |x| x["name"] == "Bob" }
-      r && [r["x"], r["y"]] == [20, 10]
+      r && [r["x"], r["y"]] == [20, 11]
     end
   end
   b.warp!(10, 6, 6)                # another map (the gym, out of the Camper's sight)

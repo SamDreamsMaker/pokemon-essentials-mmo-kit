@@ -473,7 +473,7 @@ module PEMK
                 if @reactor.alive?(conn)   # never bind a dead conn into @online
                   bind(conn, acct[:id])
                   conn.data[:last_pos] = pos if pos
-                  reply_body(conn, { type: :login_ok, account_id: acct[:id], token: token }.merge(rec), blob)
+                  reply_body(conn, { type: :login_ok, account_id: acct[:id], token: token }.merge(rec, presence_v2: conn.data[:presence_v2] ? true : false), blob)
                 end
               end
             end
@@ -510,7 +510,7 @@ module PEMK
                 if @reactor.alive?(conn)   # never bind a dead conn into @online
                   bind(conn, account_id)
                   conn.data[:last_pos] = pos if pos
-                  reply_body(conn, { type: :auth_ok, account_id: account_id }.merge(rec), blob)
+                  reply_body(conn, { type: :auth_ok, account_id: account_id }.merge(rec, presence_v2: conn.data[:presence_v2] ? true : false), blob)
                 end
               end
             end
@@ -3266,6 +3266,7 @@ module PEMK
 
     PRESENCE_SILENCE   = 15.0   # a map member silent this long has left it (presence v2)
     PRESENCE_SWEEP_SEC = 1.0
+    SYNC_EVERY         = 5.0    # a client asks who is on its map at most this often
 
     def on_tick
       sweep_trades
@@ -3544,7 +3545,6 @@ module PEMK
         pickup_enforce: @config.pickup_enforce,     # M4 Layer C: client gates pickups only when on
         pickup_reset_allowed: @config.pickup_reset_allowed,    # dev-only F9 reset offered only when on
         client_debug: @config.client_debug.to_s,               # debug mode stays off (deny/autopilot) or not
-        presence_v2: @config.presence_dedup,                   # peers kept until a leave; idle repeats not sent
         battle_enforce_teams: @config.battle_enforce_teams.to_s,   # M4 Layer D D1 team-legality mode
         battle_enforce_encounters: @config.battle_enforce_encounters.to_s,   # M4 Layer D D2 encounter mode
         battle_enforce_catches: @config.battle_enforce_catches.to_s,         # M4 Layer D D3 catch mode
@@ -3661,24 +3661,26 @@ module PEMK
         return
       end
 
-      conn.data[:presence_seen] = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      # :map_id is the last map this connection reported (money claims, gifts and the
+      # reconnect fallback read it); :zone the map whose presence zone it is in - none
+      # while a replaced or silent session is out of it.
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      conn.data[:presence_seen] = now
       old = conn.data[:map_id]
-      if old && old != map
-        zone_leave(conn, old, account_id)
-        conn.data[:left_map] = [old, Process.clock_gettime(Process::CLOCK_MONOTONIC)]   # gift_place
-      end
-      joined = old != map
-      zone_join(conn, map) if joined
+      conn.data[:left_map] = [old, now] if old && old != map   # gift_place
       conn.data[:map_id] = map
+      zone = conn.data[:zone]
+      zone_leave(conn, zone, account_id) if zone && zone != map
+      joined = conn.data[:zone] != map
+      zone_join(conn, map) if joined
 
       # ALLOWLIST the fan-out frame instead of echoing the client's envelope: env.merge
       # would relay every extra key the client attached (up to the 64 KiB envelope cap)
       # to every peer on the map — a broadcast amplifier, and an injection surface.
       frame   = presence_frame(env, account_id, map)
       content = frame.reject { |k, _| k == :type }
+      body    = Wire.encode_split(frame)
       dedup   = @config.presence_dedup
-      send_snapshot(conn, map) if dedup && (joined || env[:sync] == true)
-      body = Wire.encode_split(frame)
       if dedup && !joined && conn.data[:presence_content] == content
         broadcast_legacy(map, conn, body)   # an idle repeat
       else
@@ -3686,6 +3688,20 @@ module PEMK
         conn.data[:presence_body]    = body
         broadcast_zone(map, conn, body)
       end
+      # last: a snapshot that overflows the joiner's output closes it, and the leave that
+      # close sends must follow its frame, not precede it (a ghost on every peer)
+      send_snapshot(conn, map) if dedup && (joined || sync_due?(conn, env, now))
+    end
+
+    # A client asks who is on its map (:sync) after it cleared its remotes - and again on
+    # the next frames, in case one was dropped. Honoured at most every SYNC_EVERY: each
+    # snapshot is a frame per peer.
+    def sync_due?(conn, env, now)
+      return false unless env[:sync] == true
+      return false if (at = conn.data[:sync_at]) && now - at < SYNC_EVERY
+
+      conn.data[:sync_at] = now
+      true
     end
 
     # Presence zones (reactor thread). A client without presence_v2 is also in its
@@ -3693,12 +3709,14 @@ module PEMK
     def zone_join(conn, map)
       @zones[map].add(conn)
       (@zone_legacy[map] ||= Set.new).add(conn) unless conn.data[:presence_v2]
+      conn.data[:zone] = map
     end
 
     # +conn+ leaves +map+'s zone, and its peers are told - unless the same account is
     # still on that map through a newer session (a replaced one closing late: bind and
-    # the silence sweep clear its map first, this is the backstop).
+    # the silence sweep take it out first, this is the backstop).
     def zone_leave(conn, map, account_id)
+      conn.data.delete(:zone) if conn.data[:zone] == map
       zone = @zones.fetch(map, nil)
       return unless zone
 
@@ -3708,20 +3726,18 @@ module PEMK
         @zone_legacy.delete(map) if legacy.empty?
       end
       live  = account_id && @online[account_id]
-      stays = live && !live.equal?(conn) && live.data[:map_id] == map
+      stays = live && !live.equal?(conn) && live.data[:zone] == map
       broadcast_zone(map, conn, Wire.encode_split({ type: :leave, id: account_id })) if account_id && !stays
       @zones.delete(map) if zone.empty?   # reap AFTER the broadcast (audit: unbounded growth)
     end
 
-    # Every peer's last frame on +map+, for +conn+ entering it (or asking): a v2 client
-    # sees idle players at once - no heartbeat to wait for.
+    # Every peer's last frame on +map+, in one write, for +conn+ entering it (or asking):
+    # a v2 client sees idle players at once - no heartbeat to wait for.
     def send_snapshot(conn, map)
-      @zones.fetch(map, nil)&.each do |peer|
-        next if peer.equal?(conn) || peer.closing
-
-        body = peer.data[:presence_body]
-        @reactor.send_frame(conn, body) if body
+      bodies = @zones.fetch(map, nil)&.filter_map do |peer|
+        peer.data[:presence_body] unless peer.equal?(conn) || peer.closing
       end
+      @reactor.send_frame(conn, bodies.join) if bodies && !bodies.empty?
     end
 
     # A zone member silent for PRESENCE_SILENCE (a dead link the socket has not shown
@@ -3739,9 +3755,12 @@ module PEMK
         zone.each { |c| stale << [c, map] if now - (c.data[:presence_seen] || now) > PRESENCE_SILENCE }
       end
       stale.each do |c, map|
-        c.data.delete(:map_id)
         c.data.delete(:presence_content)
         zone_leave(c, map, c.data[:account_id])
+        # it drops everyone too: out of the zone it hears no leave, and the snapshot of
+        # its return only adds who is there then
+        leaves = @zones.fetch(map, nil)&.map { |p| Wire.encode_split({ type: :leave, id: p.data[:account_id] }) }
+        @reactor.send_frame(c, leaves.join) if leaves && !leaves.empty?
       end
     end
 
@@ -3874,8 +3893,14 @@ module PEMK
         reply(previous, type: :session_replaced)
         # its map sees the player leave now, not when its socket finally drains: a late
         # leave would hide the new session from its peers
-        (pmap = previous.data.delete(:map_id)) && zone_leave(previous, pmap, account_id)
+        (pzone = previous.data[:zone]) && zone_leave(previous, pzone, account_id)
         @reactor.finish(previous)
+      end
+      # a socket logging in again (as another account, or with other caps) leaves its
+      # map, and comes back with its next frame under what it is now
+      if (zone = conn.data[:zone])
+        zone_leave(conn, zone, conn.data[:account_id])
+        conn.data.delete(:presence_content)
       end
       conn.data[:account_id] = account_id
       conn.data[:presence_v2] = @config.presence_dedup && Array(conn.data[:caps]).include?("presence_v2")
@@ -3925,7 +3950,7 @@ module PEMK
       return unless map
 
       @last_maps[aid] = map if aid && @last_maps   # M1a: a claim re-sent after a reconnect may name it
-      zone_leave(conn, map, aid)
+      (zone = conn.data[:zone]) && zone_leave(conn, zone, aid)
     end
 
     # A dropped account cancels any rendezvous it was part of. If a LONE committer

@@ -142,6 +142,7 @@ module PEMK
       return if conn.nil? || !@conns.key?(conn.io)
 
       conn.closing = true
+      conn.data[:closing_at] ||= Process.clock_gettime(Process::CLOCK_MONOTONIC)   # CLOSE_GRACE counts from here
       conn.outbuf.empty? ? close_conn(conn) : write_conn(conn)
     end
 

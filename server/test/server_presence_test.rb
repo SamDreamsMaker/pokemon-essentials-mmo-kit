@@ -63,12 +63,31 @@ class ServerPresenceTest < Minitest::Test
     [c, recv_env(c)[:account_id]]
   end
 
-  # Every frame already waiting on +sock+ -> [env, ...]
-  def drain(sock, quiet = 0.3)
+  # The frames coming to +sock+ -> [env, ...]: the first within +first+ seconds (a
+  # loaded host is slow), the next ones until +quiet+ seconds pass with none. A check
+  # that expects nothing passes a short +first+.
+  def drain(sock, quiet = 0.3, first: 2.0)
     out = []
-    loop { out << recv_env(sock, quiet) }
+    loop { out << recv_env(sock, out.empty? ? first : quiet) }
   rescue Timeout::Error
     out
+  end
+
+  def nothing(sock)
+    drain(sock, first: 0.6)
+  end
+
+  # login_ok's :presence_v2 for a new account logging in with +caps+
+  def login_flag(user, caps)
+    probe = TCPSocket.new("127.0.0.1", @port)
+    send_env(probe, { type: :register, email: "#{user}@t.co", password: "password1" })
+    recv_env(probe)
+    login = { type: :login, email: "#{user}@t.co", password: "password1" }
+    login[:caps] = caps if caps
+    send_env(probe, login)
+    recv_env(probe)[:presence_v2]
+  ensure
+    probe&.close
   end
 
   def on_reactor(&block)
@@ -103,23 +122,19 @@ class ServerPresenceTest < Minitest::Test
   # Presence v2: an idle repeat reaches only the older clients (their timeout needs
   # it); a move reaches everyone.
   def test_an_idle_repeat_reaches_only_older_clients
-    probe = TCPSocket.new("127.0.0.1", @port)
-    send_env(probe, { type: :register, email: "Aflag@t.co", password: "passwordA1" })
-    recv_env(probe)
-    send_env(probe, { type: :login, email: "Aflag@t.co", password: "passwordA1" })
-    assert_equal true, recv_env(probe)[:presence_v2], "login says the server keeps idle players to itself"
-    probe.close
+    assert_equal true, login_flag("Aflag", %w[presence_v2]), "login says idle repeats are kept from it"
+    assert_equal false, login_flag("Bflag", nil), "not to a client that cannot keep its peers"
     a, a_id = open_authed("Av2", "passwordA1", caps: %w[presence_v2])
     b, = open_authed("Bv2", "passwordB1", caps: %w[presence_v2])
     c, = open_authed("Cold", "passwordC1")
     send_env(a, { type: :pos, map: 5, x: 1, y: 1 })
     send_env(b, { type: :pos, map: 5, x: 2, y: 2 })
     send_env(c, { type: :pos, map: 5, x: 3, y: 3 })
-    [a, b, c].each { |s| drain(s) }
+    [a, b, c].each { |s| nothing(s) }
 
     send_env(a, { type: :pos, map: 5, x: 1, y: 1 })   # the heartbeat of a player standing still
     assert_equal [[a_id, 1]], drain(c).map { |e| e.values_at(:id, :x) }, "the older client still hears it"
-    assert_empty drain(b), "a v2 client does not"
+    assert_empty nothing(b), "a v2 client does not"
     send_env(a, { type: :step, map: 5, x: 1, y: 2 })
     assert_equal [a_id], drain(b).map { |e| e[:id] }
     assert_equal [a_id], drain(c).map { |e| e[:id] }
@@ -132,7 +147,7 @@ class ServerPresenceTest < Minitest::Test
     b, b_id = open_authed("Bent", "passwordB1", caps: %w[presence_v2])
     send_env(a, { type: :pos, map: 6, x: 1, y: 1 })
     send_env(b, { type: :pos, map: 6, x: 2, y: 2 })
-    [a, b].each { |s| drain(s) }
+    [a, b].each { |s| nothing(s) }
     d, d_id = open_authed("Dent", "passwordD1", caps: %w[presence_v2])
     send_env(d, { type: :pos, map: 6, x: 4, y: 4 })
     assert_equal [a_id, b_id].sort, drain(d).map { |e| e[:id] }.sort, "everyone already on the map"
@@ -149,16 +164,63 @@ class ServerPresenceTest < Minitest::Test
     b, b_id = open_authed("Bsil", "passwordB1", caps: %w[presence_v2])
     send_env(a, { type: :pos, map: 7, x: 1, y: 1 })
     send_env(b, { type: :pos, map: 7, x: 2, y: 2 })
-    [a, b].each { |s| drain(s) }
+    [a, b].each { |s| nothing(s) }
     on_reactor do                                    # the reactor's own tick sweeps it
       conn = @server.instance_variable_get(:@online)[a_id]
       conn.data[:presence_seen] -= PEMK::Server::PRESENCE_SILENCE + 1
       @server.instance_variable_set(:@presence_swept_at, nil)
     end
-    assert_equal [[:leave, a_id]], drain(b, 1.5).map { |e| e.values_at(:type, :id) }
+    assert_equal [[:leave, a_id]], drain(b).map { |e| e.values_at(:type, :id) }
+    assert_equal [[:leave, b_id]], drain(a).map { |e| e.values_at(:type, :id) },
+                 "it drops everyone too: out of the zone, it would hear no leave"
+    assert_equal 7, on_reactor { @server.instance_variable_get(:@online)[a_id].data[:map_id] },
+                 "its last map stays known (claims, the reconnect fallback)"
     send_env(a, { type: :pos, map: 7, x: 1, y: 1 })
     assert_equal [b_id], drain(a).map { |e| e[:id] }, "back on its map: who is there"
     assert_equal [a_id], drain(b).map { |e| e[:id] }
+    [a, b].each(&:close)
+  end
+
+  # A snapshot that overflows its joiner's output closes it: its frame must go out
+  # before the leave that close sends, or every peer keeps a ghost.
+  def test_a_snapshot_that_closes_its_joiner_leaves_no_ghost
+    a, a_id = open_authed("Aghost", "passwordA1", caps: %w[presence_v2])
+    b, = open_authed("Bghost", "passwordB1", caps: %w[presence_v2])
+    send_env(b, { type: :pos, map: 4, x: 2, y: 2 })
+    nothing(b)
+    reactor = @server.instance_variable_get(:@reactor)
+    @server.define_singleton_method(:send_snapshot) { |c, _map| reactor.send(:close_conn, c) }   # it overflows
+    send_env(a, { type: :pos, map: 4, x: 1, y: 1 })
+    assert_equal [[:pos, a_id], [:leave, a_id]], drain(b).map { |e| e.values_at(:type, :id) }
+    [a, b].each(&:close)
+  end
+
+  # A socket logging in again as another account leaves its map under the first one.
+  def test_a_socket_logging_in_again_leaves_its_map
+    a, a_id = open_authed("Aagain", "passwordA1", caps: %w[presence_v2])
+    b, = open_authed("Bagain", "passwordB1", caps: %w[presence_v2])
+    send_env(a, { type: :pos, map: 3, x: 1, y: 1 })
+    send_env(b, { type: :pos, map: 3, x: 2, y: 2 })
+    [a, b].each { |s| nothing(s) }
+    send_env(a, { type: :register, email: "Yagain@t.co", password: "passwordY1" })
+    recv_env(a)
+    send_env(a, { type: :login, email: "Yagain@t.co", password: "passwordY1", caps: %w[presence_v2] })
+    assert_equal :login_ok, recv_env(a)[:type]
+    assert_equal [[:leave, a_id]], drain(b).map { |e| e.values_at(:type, :id) }
+    [a, b].each(&:close)
+  end
+
+  # A :sync is honoured at most every SYNC_EVERY: each is a frame per peer.
+  def test_a_sync_is_honoured_once_every_few_seconds
+    a, = open_authed("Async", "passwordA1", caps: %w[presence_v2])
+    b, b_id = open_authed("Bsync", "passwordB1", caps: %w[presence_v2])
+    send_env(a, { type: :pos, map: 2, x: 1, y: 1 })
+    send_env(b, { type: :pos, map: 2, x: 2, y: 2 })
+    [a, b].each { |s| nothing(s) }
+    send_env(a, { type: :pos, map: 2, x: 1, y: 1, sync: true })
+    assert_equal [b_id], drain(a).map { |e| e[:id] }
+    send_env(a, { type: :pos, map: 2, x: 1, y: 1, sync: true })
+    assert_empty nothing(a), "a second ask within a few seconds gets no second snapshot"
     [a, b].each(&:close)
   end
 
@@ -170,7 +232,7 @@ class ServerPresenceTest < Minitest::Test
     a.close                                          # registered; this socket goes
     b, = open_authed("Brep", "passwordB1", caps: %w[presence_v2])
     send_env(b, { type: :pos, map: 8, x: 2, y: 2 })
-    drain(b)
+    nothing(b)
     dead = on_reactor do                             # the account on map 8 over a link that never drains
       c = PEMK::Reactor::Conn.new(Object.new, "dead")
       c.data.merge!(account_id: a_id, presence_v2: true, map_id: 8,
@@ -183,10 +245,11 @@ class ServerPresenceTest < Minitest::Test
     send_env(a2, { type: :login, email: "Arep@t.co", password: "passwordA1", caps: %w[presence_v2] })
     assert_equal :login_ok, recv_env(a2)[:type]
     assert_equal [[:leave, a_id]], drain(b).map { |e| e.values_at(:type, :id) }, "at once, the old link still open"
+    assert_equal 8, on_reactor { dead.data[:map_id] }, "its last map stays known for the reconnect fallback"
     send_env(a2, { type: :pos, map: 8, x: 1, y: 1 })
     assert_equal [[:pos, a_id]], drain(b).map { |e| e.values_at(:type, :id) }
     on_reactor { @server.send(:on_close, dead) }   # the dead link finally goes
-    assert_empty drain(b, 0.6), "no late leave hides the new session"
+    assert_empty nothing(b), "no late leave hides the new session"
     [a2, b].each(&:close)
   end
 
@@ -196,7 +259,7 @@ class ServerPresenceTest < Minitest::Test
     b, = open_authed("Bbud", "passwordB1", caps: %w[presence_v2])
     send_env(b, { type: :pos, map: 9, x: 0, y: 0 })
     send_env(a, { type: :pos, map: 9, x: 0, y: 0 })
-    [a, b].each { |s| drain(s) }
+    [a, b].each { |s| nothing(s) }
     types = %i[pos dir step]
     a.write((1..120).map { |i| W.encode_split({ type: types[i % 3], map: 9, x: i, y: 0, dir: 2 + (2 * (i % 4)) }) }.join)
     got = drain(b, 0.5).size
@@ -284,7 +347,7 @@ class ServerPresenceTest < Minitest::Test
     b, = open_authed("Bkill", "passwordB1", caps: %w[presence_v2])
     send_env(a, { type: :pos, map: 5, x: 1, y: 1 })
     send_env(b, { type: :pos, map: 5, x: 2, y: 2 })
-    assert_empty drain(b), "no snapshot"
+    assert_empty nothing(b), "no snapshot"
     drain(a)
     send_env(a, { type: :pos, map: 5, x: 1, y: 1 })
     assert_equal [a_id], drain(b).map { |e| e[:id] }, "an idle repeat reaches everyone"

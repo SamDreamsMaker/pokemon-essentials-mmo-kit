@@ -54,10 +54,7 @@ class PresenceV2PluginTest < Minitest::Test
     pr.adopt_v2(true)
     out[:v2] = [beats.(600, false), beats.(600, true), prune_after.(60)]
     remotes.clear_all                 # a map change, a snap-back to another map, a lost link
-    beats.(30, false)
-    first = $sent.first
-    beats.(30, false)
-    out[:v2_sync] = [first[:sync], $sent.first.key?(:sync)]
+    out[:v2_sync] = Array.new(4) { beats.(30, false); $sent.first.key?(:sync) }
     # the link drops: no leave will come, the remotes go (Dispatch's DISCONNECTED)
     module PEMK
       module NetClient; DISCONNECTED = :__disconnected__; end
@@ -80,7 +77,8 @@ class PresenceV2PluginTest < Minitest::Test
     assert_equal [20, 0, false], got[:legacy], "as before: idle beats every 30 frames, none walking, a 3 s timeout"
     assert_equal false, got[:legacy_sync]
     assert_equal [20, 2, true], got[:v2], "v2: a beat every 300 frames while walking too, no timeout"
-    assert_equal [true, false], got[:v2_sync], "the first frame after a clear asks who is there, once"
+    assert_equal [true, true, true, false], got[:v2_sync],
+                 "the frames after a clear ask who is there - three, one may be dropped"
     assert_equal true, got[:dropped], "a dropped link clears the remotes"
     assert_equal [false, false], got[:told_nothing], "a server that says nothing: back to the timeout"
   end
