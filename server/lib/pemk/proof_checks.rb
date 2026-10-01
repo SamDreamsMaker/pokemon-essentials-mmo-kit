@@ -59,18 +59,17 @@ module PEMK
     end
 
     # -> [:ok | :unprovable | :refuted, reason | nil]. +audit+: a TeamAudit on the game's
-    # battle data.
-    def player_team(db, account_id, record, audit: nil)
+    # battle data. +badges+: see badge_excess.
+    def player_team(db, account_id, record, audit: nil, badges: nil)
       frames = player_frames(record)
       return [:unprovable, "no player team in the record"] if frames.empty?
       if (shape = team_shape(record))
         return [:refuted, shape]
       end
 
-      # The badges set how high a traded Pokemon obeys: no more than the server knows.
-      claimed = record[:init][:badges]
-      if claimed.is_a?(Integer) && claimed > (known = server_badges(db, account_id))
-        return [:refuted, "#{claimed} badges in the record, the server knows #{known}"]
+      # The badges set how high a traded Pokemon obeys: no more than the server owns.
+      if (excess = badge_excess(db, account_id, record[:init][:badges], badges: badges))
+        return [excess[0] == :refuted ? :refuted : :unprovable, excess[1]]
       end
 
       unprovable = nil
@@ -163,6 +162,32 @@ module PEMK
     # The badges the server knows the account has: its ledger's mask.
     def server_badges(db, account_id)
       db[:economy_balances].where(account_id: account_id, field: "badges").get(:balance).to_i.to_s(2).count("1")
+    end
+
+    # The badges a record says the player had (+claimed+), past the ones the server owns
+    # (badge authority B2: what the client showed may hold wins not proven yet). +badges+:
+    # a BadgeAudit - past the owned, wins waiting for their replay (:defer: judged once
+    # they are decided) or that no replay can prove (:unprovable); :unknown (no badge
+    # sources to tell) - unprovable; nil - refuted. -> nil (within) | [verdict, why]
+    def badge_excess(db, account_id, claimed, badges: nil)
+      return nil unless claimed.is_a?(Integer)
+
+      mask = db[:economy_balances].where(account_id: account_id, field: "badges").get(:balance).to_i
+      owned = mask.to_s(2).count("1")
+      return nil if claimed <= owned
+
+      why = "#{claimed} badges in the record, the server knows #{owned}"
+      return [:unprovable, "#{why} (no badge sources to tell)"] if badges == :unknown
+      return [:refuted, why] unless badges
+
+      pending = badges.pending_bits(account_id) & ~mask
+      more = pending.to_s(2).count("1")
+      return [:defer, "#{why}, #{more} more wait for their replay"] if claimed <= owned + more
+
+      lost = badges.unprovable_bits(account_id) & ~mask & ~pending
+      return [:unprovable, "#{why}; past them, wins no replay can prove"] if claimed <= owned + more + lost.to_s(2).count("1")
+
+      [:refuted, why]
     end
 
     # A record's words, safe to store and print: its bytes may be anything a client sent

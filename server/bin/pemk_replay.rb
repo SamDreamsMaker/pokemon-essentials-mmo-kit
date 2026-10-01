@@ -24,6 +24,8 @@ require "pemk_prng"
 require "pemk/proof_checks"
 require "pemk/battle_data"
 require "pemk/team_audit"
+require "pemk/world_data"
+require "pemk/badge_audit"
 require_relative "../harness/harness"
 
 game_root = ENV["PEMK_GAME_ROOT"] || File.expand_path("..", server_root)
@@ -40,6 +42,11 @@ bd_path = ENV["PEMK_BATTLE_DATA"] || File.join(server_root, "data", "battle_data
 battle_data = (PEMK::BattleData.new(bd_path) rescue nil)
 $audit = battle_data&.loaded? ? PEMK::TeamAudit.new(battle_data) : nil
 puts "replay: no battle data at #{bd_path} - trainer teams checked without it" unless $audit
+# Badge authority B2: the badges a record may say the player had - the owned ones, and past
+# them its wins waiting for their replay, or that no replay can prove (the badge sources).
+world_path = ENV["PEMK_WORLD"] || File.join(server_root, "data", "world.json")
+world = (PEMK::WorldData.new(world_path) rescue nil)
+$badges = world&.badge_marks? ? PEMK::BadgeAudit.new(db, world) : :unknown
 
 # Replayable statuses only. walk_mismatch / no_log / mode_mismatch are TRIAGE
 # evidence — never silently overwritten; REPLAY_ID alone still respects that
@@ -146,6 +153,15 @@ def replay_row(db, row, dry:)
     why ||= PEMK::ProofChecks.team_shape(rec)
     result = { verdict: :mismatch, detail: why } if why
   end
+  # Badge authority B2: a record saying the player had badges its wins still waiting for
+  # their replay will give waits for them - judged on a count that is decided.
+  if !result && rec.is_a?(Hash) && rec[:kind] == "trainer" && rec[:init].is_a?(Hash)
+    excess = PEMK::ProofChecks.badge_excess(db, row[:account_id], rec[:init][:badges], badges: $badges)
+    if excess&.first == :defer
+      puts "  ##{row[:id]}: waits - #{excess[1]}"
+      return :deferred
+    end
+  end
   mark!(row[:id]) unless dry || result
   fault!(row)   # tests only (REPLAY_FAULT_ID)
   result ||=
@@ -156,7 +172,7 @@ def replay_row(db, row, dry:)
     end
   # Trainer proof P3: a trainer battle's player team must be the server's own (owned,
   # locked, no more EXP than seen) - the replay alone takes the record's word for it.
-  team, team_why = rec.is_a?(Hash) && rec[:kind] == "trainer" ? PEMK::ProofChecks.player_team(db, row[:account_id], rec, audit: $audit) : nil
+  team, team_why = rec.is_a?(Hash) && rec[:kind] == "trainer" ? PEMK::ProofChecks.player_team(db, row[:account_id], rec, audit: $audit, badges: $badges) : nil
   result[:detail] ||= team_why if team && team != :ok
   detail = safe_text(result[:detail])
   # verdict_at stamps EVERY pass (the live server's harness-liveness detector

@@ -34,7 +34,9 @@ module PEMK
     # makes itself, so a fresh value above the balance is refused - recorded under its seq
     # with the balance unchanged, the ledger showing the refusal and the client's next
     # frame never taken for a replay of it.
-    def apply_econ(account_id, field, value, seq, now: Time.now, reason: "unattributed", no_increase: false)
+    # +hold+ (badge authority B2): the frame moves nothing - only the server's grants do; it
+    # is recorded under its seq, the balance untouched. -> [:held, balance]
+    def apply_econ(account_id, field, value, seq, now: Time.now, reason: "unattributed", no_increase: false, hold: false)
       key = field.to_s.to_sym
       cap = @caps[key]
       return [:rej, current(account_id, field), :bad_field] unless cap && value.is_a?(Integer) && seq.is_a?(Integer)
@@ -60,6 +62,13 @@ module PEMK
           value |= cur if monotonic?(key)
           if value.negative? || value > cap
             result = [:rej, cur, :cap]
+          elsif hold
+            @db[:economy_balances]
+              .insert_conflict(target: %i[account_id field], update: { last_seq: seq })
+              .insert(account_id: account_id, field: field.to_s, balance: cur, last_seq: seq)
+            @db[:economy_ledger].insert(account_id: account_id, field: field.to_s, delta: 0,
+                                        reason: "held", seq: seq, balance_after: cur, created_at: now)
+            result = [:held, cur]
           elsif no_increase && value > cur
             @db[:economy_balances]
               .insert_conflict(target: %i[account_id field], update: { last_seq: seq })
@@ -116,6 +125,20 @@ module PEMK
       @db[:economy_balances].where(account_id: account_id, field: field.to_s).get(:balance) || 0
     end
 
+    # Badge authority B2: the server sets badge bits itself - a proven win, the cutover, the
+    # operator - bitwise, under the badges row's lock (an adjust's delta from a stale read
+    # would carry: two grants of one bit, a badge nobody earned), with +grants+ (the
+    # badge_grants rows) in the same transaction. -> the mask after
+    def grant_bits(account_id, mask, reason:, grants: [], now: Time.now)
+      set_badges(account_id, reason: reason, grants: grants, now: now) { |cur| cur | mask }
+    end
+
+    # The badges the ledger holds become exactly +mask+ (the boot pass: what the server
+    # owns). -> the mask after
+    def set_badge_bits(account_id, mask, reason:, grants: [], now: Time.now)
+      set_badges(account_id, reason: reason, grants: grants, now: now) { |_cur| mask }
+    end
+
     # Was this (account, field, seq) already applied? (D4: attribute/consume budget only
     # for a genuinely new frame, never a reconnect replay.)
     def recorded?(account_id, field, seq)
@@ -139,6 +162,31 @@ module PEMK
         last_seq = row[:last_seq] if row[:last_seq] > last_seq
       end
       { balances: balances, last_seq: last_seq }
+    end
+
+    private
+
+    # The badges row, locked: yields its mask, writes what the block returns (a server row
+    # under a negative seq, like adjust; the client's last_seq untouched) and +grants+.
+    def set_badges(account_id, reason:, now:, grants: [])
+      @db.transaction do
+        @db[:economy_balances].insert_conflict(target: %i[account_id field])
+                              .insert(account_id: account_id, field: "badges", balance: 0, last_seq: 0)
+        rows = @db[:economy_balances].where(account_id: account_id, field: "badges")
+        cur = rows.for_update.get(:balance).to_i
+        value = yield(cur)
+        grants.each do |g|
+          @db[:badge_grants].insert_conflict(target: %i[account_id badge])
+                            .insert(g.merge(account_id: account_id, granted_at: g[:granted_at] || now))
+        end
+        if value != cur
+          low = @db[:economy_ledger].where(account_id: account_id, field: "badges").min(:seq) || 0
+          rows.update(balance: value)
+          @db[:economy_ledger].insert(account_id: account_id, field: "badges", delta: value - cur, reason: reason.to_s,
+                                      seq: [low, 0].min - 1, balance_after: value, created_at: now)
+        end
+        value
+      end
     end
   end
 end

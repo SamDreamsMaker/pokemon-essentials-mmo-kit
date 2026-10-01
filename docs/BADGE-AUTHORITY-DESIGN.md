@@ -111,13 +111,49 @@ computed index, a fill, an assignment) and, in the game's code, any to the playe
   gym's event is done): the client waits for the seed of a battle that gives a badge, and
   the operator grant covers the rest. A proven win's badge is granted at the proof, and
   stays when a fresh login voids its unsealed claim (the battle fought again sets a badge
-  already owned) - 089 checks that rather than a lost badge. The proof checks, the login
-  and the acknowledgements count `ledger | pending`. A shadow claim naming a seed that is
-  not its own is unlinked - B1 says UNPROVABLE where `on` refuses it (`wrong_seed`); a
-  record dropped over its hourly cap leaves an honest badge WOULD-REFUSE until it comes.
-- **B2 - enforcement**: the rules above, the client holding its badge frame with its money
-  frame and marking it again after each claim answer, an operator grant command. Autotest
-  089: an honest badge shown at once, owned after the proof, kept across a relogin; a
-  client killed before its checkpoint loses its claim - and its badge while its win is
-  unproven - and fights Brock again; a modified client holding a claim then logging in
-  again is never granted.
+  already owned) - 089 checks that rather than a lost badge. A shadow claim naming a seed
+  that is not its own is unlinked - B1 says UNPROVABLE where `on` refuses it
+  (`wrong_seed`); a record dropped over its hourly cap leaves an honest badge WOULD-REFUSE
+  until it comes.
+- **B2 - enforcement** (reviewed 2026-10-01, before any code). `on` enforces when trainer
+  proof and money enforce and no blocker stands; its clients advertise `badge_hold`
+  (older ones get update_required). Its review changed the plan:
+  - *Owned, pending, shown.* Owned = the ledger, which only the server raises:
+    `Ledger#grant_bits` ORs bits under `SELECT ... FOR UPDATE` of the badges row (never an
+    `adjust` delta: two grants of one bit would carry into a badge nobody earned) and
+    writes the `badge_grants` rows, in one transaction. Pending = the win bits of held,
+    unvoided, linked claims with no proof yet whose won record's replay is undecided
+    (pending, walk_ok, walk_skipped, or a match whose team check stands) - a decided
+    record ends it before the sweep settles. Shown = pending, read first, then owned: a
+    proof settled between the two reads is in one or the other.
+  - *Grant at the proof*, inside `TrainerProofs#settle`'s transaction: no moment where the
+    claim is no longer pending and the bit not yet owned.
+  - *Frames never move the badges*: the frame's seq is recorded, the balance untouched
+    (no raise, and no drop - a stale save's 0 erases nothing); the answer is `shown` (a
+    duplicate frame's too). Bits it shows that are neither owned nor pending: HELD, logged
+    and flagged as B1 does.
+  - *The proof checks count owned badges only* (the replay daemon, obedience): a record
+    claiming more badges than owned, where pending wins still undecided cover the excess,
+    gets no verdict yet (retried at the next pass); covered only by unprovable wins, it is
+    unprovable (the allowance, no flag); else refuted. Pending counted at the record's time
+    would let a made-up win open a window for another battle's record.
+  - *The boot pass*, before the reactor starts, at every enforcing boot - and logged as a
+    dry run at a shadow boot: owned := the grant rows, plus, at the first cutover only
+    (`badge_cutover`), the legacy bits (the baseline, or the whole mask of an account never
+    judged; not for an account born after the cutover), plus proof grants for proven
+    claims never granted; pending bits stripped from the ledger (shown still shows them);
+    refused bits removed and flagged; unprovable ones removed without a flag and listed
+    for the operator. A period with the authority off thus loses nothing granted.
+  - *Client* (`badge_hold`): the badge frame waits (bounded) while a prize claim or a kept
+    record is unanswered, and goes out again after each claim and record acknowledgement;
+    `login_ok` names the placements whose win gives a badge, and their seed is waited for
+    while online, across a reconnect. Login always carries `:badges` (0 without a row).
+  - *Operator*: `bin/pemk_badges.rb grant | list | list --unowned` (the unprovable or
+    refused wins a player may have earned).
+  - Autotest 089, on a fixture export (the demo's is blocked: the house's set, May): an
+    honest badge shown at once, owned after the replay, kept across a relogin and a resume;
+    a badge frame before its claim keeps the badge and flags no one; killed before its
+    checkpoint: claim void, the badge gone while unproven, Brock again; a rogue's frame
+    never raises; a made-up record pending then refuted, and a record sent meanwhile
+    claiming the badge refuted; the cutover's cases; on, off (flag state off), on restores
+    every grant; an operator grant; a P4-era client gets update_required.

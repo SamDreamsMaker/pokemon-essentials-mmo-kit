@@ -51,6 +51,46 @@ class LedgerTest < Minitest::Test
     assert PEMK::Ledger.seq_ok?(PEMK::Ledger::SEQ_MAX - 1)
   end
 
+  # Badge authority B2: only the server raises the badges.
+  def test_grant_bits_is_bitwise_and_the_server_s_own
+    @led.apply_econ(@acct, :badges, 0b1, 5)
+    assert_equal 0b11, @led.grant_bits(@acct, 0b10, reason: "badge:proof:7",
+                                             grants: [{ badge: 1, evidence: "proof", source: "claim 7", claim_nonce: 7 }])
+    assert_equal 0b11, @led.grant_bits(@acct, 0b10, reason: "again"), "a bit owned: nothing moves"
+    assert_equal 0b11, @led.current(@acct, :badges)
+    rows = @db[:economy_ledger].where(account_id: @acct, field: "badges").order(:seq).all
+    assert_equal [[-1, 0b10, "badge:proof:7"], [5, 0b1, "unattributed"]], rows.map { |r| r.values_at(:seq, :delta, :reason) }
+    assert_equal 5, @db[:economy_balances].where(account_id: @acct, field: "badges").get(:last_seq), "the client's seq stays"
+    assert_equal [[1, "proof", 7]], @db[:badge_grants].where(account_id: @acct).select_map(%i[badge evidence claim_nonce])
+    assert_equal 0b1, @led.set_badge_bits(@acct, 0b1, reason: "cutover")
+  end
+
+  # Two grants at once, each reading before the other writes: the row's lock makes the
+  # second read the first's write - a stale read would lose a badge (or, as an adjust's
+  # delta, carry into one nobody earned).
+  def test_grants_at_once_lose_nothing
+    @led.grant_bits(@acct, 0b1, reason: "first")
+    [0b10, 0b100].map do |bit|
+      Thread.new do
+        PEMK::Ledger.new(@db, CAPS).send(:set_badges, @acct, reason: "race", now: Time.now) do |cur|
+          sleep 0.2   # the other grant reads meanwhile
+          cur | bit
+        end
+      end
+    end.each(&:join)
+    assert_equal 0b111, @led.current(@acct, :badges)
+  end
+
+  def test_a_held_frame_moves_nothing
+    @led.grant_bits(@acct, 0b1, reason: "proof")
+    assert_equal [:held, 0b1], @led.apply_econ(@acct, :badges, 0b111, 3, hold: true)
+    assert_equal [:held, 0b1], @led.apply_econ(@acct, :badges, 0, 4, hold: true), "nor drops a bit"
+    assert_equal 0b1, @led.current(@acct, :badges)
+    assert @led.recorded?(@acct, :badges, 4)
+    assert_equal [:dup, 0b1], @led.apply_econ(@acct, :badges, 0b111, 3, hold: true)
+    assert_equal 4, @db[:economy_balances].where(account_id: @acct, field: "badges").get(:last_seq)
+  end
+
   def test_a_new_lower_seq_still_applies_gap_safe
     @led.apply_econ(@acct, :money, 700, 5)
     # seq 3 < 5 but its row does not exist -> applied (row-existence, not high-water)

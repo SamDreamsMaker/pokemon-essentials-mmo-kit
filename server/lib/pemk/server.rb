@@ -144,6 +144,8 @@ module PEMK
       @badge_said  = {}   # [account, badge] => the verdict logged last (a frame sent again says nothing new)
       @badge_based = {}   # account => its baseline (badge_baselines)
       @badge_mutex = Mutex.new
+      # B2: a proven win's badges are owned inside its proof's settle transaction
+      @trainer_proofs.on_proven = ->(claim) { badge_grant_win(claim) } if @badge_audit && @trainer_proofs
       @last_item_sweep = nil
       @item_sweeping   = false
       @audit      = Audit.new(@world, logger: @log)
@@ -221,6 +223,7 @@ module PEMK
       log_money_authority
       log_trainer_proof
       log_badge_authority
+      badge_boot_pass
       @log.call("server: item authority = #{@config.item_authority} (item increases judged against server-known sources; logs only)")
       if @config.item_authority == :on
         if @item_enforce
@@ -415,10 +418,12 @@ module PEMK
     end
 
     # M3: a client that claims no prizes would see every one of them refused - it has to
-    # update before it plays here. So does one that cannot wait for a prize's proof (P4).
+    # update before it plays here. So does one that cannot wait for a prize's proof (P4),
+    # or hold its badge frame for its claim and record (badge authority B2).
     def money_update_required?(conn)
       caps = Array(conn.data[:caps])
-      (@money_enforce && !caps.include?("money_claims")) || (@trainer_enforce && !caps.include?("trainer_proof"))
+      (@money_enforce && !caps.include?("money_claims")) || (@trainer_enforce && !caps.include?("trainer_proof")) ||
+        (badge_enforce? && !caps.include?("badge_hold"))
     end
 
     def handle_login(conn, env)
@@ -601,7 +606,12 @@ module PEMK
         judge_badges(account_id, value, seq, seeds: seeds) if @badge_audit && field.to_s == "badges"
         # M3: money rises only through the server's own transactions (claims, deals).
         enforced = @money_enforce && field.to_s == "money"
-        status = @ledger.apply_econ(account_id, field, value, seq, reason: reason, no_increase: enforced)
+        hold = field.to_s == "badges" && badge_enforce?   # B2: only the server's grants move them
+        status = @ledger.apply_econ(account_id, field, value, seq, reason: reason, no_increase: enforced, hold: hold)
+        if hold   # the answer is what the client shows: owned, and pending
+          shown = badge_shown(account_id)
+          status = value == shown ? [:ack, shown] : [:rej, shown, :badges]
+        end
         if field.to_s == "money" && status.first == :ack
           # M1a: a fresh money frame carries the prizes claimed before it - they reached
           # the ledger, so a fresh login no longer voids them.
@@ -2276,7 +2286,91 @@ module PEMK
 
     BADGE_VERDICTS = { explained: "EXPLAINED", pending: "PENDING", unprovable: "UNPROVABLE",
                        refused: "WOULD-REFUSE" }.freeze
+    BADGE_ENFORCED = { explained: "OWNED", pending: "PENDING", unprovable: "UNPROVABLE", refused: "REFUSED" }.freeze
     BADGE_SAID_MAX = 100_000
+    BADGE_BOOT_LINES = 200   # accounts the boot pass names one by one
+
+    # B2: the server owns the badges - `on`, trainer proof and money enforcing, and nothing
+    # keeping it from owning them.
+    def badge_enforce?
+      @config.badge_authority == :on && !@badge_audit.nil? && @trainer_enforce && @money_enforce && @badge_sure ? true : false
+    end
+
+    # What the client shows: pending (read first), then owned - a proof settled between the
+    # two reads is in one or the other.
+    def badge_shown(account_id)
+      pending = @badge_audit.pending_bits(account_id)
+      pending | @ledger.current(account_id, :badges).to_i
+    end
+
+    # B2, inside a proven claim's settle transaction: its win's badges become the account's.
+    def badge_grant_win(claim)
+      return unless badge_enforce? && BadgeAudit::KINDS.include?(claim[:kind]) && MoneyClaims::KEYED.include?(claim[:verdict])
+
+      wins = @badge_audit.wins_in(claim)
+      return if wins.empty?
+
+      grants = wins.map { |b| { badge: b, evidence: "proof", source: "claim #{claim[:nonce]}", claim_nonce: claim[:nonce] } }
+      @ledger.grant_bits(claim[:account_id], wins.sum { |b| 1 << b }, reason: "badge:proof:#{claim[:nonce]}", grants: grants)
+    end
+
+    # B2's boot pass, before the first frame: each account's ledger holds what the server
+    # owns - its grants, at the first cutover its badges from before the authority, its
+    # proven wins; pending stripped (still shown), the rest removed. A shadow boot logs it
+    # as a dry run. -> the totals
+    def badge_boot_pass
+      return unless @badge_audit
+
+      apply = badge_enforce?
+      cutover = @db[:badge_cutover].empty?
+      totals = Hash.new(0)
+      named = 0
+      ids = (@db[:economy_balances].where(field: "badges").exclude(balance: 0).select_map(:account_id) +
+             @db[:badge_grants].distinct.select_map(:account_id)).uniq.sort
+      ids.each do |id|
+        held = @ledger.current(id, :badges).to_i
+        plan = @badge_audit.plan(id, held, cutover: cutover)
+        next if plan[:owned] == held && plan[:proof].empty? && plan[:legacy].zero?
+
+        totals[:accounts] += 1
+        %i[legacy pending].each { |k| totals[k] += @badge_audit.bits_of(plan[k]).size }
+        totals[:proof] += plan[:proof].size
+        totals[:refused] += plan[:refused].size
+        totals[:unprovable] += plan[:unprovable].size
+        if apply
+          grants = @badge_audit.bits_of(plan[:legacy]).map { |b| { badge: b, evidence: "legacy", source: "cutover" } } +
+                   plan[:proof].map { |b, n| { badge: b, evidence: "proof", source: "claim #{n}", claim_nonce: n } }
+          @ledger.set_badge_bits(id, plan[:owned], reason: "badge:boot", grants: grants)
+          @anomaly&.record_flag(id, :badge_unexplained) if @badge_sure && !plan[:refused].empty?
+        end
+        next if (named += 1) > BADGE_BOOT_LINES
+
+        @log.call("badge: #{apply ? '' : '(dry run) '}boot account #{id}: #{badge_plan_words(plan)}")
+      end
+      @db[:badge_cutover].insert(id: 1, at: Time.now) if apply && cutover
+      @log.call("badge: #{apply ? '' : '(dry run) '}boot pass#{cutover ? ' (the cutover)' : ''}: " \
+                "#{totals[:accounts]} account(s) - legacy #{totals[:legacy]}, proof #{totals[:proof]}, " \
+                "pending #{totals[:pending]} stripped, refused #{totals[:refused]} and unprovable " \
+                "#{totals[:unprovable]} removed#{named > BADGE_BOOT_LINES ? " (#{named - BADGE_BOOT_LINES} not named)" : ''}")
+      totals
+    rescue StandardError => e
+      @log.call("badge: WARNING the boot pass failed #{e.class}: #{e.message}")
+      nil
+    end
+
+    def badge_plan_words(plan)
+      list = ->(mask) { @badge_audit.bits_of(mask).join(", ") }
+      out = ["owns #{list.(plan[:owned]).then { |s| s.empty? ? 'none' : s }}"]
+      out << "legacy #{list.(plan[:legacy])}" unless plan[:legacy].zero?
+      out << "proven #{plan[:proof].map { |b, n| "#{b} (claim #{n})" }.join(', ')}" unless plan[:proof].empty?
+      out << "pending #{list.(plan[:pending])} (shown, not owned)" unless plan[:pending].zero?
+      out << "removed #{plan[:refused].map { |b, why| "#{b} (#{why})" }.join(', ')}" unless plan[:refused].empty?
+      unless plan[:unprovable].empty?
+        out << "removed unprovable #{plan[:unprovable].map { |b, why| "#{b} (#{why})" }.join(', ')} " \
+               "- bin/pemk_badges.rb grant if it was earned"
+      end
+      out.join("; ")
+    end
 
     # B1: on the account's mailbox, before the frame is applied - the bits it adds to the
     # ledger's and to its baseline, each judged; shadow logs and flags what enforcement
@@ -2300,7 +2394,7 @@ module PEMK
       fresh.group_by { |_, verdict, why| [verdict, why] }.each do |(verdict, why), list|
         badges = list.map(&:first)
         what = badges.one? ? "badge #{badges[0]}" : "badges #{badges.join(', ')}"
-        @log.call("badge: account #{account_id} #{what} #{BADGE_VERDICTS.fetch(verdict)}: #{why}")
+        @log.call("badge: account #{account_id} #{what} #{(badge_enforce? ? BADGE_ENFORCED : BADGE_VERDICTS).fetch(verdict)}: #{why}")
       end
       badge_flags(account_id, fresh, seeds: seeds)
     rescue StandardError => e
@@ -2337,7 +2431,7 @@ module PEMK
       return if wins.empty?
 
       if proof == :proven
-        wins.each { |b| @log.call("badge: account #{account_id} WOULD-GRANT badge #{b} (claim #{nonce}'s win is proven)") }
+        wins.each { |b| @log.call("badge: account #{account_id} #{badge_enforce? ? 'GRANTED' : 'WOULD-GRANT'} badge #{b} (claim #{nonce}'s win is proven)") }
       else
         badge_drops(account_id, wins, "claim #{nonce}'s win is #{proof}")
       end
@@ -2349,14 +2443,19 @@ module PEMK
     # explains now (a refused or voided claim showed them): B2 drops them from what the
     # client shows. An account never judged holds nothing gained since.
     # +flag+: false for a void - an honest client killed before its save is one too.
+    # Enforced (B2), what the claim showed is its wins the ledger does not own.
     def badge_drops(account_id, wins, cause, flag: true)
-      base = badge_based(account_id)
-      return unless base
+      mask = wins.sum { |b| 1 << b }
+      if badge_enforce?
+        mask &= ~@ledger.current(account_id, :badges).to_i
+      else
+        base = badge_based(account_id)
+        return unless base
 
-      held = @ledger.current(account_id, :badges).to_i & ~base
-      drops = @badge_audit.judge(account_id, wins.sum { |b| held[b] << b })
-                          .reject { |_, verdict, _| %i[explained pending].include?(verdict) }
-      drops.each { |badge, _, why| @log.call("badge: account #{account_id} WOULD-DROP badge #{badge} (#{cause}: #{why})") }
+        mask &= @ledger.current(account_id, :badges).to_i & ~base
+      end
+      drops = @badge_audit.judge(account_id, mask).reject { |_, verdict, _| %i[explained pending].include?(verdict) }
+      drops.each { |badge, _, why| @log.call("badge: account #{account_id} #{badge_enforce? ? 'DROPPED' : 'WOULD-DROP'} badge #{badge} (#{cause}: #{why})") }
       badge_flags(account_id, drops) if flag
     rescue StandardError => e
       @log.call("badge: account #{account_id}'s badges (#{cause}) failed #{e.class}: #{e.message}")
@@ -2369,11 +2468,24 @@ module PEMK
     # At boot: the mode, what it relies on, and what keeps the server from owning a badge.
     def log_badge_authority
       mode = @config.badge_authority
-      what = @badge_audit ? "each new badge judged by the battle that gives it; logs only" : "nothing is judged"
+      what = if @badge_audit
+               "each new badge judged by the battle that gives it#{badge_enforce? ? '' : '; logs only'}"
+             else
+               "nothing is judged"
+             end
       @log.call("server: badge authority = #{mode} (#{what})")
       return if mode == :off
 
-      @log.call("server: badge authority 'on' runs as shadow until its enforcement is built") if mode == :on
+      if badge_enforce?
+        @log.call("server: badge authority ENFORCED - a frame never moves the badges, a proven win grants them " \
+                  "(clients need badge_hold)")
+      elsif mode == :on
+        why = []
+        why << "trainer proof does not enforce" unless @trainer_enforce
+        why << "money authority does not enforce" unless @money_enforce
+        why << "what keeps it from owning the badges (below)" if @badge_audit && !@badge_sure
+        @log.call("server: WARNING badge authority 'on' runs as shadow: #{why.join(', ')}") unless why.empty?
+      end
       unless @badge_audit
         @log.call("server: WARNING badge authority does nothing: it judges by the trainer prize claims " \
                   "(PEMK_MONEY_AUTHORITY is off)")
@@ -3309,6 +3421,7 @@ module PEMK
       seed_start_money(account_id)                     # M3: the start money is the server's, not the save's
       @money_shadow&.login(account_id, money_row(account_id).to_i) if fresh   # M1b: the client adopts the ledger's
       snap = @ledger.snapshot(account_id)
+      snap[:balances][:badges] = badge_shown(account_id) if badge_enforce?   # B2: always named, 0 too
       inv  = @inventory.snapshot(account_id)
       stores = @config.item_record == :full ? inv[:stores] : nil
       { econ: snap[:balances], econ_seq: snap[:last_seq],
