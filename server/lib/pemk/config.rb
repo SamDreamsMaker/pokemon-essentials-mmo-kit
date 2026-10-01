@@ -16,7 +16,7 @@ module PEMK
                 :gift_enforce, :peer_check, :peer_classes, :trade_redelivery, :item_record,
                 :shop_enforce, :item_authority, :item_local, :item_grace, :money_authority,
                 :money_payday_daily, :money_local_daily, :money_repeat_daily, :trainer_proof,
-                :money_unproven_daily, :badge_authority, :badge_ignore, :client_debug
+                :money_unproven_daily, :badge_authority, :badge_ignore, :client_debug, :presence_dedup
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -63,6 +63,13 @@ module PEMK
       # Unknown -> deny (never boot looser than asked).
       dmode = env.fetch("PEMK_CLIENT_DEBUG", "deny").to_s.strip.downcase
       @client_debug = %w[deny autopilot allow].include?(dmode) ? dmode.to_sym : :deny
+
+      # Presence v2: an idle player's heartbeat is not sent again to clients that keep
+      # their peers until a leave (presence_v2); a player entering a map is sent everyone
+      # already there; a member silent for PRESENCE_SILENCE leaves its map. Older clients
+      # get every frame, as before. On by default (an idle town cost 2N(N-1) sends a
+      # second); off = every frame to everyone, no snapshot, no silence sweep.
+      @presence_dedup = env.fetch("PEMK_PRESENCE_DEDUP", "on").to_s.strip.downcase != "off"
 
       # M4 Layer D: team/set legality enforcement mode, same off/shadow/on tri-state as
       # PEMK_POS_ENFORCE. Default off. D1 is detection-only (there is no battle-entry

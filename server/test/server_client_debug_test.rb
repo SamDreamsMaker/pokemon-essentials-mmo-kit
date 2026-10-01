@@ -81,8 +81,11 @@ class ServerClientDebugTest < Minitest::Test
     assert wait_log(/client debug = deny \(debug mode stays off on the clients/)
     s, lo = login("deny@t.co")
     assert_equal [:login_ok, "deny"], lo.values_at(:type, :client_debug)
-    send_env(s, { type: :auth, token: lo[:token], caps: %w[debug_lock], resume: true })
-    assert_equal "deny", recv_type(s, :auth_ok, :auth_err)[:client_debug], "a resume says it again"
+    s2 = TCPSocket.new("127.0.0.1", @server.port)   # a reconnect: a new socket
+    send_env(s2, { type: :auth, token: lo[:token], caps: %w[debug_lock], resume: true })
+    assert_equal "deny", recv_type(s2, :auth_ok, :auth_err)[:client_debug], "a resume says it again"
+    s2.close
+    s.close
     refute logs.any? { |l| l.include?("keeps debug mode") }
     _, old = login("old@t.co", caps: [])
     assert_equal :login_ok, old[:type], "an older client is not refused"

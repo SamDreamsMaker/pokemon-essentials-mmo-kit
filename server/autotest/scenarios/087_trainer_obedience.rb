@@ -17,6 +17,7 @@ Autotest.scenario "a traded Pokemon's disobedience is replayed as the game rolle
   id = s.account_id(a)
   a.fast!
   a.add_pokemon!("SQUIRTLE", 14, "foreign")   # obeys up to level 10 with no badge: often not
+  a.add_pokemon!("WARTORTLE", 40)             # behind it: a Squirtle that loafs its way to fainting lost the battle once
   a.warp!(10, 6, 14)                       # the Cedolan Gym's entrance
   a.wait_until!("idle within 10", timeout: 20)
   a.talk_to(4, timeout: 60)                # Camper Liam

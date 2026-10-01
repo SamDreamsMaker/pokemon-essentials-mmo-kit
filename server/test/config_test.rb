@@ -194,4 +194,13 @@ class ConfigTest < Minitest::Test
     assert_equal :allow,     PEMK::Config.new(env: ENV.to_h.merge("PEMK_CLIENT_DEBUG" => " ALLOW ")).client_debug
     assert_equal :deny,      PEMK::Config.new(env: ENV.to_h.merge("PEMK_CLIENT_DEBUG" => "on")).client_debug
   end
+
+  # Presence v2: on by default, off only when asked.
+  def test_presence_dedup_defaults_on
+    env = ENV.to_h
+    env.delete("PEMK_PRESENCE_DEDUP")
+    assert_equal true,  PEMK::Config.new(env: env).presence_dedup
+    assert_equal false, PEMK::Config.new(env: ENV.to_h.merge("PEMK_PRESENCE_DEDUP" => " OFF ")).presence_dedup
+    assert_equal true,  PEMK::Config.new(env: ENV.to_h.merge("PEMK_PRESENCE_DEDUP" => "junk")).presence_dedup
+  end
 end

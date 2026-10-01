@@ -173,6 +173,14 @@ with no double-pumping. `Pump.tick` no-ops until a game is loaded (`$player`), s
 the title/load screen is untouched; login pumps manually. The client runs no
 background game threads — the authoritative server is a separate process.
 
+**Presence.** A step or a turn sends the player's tile; standing still, a heartbeat
+re-sends it every half second. A server with presence v2 (`presence_v2` at login) keeps
+those repeats from clients that do not need them, sends a player entering a map everyone
+already there, and a leave for every player who goes: such a client keeps its remote
+players until a leave (no timeout), sends a frame every 5 s even during a forced walk,
+asks the server who is on the map after it cleared them, and clears them when the link
+drops. Told nothing (an older server), it keeps the 3 s timeout.
+
 **How PvP battles stay in sync.** Each instance runs its *own* battle with its own
 team as party 1, so the untouched scene shows each player their own perspective.
 The two are made byte-identical by making one side **authoritative**: the

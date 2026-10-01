@@ -122,6 +122,7 @@ module PEMK
     def request(item, map, x, y)
       @inbox.clear   # a new pickup supersedes any late reply from a timed-out one (no @inbox leak)
       @seq += 1
+      (PEMK::Presence.emit_now(:pos) rescue nil)   # judged by reach: the server needs the tile now
       PEMK.send_message(:type => :pickup_req, :kind => :item, :item => item,
                         :map => map, :x => x, :y => y, :seq => @seq)
       @seq
