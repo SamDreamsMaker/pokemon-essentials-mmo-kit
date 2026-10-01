@@ -198,6 +198,100 @@ class WorldDataTest < Minitest::Test
     assert_nil load(doc).partner_versions("POKEMONTRAINER", "May"), "a partner computed at runtime: any"
   end
 
+  # Badge authority B0: what gives each badge.
+  # The sample with Brock placed at map 10 event 3, alone in his call, and the game's
+  # partners listed (+partners+; nil: none listed).
+  def gym_sample(partners: [])
+    doc = sample
+    doc["maps"]["10"] = { "name" => "Gym", "width" => 20, "height" => 20, "objects" => [],
+                          "trainers" => [{ "event_id" => 3, "x" => 6, "y" => 5, "type" => "LEADER_Brock",
+                                           "name" => "Brock", "version" => 0, "calls" => [0] }] }
+    doc["partners"] = { "list" => partners, "computed" => false } if partners
+    doc
+  end
+
+  def test_badge_sources
+    doc = gym_sample
+    w = load(doc)
+    assert_equal false, w.badge_marks?
+    assert_nil w.badge_sources(0), "an export before the badges says nothing"
+    doc["badge_sources"] = {
+      "list" => [{ "badge" => 0, "map" => 10, "event" => 3, "page" => 0, "trainers" => [["LEADER_Brock", "Brock", 0]] },
+                 { "badge" => 1, "map" => 12, "event" => 5, "page" => 1 },
+                 { "badge" => 1, "common_event" => 7 },
+                 { "badge" => -1, "map" => 1, "event" => 1 }, "junk"],
+      "unknown" => [{ "map" => 12, "event" => 5, "page" => 2, "script" => "$player.badges[n] = true" }]
+    }
+    w = load(doc)
+    assert w.badge_marks?
+    assert_equal [{ map: 10, event: 3, page: 0, trainers: [["LEADER_Brock", "Brock", 0]], no_money: false, no_partner: false,
+                    size: nil, call: nil }],
+                 w.badge_sources(0)
+    assert_equal [{ map: 12, event: 5, page: 1, trainers: nil, no_money: false, no_partner: false, size: nil, call: nil },
+                  { common_event: 7 }], w.badge_sources(1)
+    assert_equal [], w.badge_sources(2), "nothing the export read gives badge 2"
+    assert_equal 1, w.badge_unknown.size
+    assert_equal [0], w.win_bits(10, 3, "LEADER_Brock", "Brock", 0)
+    assert_equal [], w.win_bits(10, 4, "LEADER_Brock", "Brock", 0), "another event"
+    assert_equal ["a badge set the export cannot read: map 12 event 5 page 2 ($player.badges[n] = true)",
+                  "badge 1 is given with no battle (map 12 event 5 page 1)",
+                  "badge 1 is given with no battle (common event 7)"], w.badge_blockers
+  end
+
+  # What keeps the server from owning the badges an export gives.
+  def test_badge_blockers
+    doc = gym_sample
+    assert_match(/predate the badge sources/, load(doc).badge_blockers[0])
+    brock = ["LEADER_Brock", "Brock", 0]
+    doc["badge_sources"] = {
+      "list" => [{ "badge" => 0, "map" => 10, "event" => 3, "page" => 0, "trainers" => [brock] }],
+      "unknown" => [{ "file" => "Plugins/MyGame/x.rb", "line" => 3, "script" => "$player.badges[2] = true" }]
+    }
+    assert_equal ["a badge set the export cannot read: Plugins/MyGame/x.rb:3 ($player.badges[2] = true)"],
+                 load(doc).badge_blockers
+    doc["badge_sources"]["unknown"] = []
+    assert_equal [], load(doc).badge_blockers, "a single trainer's paying win: nothing blocks"
+    doc["badge_sources"]["list"] += [
+      { "badge" => 1, "map" => 10, "event" => 3, "page" => 0, "trainers" => [brock], "call" => 5 },
+      { "badge" => 4, "map" => 11, "event" => 4, "page" => 0, "trainers" => [["A", "A", 0], ["B", "B", 0]] },
+      { "badge" => 6, "map" => 14, "event" => 7, "page" => 0, "trainers" => [["D", "D", 0]], "no_money" => true },
+      { "badge" => 9, "map" => 15, "event" => 1, "page" => 0, "trainers" => [["E", "E", 0]] }
+    ]
+    assert_equal ["badge 4 is a battle against several trainers (map 11 event 4 page 0): no replay proves it",
+                  "badge 6's battle pays nothing (map 14 event 7 page 0): no claim proves it",
+                  "badge 9 is over the cap of 8",
+                  "badge 9's battle gets no seed (map 15 event 1 page 0): the export does not place E E",
+                  "LEADER_Brock Brock v0 (map 10 event 3) gives badges 0, 1 in different battles: " \
+                  "which, the win cannot say"],
+                 load(doc).badge_blockers(badges_max: 8)
+    doc["badge_sources"]["list"] = [{ "badge" => 0, "map" => 10, "event" => 3, "page" => 0, "trainers" => [brock], "call" => 2 },
+                                    { "badge" => 1, "map" => 10, "event" => 3, "page" => 0, "trainers" => [brock], "call" => 2 }]
+    assert_equal [], load(doc).badge_blockers, "one battle giving two badges gives both"
+  end
+
+  # A badge's battle the server gives no seed - or the client asks none for - is one no
+  # replay proves.
+  def test_badge_battles_without_a_seed
+    brock = { "badge" => 0, "map" => 10, "event" => 3, "page" => 0, "trainers" => [["LEADER_Brock", "Brock", 0]] }
+    sources = { "list" => [brock], "unknown" => [] }
+    doc = gym_sample(partners: [["POKEMONTRAINER_May", "May", 0]]).merge("badge_sources" => sources)
+    assert_equal ["badge 0's battle gets no seed (map 10 event 3 page 0): a partner may join it (POKEMONTRAINER_May May)"],
+                 load(doc).badge_blockers
+    sources["list"] = [brock.merge("no_partner" => true)]
+    assert_equal [], load(doc).badge_blockers, "fought alone: no partner joins"
+    doc = gym_sample(partners: nil).merge("badge_sources" => { "list" => [brock], "unknown" => [] })
+    assert_equal ["badge 0's battle gets no seed (map 10 event 3 page 0): a partner may join it " \
+                  "(the export cannot list the game's partners)"], load(doc).badge_blockers
+    doc = gym_sample.merge("badge_sources" => { "list" => [brock], "unknown" => [] })
+    doc["maps"]["10"]["trainers"] << { "event_id" => 3, "x" => 6, "y" => 5, "type" => "LEADER_Misty", "name" => "Misty",
+                                       "version" => 0, "calls" => [0] }
+    assert_equal ["badge 0's battle gets no seed (map 10 event 3 page 0): LEADER_Brock Brock shares a battle call"],
+                 load(doc).badge_blockers
+    doc = gym_sample.merge("badge_sources" => { "list" => [brock.merge("size" => "double", "no_partner" => true)],
+                                                "unknown" => [] })
+    assert_equal ["badge 0's battle gets no seed (map 10 event 3 page 0): it is a double battle"], load(doc).badge_blockers
+  end
+
   def test_prize_events
     doc = sample
     doc["maps"]["7"]["objects"] = [{ "kind" => "prize", "item" => "MASTERBALL", "items" => %w[MASTERBALL PPUP],

@@ -12,7 +12,7 @@ Autotest.scenario "Pay Day's coins are claimed and judged",
   a.new_game("Payday")
   id = s.account_id(a)
   a.fast!
-  a.add_pokemon!("MEOWTH", 14)             # learned Pay Day at 12
+  a.add_pokemon!("MEOWTH", 19)             # learned Pay Day at 12, kept until 20; Route 1's foes are 11-14
   a.warp!(5, 18, 20)                       # Route 1
   a.wait_until!("idle within 10", timeout: 20)
   before = a.state.dig("trainer", "money")

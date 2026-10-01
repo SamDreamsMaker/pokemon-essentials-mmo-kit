@@ -37,12 +37,14 @@ Autotest.scenario "a trainer battle runs on its placement's seed",
   fight.("Brock again", 3, [10, 6, 6])
 
   recs  = records.call
-  seeds = s.db[:trainer_battles].where(account_id: id).order(:id).select_map(:id)
+  seeds = s.db[:trainer_battles].where(account_id: id).order(:id).select_map(%i[id seed])
   s.check("the client asked, and got, a seed for each") { a.log_tail(400).count { |l| l.include?("trainer battle seeded") } == 3 }
   s.check("each battle ran on its placement's seed") do
     recs.map { |r| r[:mode] } == %w[on on on] && seeds.size == 2 &&
-      recs.map { |r| r[:trainer_battle_id] } == [seeds[0], seeds[1], seeds[1]]
+      recs.map { |r| r[:battle_seed] } == [seeds[0][1], seeds[1][1], seeds[1][1]]
   end
+  # A seed holds one won battle (P4): Brock won twice, the first win gives way to the second.
+  s.check("each seed holds its last battle") { recs.last[:trainer_battle_id] == seeds[1][0] }
   s.check("each record passed the seed walk") { recs.map { |r| r[:replay_status] } == %w[walk_ok walk_ok walk_ok] }
   lines = recs.map do |r|
     out, = Open3.capture2e({ "DATABASE_URL" => ENV.fetch("DATABASE_URL"), "REPLAY_ID" => r[:id].to_s },

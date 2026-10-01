@@ -164,4 +164,14 @@ class ConfigTest < Minitest::Test
     assert_equal true,  PEMK::Config.new(env: ENV.to_h.merge("PEMK_ANOMALY_DETECTION" => "ON")).anomaly_detection
     assert_equal false, PEMK::Config.new(env: ENV.to_h.merge("PEMK_ANOMALY_DETECTION" => "junk")).anomaly_detection
   end
+
+  # Badge authority: off/shadow/on, default off.
+  def test_badge_authority_defaults_off_and_reads_env
+    env = ENV.to_h
+    env.delete("PEMK_BADGE_AUTHORITY")
+    assert_equal :off,    PEMK::Config.new(env: env).badge_authority
+    assert_equal :shadow, PEMK::Config.new(env: ENV.to_h.merge("PEMK_BADGE_AUTHORITY" => "shadow")).badge_authority
+    assert_equal :on,     PEMK::Config.new(env: ENV.to_h.merge("PEMK_BADGE_AUTHORITY" => " ON ")).badge_authority
+    assert_equal :off,    PEMK::Config.new(env: ENV.to_h.merge("PEMK_BADGE_AUTHORITY" => "junk")).badge_authority
+  end
 end
