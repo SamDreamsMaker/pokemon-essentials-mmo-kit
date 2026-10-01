@@ -224,6 +224,7 @@ module PEMK
       log_trainer_proof
       log_badge_authority
       badge_boot_pass
+      badge_mark_enforcing
       @log.call("server: item authority = #{@config.item_authority} (item increases judged against server-known sources; logs only)")
       if @config.item_authority == :on
         if @item_enforce
@@ -2285,9 +2286,9 @@ module PEMK
     # === badge authority (docs/BADGE-AUTHORITY-DESIGN.md) ============================
 
     BADGE_VERDICTS = { explained: "EXPLAINED", pending: "PENDING", unprovable: "UNPROVABLE", waiting: "WAITING",
-                       refused: "WOULD-REFUSE" }.freeze
+                       revoked: "REVOKED", refused: "WOULD-REFUSE" }.freeze
     BADGE_ENFORCED = { explained: "OWNED", pending: "PENDING", unprovable: "UNPROVABLE", waiting: "WAITING",
-                       refused: "REFUSED" }.freeze
+                       revoked: "REVOKED", refused: "REFUSED" }.freeze
     BADGE_SAID_MAX = 100_000
     BADGE_BOOT_LINES = 200   # accounts the boot pass names one by one
 
@@ -2311,7 +2312,9 @@ module PEMK
       wins = @badge_audit.wins_in(claim)
       return if wins.empty?
 
-      grants = wins.map { |b| { badge: b, evidence: "proof", source: "claim #{claim[:nonce]}", claim_nonce: claim[:nonce] } }
+      grants = wins.map do |b|
+        { badge: b, evidence: "proof", source: "claim #{claim[:nonce]}", claim_nonce: claim[:nonce], since: Time.now }
+      end
       @ledger.grant_bits(claim[:account_id], wins.sum { |b| 1 << b }, reason: "badge:proof:#{claim[:nonce]}", grants: grants)
     end
 
@@ -2326,7 +2329,7 @@ module PEMK
       apply = badge_enforce?
       return unless apply || @config.badge_authority == :on
 
-      mark = @db[:badge_cutover].first
+      mark = @db[:badge_cutover].where(id: 1).first
       cutover = mark.nil?
       now = Time.now
       totals = Hash.new(0)
@@ -2339,10 +2342,11 @@ module PEMK
 
         totals[:accounts] += 1
         %i[legacy pending].each { |k| totals[k] += @badge_audit.bits_of(plan[k]).size }
-        %i[proof refused unprovable waiting].each { |k| totals[k] += plan[k].size }
+        %i[proof refused unprovable waiting revoked].each { |k| totals[k] += plan[k].size }
         if apply
+          proven_at = @db[:money_claims].where(account_id: id, nonce: plan[:proof].values).select_hash(:nonce, :proof_at)
           grants = @badge_audit.bits_of(plan[:legacy]).map { |b| { badge: b, evidence: "legacy", source: "cutover" } } +
-                   plan[:proof].map { |b, n| { badge: b, evidence: "proof", source: "claim #{n}", claim_nonce: n } }
+                   plan[:proof].map { |b, n| { badge: b, evidence: "proof", source: "claim #{n}", claim_nonce: n, since: proven_at[n] } }
           @ledger.rebase_badge_bits(id, add: plan[:owned] & ~held, remove: held & ~plan[:owned], reason: "badge:boot",
                                         grants: grants)
           # a sign at the cutover only: later, a period with the authority off trusted the clients
@@ -2356,19 +2360,33 @@ module PEMK
         @log.call("badge: WARNING the boot pass skipped account #{id}: #{e.class}: #{e.message}")
       end
       if apply && failed.zero?
-        cutover ? @db[:badge_cutover].insert(id: 1, at: now, pass_at: now) : @db[:badge_cutover].update(pass_at: now)
+        cutover ? @db[:badge_cutover].insert(id: 1, at: now, pass_at: now) : @db[:badge_cutover].where(id: 1).update(pass_at: now)
       elsif apply
         @log.call("badge: WARNING the boot pass skipped #{failed} account(s): it is done again at the next boot")
       end
       @log.call("badge: #{apply ? '' : '(dry run) '}boot pass#{cutover ? ' (the cutover)' : ''}: " \
                 "#{totals[:accounts]} account(s) - legacy #{totals[:legacy]}, proof #{totals[:proof]}, " \
                 "pending #{totals[:pending]} stripped, refused #{totals[:refused]}, unprovable " \
-                "#{totals[:unprovable]} and waiting #{totals[:waiting]} removed" \
+                "#{totals[:unprovable]}, waiting #{totals[:waiting]} and revoked #{totals[:revoked]} removed" \
                 "#{named > BADGE_BOOT_LINES ? " (#{named - BADGE_BOOT_LINES} not named)" : ''}")
       totals
     rescue StandardError => e
       @log.call("badge: WARNING the boot pass failed #{e.class}: #{e.message}")
       nil
+    end
+
+    # Row 2 of badge_cutover says the server enforces - written at an enforcing boot, gone at
+    # any other, whether or not a boot pass ended whole. The replay daemon told nothing
+    # follows it at each pass.
+    def badge_mark_enforcing
+      if badge_enforce?
+        now = Time.now
+        @db[:badge_cutover].insert_conflict(target: :id, update: { at: now }).insert(id: 2, at: now)
+      else
+        @db[:badge_cutover].where(id: 2).delete
+      end
+    rescue StandardError => e
+      @log.call("badge: WARNING marking the badge authority failed #{e.class}: #{e.message}")
     end
 
     # The accounts the boot pass looks at: at the cutover, every one holding, granted or
@@ -2406,6 +2424,7 @@ module PEMK
                "- bin/pemk_badges.rb grant if it was earned"
       end
       out << "waiting #{plan[:waiting].map { |b, why| "#{b} (#{why})" }.join(', ')}" unless plan[:waiting].empty?
+      out << "revoked #{plan[:revoked].map(&:first).join(', ')}" unless plan[:revoked].empty?
       out.join("; ")
     end
 

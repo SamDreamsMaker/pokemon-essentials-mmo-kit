@@ -42,23 +42,31 @@ bd_path = ENV["PEMK_BATTLE_DATA"] || File.join(server_root, "data", "battle_data
 battle_data = (PEMK::BattleData.new(bd_path) rescue nil)
 $audit = battle_data&.loaded? ? PEMK::TeamAudit.new(battle_data) : nil
 puts "replay: no battle data at #{bd_path} - trainer teams checked without it" unless $audit
-# Badge authority B2 - PEMK_BADGE_AUTHORITY=on as the server's, or (unset) the server has cut
-# over to owning the badges: the badges a record may say the player had are the owned ones,
-# and past them its earlier wins no replay could prove or still waiting for their replay
-# (the badge sources). Otherwise: no more than owned (P4).
-badge_mode = ENV["PEMK_BADGE_AUTHORITY"].to_s.strip.downcase
-owns = badge_mode.empty? ? (db.table_exists?(:badge_cutover) && !db[:badge_cutover].empty?) : badge_mode == "on"
+# Badge authority B2 - PEMK_BADGE_AUTHORITY=on as the server's, or (unset) the server says
+# it enforces (badge_cutover row 2, read at every pass): the badges a record may say the
+# player had are the owned ones, and past them its earlier wins no replay could prove or
+# still waiting for their replay (the badge sources). Otherwise: no more than owned (P4).
+$world_path = ENV["PEMK_WORLD"] || File.join(server_root, "data", "world.json")
 $badges = nil
-if owns
-  world = (PEMK::WorldData.new(ENV["PEMK_WORLD"] || File.join(server_root, "data", "world.json")) rescue nil)
-  $badges = world&.badge_marks? ? PEMK::BadgeAudit.new(db, world) : :unknown
+$badges_said = nil
+def follow_badge_mode(db)
+  mode = ENV["PEMK_BADGE_AUTHORITY"].to_s.strip.downcase
+  owns = mode.empty? ? (db.table_exists?(:badge_cutover) && !db[:badge_cutover].where(id: 2).empty?) : mode == "on"
+  if !owns
+    $badges = nil
+  elsif !$badges.is_a?(PEMK::BadgeAudit)
+    world = (PEMK::WorldData.new($world_path) rescue nil)
+    $badges = world&.badge_marks? ? PEMK::BadgeAudit.new(db, world) : :unknown
+  end
+  said = case $badges
+         when nil      then "no more than the server owns"
+         when :unknown then "WARNING the server owns them, but the world export has no badge sources: any past the owned unprovable"
+         else               "the owned, then earlier wins unprovable or waiting for their replay (badge authority)"
+         end
+  puts "replay: a record's badges - #{said}" unless said == $badges_said
+  $badges_said = said
 end
-puts "replay: a record's badges - " +
-     case $badges
-     when nil      then "no more than the server owns"
-     when :unknown then "WARNING the server owns them, but the world export has no badge sources: any past the owned unprovable"
-     else               "the owned, then earlier wins unprovable or waiting for their replay (badge authority)"
-     end
+follow_badge_mode(db)
 $waiting = {}   # record id => when it began waiting, this run (said once)
 
 # Replayable statuses only. walk_mismatch / no_log / mode_mismatch are TRIAGE
@@ -107,6 +115,7 @@ end
 
 # One pass over the queue. -> tally hash (also the loop's liveness signal).
 def replay_pass(db, dry:, limit:)
+  follow_badge_mode(db)   # the server may have cut over (or back) since the last pass
   ds =
     if ENV["REPLAY_ID"]
       one = db[:battle_records].where(id: ENV["REPLAY_ID"].to_i)
@@ -178,6 +187,7 @@ def replay_row(db, row, dry:)
       return :deferred
     end
   end
+  $waiting.delete(row[:id])
   mark!(row[:id]) unless dry || result
   fault!(row)   # tests only (REPLAY_FAULT_ID)
   result ||=
@@ -228,7 +238,8 @@ if loop_secs.match?(/\A[1-9]\d*\z/)
     # Trainer proof P3: the server NOTIFYs each record it ingests - a trainer's prize
     # waits on this replay, so it runs within a second, not at the next poll.
     begin
-      db.listen("pemk_replay", timeout: interval)
+      # a record waiting for earlier wins: soon again (a proof's grant sends no NOTIFY)
+      db.listen("pemk_replay", timeout: $waiting.empty? ? interval : [interval, 5].min)
     rescue StandardError
       sleep interval
     end

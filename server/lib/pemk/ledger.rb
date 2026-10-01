@@ -194,13 +194,16 @@ module PEMK
         cur = rows.for_update.get(:balance).to_i
         value = yield(cur)
         grants.each do |g|
-          row = { evidence: nil, source: nil, claim_nonce: nil }.merge(g).merge(account_id: account_id,
-                                                                                granted_at: g[:granted_at] || now)
-          # a grant stands; a revoked one gives way to a new grant
-          @db[:badge_grants].insert_conflict(target: %i[account_id badge],
-                                             update: row.slice(:evidence, :source, :claim_nonce, :granted_at),
-                                             update_where: { Sequel[:badge_grants][:evidence] => "revoked" })
-                            .insert(row)
+          since = g[:since]   # when its evidence came (a proof, the operator): after a revocation, it wins
+          row = { evidence: nil, source: nil, claim_nonce: nil }.merge(g.except(:since))
+                                                                .merge(account_id: account_id, granted_at: g[:granted_at] || now)
+          conflict = { target: %i[account_id badge] }
+          if since   # a grant stands; a revocation gives way to evidence that came after it (never to legacy)
+            conflict[:update] = row.slice(:evidence, :source, :claim_nonce, :granted_at)
+            conflict[:update_where] = Sequel.&({ Sequel[:badge_grants][:evidence] => "revoked" },
+                                               Sequel[:badge_grants][:granted_at] < since)
+          end
+          @db[:badge_grants].insert_conflict(**conflict).insert(row)
         end
         if value != cur
           low = @db[:economy_ledger].where(account_id: account_id, field: "badges").min(:seq) || 0

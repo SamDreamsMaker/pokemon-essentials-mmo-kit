@@ -65,8 +65,12 @@ class LedgerTest < Minitest::Test
     grant = -> { @db[:badge_grants].where(account_id: @acct, badge: 1).get(%i[evidence claim_nonce]) }
     assert_equal 0b1, @led.revoke_bits(@acct, 0b10, reason: "badge:revoked", source: "op: a mistake")
     assert_equal ["revoked", nil], grant.(), "kept as revoked"
-    @led.grant_bits(@acct, 0b10, reason: "proof", grants: [{ badge: 1, evidence: "proof", claim_nonce: 8 }])
-    assert_equal ["proof", 8], grant.(), "a new grant takes a revoked one's place"
+    @led.grant_bits(@acct, 0b10, reason: "cutover", grants: [{ badge: 1, evidence: "legacy" }])
+    assert_equal ["revoked", nil], grant.(), "legacy never undoes a revocation"
+    @led.grant_bits(@acct, 0b10, reason: "proof", grants: [{ badge: 1, evidence: "proof", claim_nonce: 7, since: Time.now - 3600 }])
+    assert_equal ["revoked", nil], grant.(), "nor a proof made before it"
+    @led.grant_bits(@acct, 0b10, reason: "proof", grants: [{ badge: 1, evidence: "proof", claim_nonce: 8, since: Time.now + 1 }])
+    assert_equal ["proof", 8], grant.(), "a proof made after takes its place"
     @led.grant_bits(@acct, 0b10, reason: "again", grants: [{ badge: 1, evidence: "operator" }])
     assert_equal ["proof", 8], grant.(), "a grant stands"
   end

@@ -56,7 +56,7 @@ when "grant", "revoke"
   source = [operator, note].reject(&:empty?).join(": ")[0, 160]
   if cmd == "grant"
     after = ledger.grant_bits(acct[:id], 1 << badge, reason: "badge:operator:#{operator}"[0, 64],
-                                                    grants: [{ badge: badge, evidence: "operator", source: source }])
+                                                    grants: [{ badge: badge, evidence: "operator", source: source, since: Time.now }])
     puts "granted badge #{badge} to #{label.(acct)} - it owns #{bits.(after)}"
   else
     after = ledger.revoke_bits(acct[:id], 1 << badge, reason: "badge:revoked:#{operator}"[0, 64], source: source)

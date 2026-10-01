@@ -106,7 +106,7 @@ class ReplayDaemonTrainerTest < Minitest::Test
     id = counting.(2002, 4)
     assert_equal "walk_ok", replay(id, on)[:replay_status], "no verdict yet"
     assert_match(/##{id}: waits - 1 badges in the record, the server knows 0, 1 more wait for their replay/, @out)
-    @db[:badge_cutover].insert(id: 1, at: Time.now)   # the server owns the badges: the daemon told nothing follows it
+    @db[:badge_cutover].insert(id: 2, at: Time.now)   # the server enforces: the daemon told nothing follows it
     assert_equal "walk_ok", replay(id)[:replay_status]
     assert_match(/the owned, then earlier wins unprovable or waiting for their replay/, @out)
     @db[:badge_cutover].delete

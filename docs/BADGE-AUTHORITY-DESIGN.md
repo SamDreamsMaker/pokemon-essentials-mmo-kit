@@ -134,15 +134,18 @@ computed index, a fill, an assignment) and, in the game's code, any to the playe
     logged and flagged as B1 does - but WAITING (not shown, no flag) for a claim whose
     won record is not in yet: over its hourly cap, a reconnect.
   - *The proof checks count owned badges only* (the replay daemon, obedience; with
-    `PEMK_BADGE_AUTHORITY=on` in its environment, or - told nothing - once the server has
-    cut over; otherwise P4's rule, no more than owned; its boot line says which): a record
+    `PEMK_BADGE_AUTHORITY=on` in its environment, or - told nothing - while the server
+    says it enforces: `badge_cutover` row 2, written at an enforcing boot and gone at any
+    other, read at every pass; otherwise P4's rule, no more than owned; it says which when
+    it changes): a record
     claiming more badges than owned, covered by earlier wins shown then not replayable,
     is unprovable (the allowance, no flag); where wins recorded before it (its own never -
     it would wait for itself) and still undecided are needed, it gets no verdict yet -
     their verdict decides, a made-up one refuted covering nothing - retried at the next
     pass, at most ten minutes from when it began waiting (not from its arrival: a backlog
-    replayed at once must not turn an honest record unprovable), then unprovable; else
-    refuted. A win claimed with no seed was never shown: it covers nothing. Pending
+    replayed at once must not turn an honest record unprovable; a daemon in loop mode asks
+    again within 5 s while one waits; a one-shot run never expires one), then unprovable;
+    else refuted. A win claimed with no seed was never shown: it covers nothing. Pending
     counted at the record's time would let a made-up win open a window for another
     battle's record.
   - *The boot pass*, before the reactor starts, at every enforcing boot - a dry run when
@@ -158,7 +161,11 @@ computed index, a fill, an assignment) and, in the game's code, any to the playe
     only at accounts whose ledger is not their grants, or with a win proven since its last
     whole pass; an account it fails on keeps what it holds and the pass is done again at
     the next boot. An operator's revocation is kept as a revoked grant: no legacy bit,
-    no win proven before it grants the badge again - one proven after does.
+    no win proven before it grants the badge again - one proven after does, as does a win
+    waiting for its replay as it came; a frame showing the badge is REVOKED (no sign). A
+    revocation reaches a player at their next login (revoke while they are away: until
+    then their records counting the badge are refused), and the console's clock is the
+    server's (run it where the server runs: proofs and revocations compare times).
   - *Client* (`badge_hold`): the badge frame waits (60 s at most, by the clock) while a
     prize claim or a kept record is unanswered, and goes out again after each claim's and
     record's first answer; `login_ok` names the placements whose win gives a badge, and

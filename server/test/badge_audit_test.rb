@@ -212,6 +212,21 @@ class BadgeAuditTest < Minitest::Test
     assert_equal [[2, "the win over CAMPER Liam was claimed with no seed"]], audit.plan(@me, 0b100, cutover: false)[:unprovable]
   end
 
+  # A revoked badge a frame shows: REVOKED - not a sign; a win proven since, or waiting for
+  # its replay, gives it again.
+  def test_a_revoked_badge_is_judged_revoked
+    @db[:badge_grants].insert(account_id: @me, badge: 1, evidence: "revoked", granted_at: Time.now - 30)
+    @db[:badge_grants].insert(account_id: @me, badge: 0, evidence: "revoked", granted_at: Time.now - 30)
+    assert_equal [[0, :revoked], [1, :revoked]], verdict(0b11), "no battle gives badge 1: still revoked, no refusal"
+    claim(1, proof: "proven")
+    @db[:money_claims].where(nonce: 1).update(proof_at: Time.now - 60)
+    assert_equal [[0, :revoked]], verdict(1), "a proof from before the revocation"
+    claim(2, record: true)
+    assert_equal [[0, :pending]], verdict(1), "a win waiting for its replay: shown, granted once proven"
+    @db[:money_claims].where(nonce: 1).update(proof_at: Time.now)
+    assert_equal [[0, :explained]], verdict(1), "a proof since"
+  end
+
   # The operator's revocation stands at the next boot pass: no legacy, no proof made before
   # it - a win proven after it grants the badge again.
   def test_a_revocation_stands
@@ -225,6 +240,7 @@ class BadgeAuditTest < Minitest::Test
     @db[:badge_grants].insert(account_id: @me, badge: 0, evidence: "revoked", granted_at: Time.now - 30)
     plan = audit.plan(@me, 0b101, cutover: true)
     assert_equal 0, plan[:owned], "revoked: neither its legacy bit nor its earlier proof"
+    assert_equal [[0, "the operator revoked it"], [2, "the operator revoked it"]], plan[:revoked], "said, removed"
     @db[:money_claims].where(nonce: 1).update(proof_at: Time.now)
     assert_equal 0b100, audit.plan(@me, 0, cutover: false)[:owned], "proven after the revocation: granted again"
     assert_equal 0, audit.granted_bits(@me), "a revoked grant owns nothing"

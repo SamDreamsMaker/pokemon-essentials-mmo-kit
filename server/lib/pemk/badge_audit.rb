@@ -12,6 +12,8 @@ module PEMK
   #   pending    - such a win's record is on its claim's seed, its replay not decided yet;
   #   unprovable - such a win was claimed with no seed, or its record could not be
   #                replayed: no replay proves it (the server's side, or a seed lost);
+  #   waiting    - such a win's claim, its record not in yet;
+  #   revoked    - the operator revoked it, and no win proven since gives it again;
   #   refused    - anything else: no source, no battle gives it, no such win claimed, or
   #                its win refuted or never recorded.
   # B1 (shadow) logs the verdicts; B2 (enforcement) owns the proven, shows the pending.
@@ -32,7 +34,7 @@ module PEMK
       bits = bits_of(new_bits)
       return [] if bits.empty?
 
-      seen = nil   # the account's claims and won records: read once, and only for a badge a battle gives
+      seen = nil   # the account's claims, won records and revocations: read once per judge
       bits.map { |badge| [badge, *judge_bit(badge) { seen ||= claims_seen(account_id) }] }
     end
 
@@ -101,7 +103,7 @@ module PEMK
       verdicts = judge(account_id, held & ~(owned | pending))
       words = ->(v) { verdicts.select { |_, verdict, _| verdict == v }.map { |b, _, why| [b, why] } }
       { owned: owned, legacy: legacy, proof: proof, pending: held & pending, refused: words.(:refused),
-        unprovable: words.(:unprovable), waiting: words.(:waiting) }
+        unprovable: words.(:unprovable), waiting: words.(:waiting), revoked: words.(:revoked) }
     end
 
     # The ledger's badges before the account's first judged frame: B2's cutover takes them
@@ -125,18 +127,15 @@ module PEMK
 
     private
 
-    # yields for [claims, { seed row id => [its won record's replay status, team check, detail] }]
+    # yields for [claims, { seed row id => [its won record's replay status, team check,
+    # detail, id] }, { revoked badge => when }]
     def judge_bit(badge)
+      claims, recorded, revoked = yield
       sources = @world.badge_sources(badge)
-      return [:refused, "the exports do not say what gives badges"] if sources.nil?
-      return [:refused, "nothing the exports read gives it"] if sources.empty?
-
-      wins = sources.select { |s| s[:trainers] }
-      return [:refused, "no battle gives it"] if wins.empty?
-
-      claims, recorded = yield
-      mine = claims.select { |c| trainers_of(c).any? { |t| @world.win_bits(t[3], t[4], t[0], t[1], t[2]).include?(badge) } }
-      if (c = mine.find { |x| x[:proof] == "proven" })
+      wins = Array(sources).select { |s| s[:trainers] }
+      mine = wins.empty? ? [] : claims.select { |c| trainers_of(c).any? { |t| @world.win_bits(t[3], t[4], t[0], t[1], t[2]).include?(badge) } }
+      cut = revoked[badge]   # the operator revoked it: only a win proven since grants it again
+      if (c = mine.find { |x| x[:proof] == "proven" && (cut.nil? || (x[:proof_at] && x[:proof_at] > cut)) })
         return [:explained, "the win over #{names(c)} is proven"]
       end
       # (a voided claim counts only proven: its badge was the account's at the proof)
@@ -145,6 +144,10 @@ module PEMK
       if (c = live.find { |x| state.(x) == :open })
         return [:pending, "the win over #{names(c)} waits for its replay"]
       end
+      return [:revoked, "the operator revoked it"] if cut
+      return [:refused, "the exports do not say what gives badges"] if sources.nil?
+      return [:refused, "nothing the exports read gives it"] if sources.empty?
+      return [:refused, "no battle gives it"] if wins.empty?
       if (c = live.find { |x| x[:proof] == "unprovable" || state.(x) == :unprovable })
         return [:unprovable, "the win over #{names(c)} could not be replayed"]
       end
@@ -192,7 +195,8 @@ module PEMK
       claims = @db[:money_claims].where(account_id: account_id, kind: KINDS, verdict: MoneyClaims::KEYED,
                                         map: @world.badge_maps)
                                  .where(Sequel.|({ voided_at: nil }, { proof: "proven" }))
-                                 .select(:nonce, :trainers, :proof, :proof_record_id, :trainer_battle_id, :voided_at).all
+                                 .select(:nonce, :trainers, :proof, :proof_at, :proof_record_id, :trainer_battle_id,
+                                         :voided_at).all
       ids = claims.filter_map { |c| c[:trainer_battle_id] }
       recorded = {}
       unless ids.empty?
@@ -201,7 +205,7 @@ module PEMK
           recorded[r[:trainer_battle_id]] = [r[:replay_status], r[:team_check], r[:replay_detail], r[:id]]
         end
       end
-      [claims, recorded]
+      [claims, recorded, @db[:badge_grants].where(account_id: account_id, evidence: "revoked").select_hash(:badge, :granted_at)]
     end
 
     # The account's proven wins, their claims voided since or not (B2 granted them at the

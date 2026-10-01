@@ -260,6 +260,16 @@ class ServerBadgeEnforceTest < Minitest::Test
     blocked&.close!
   end
 
+  # badge_cutover row 2: the server enforces - the replay daemon told nothing follows it.
+  def test_the_enforcing_mark
+    start_server
+    @server.send(:badge_mark_enforcing)
+    refute @db[:badge_cutover].where(id: 2).empty?
+    @server.stop
+    start_server({ "PEMK_BADGE_AUTHORITY" => "shadow" }, enforce: false)
+    assert @db[:badge_cutover].where(id: 2).empty?, "a boot not enforcing takes it away"
+  end
+
   def put_badges(id, mask) = @db[:economy_balances].insert(account_id: id, field: "badges", balance: mask, last_seq: 0)
 
   def account(email) = @db[:accounts].insert(email: email, password_hash: "x", status: "active", created_at: Time.now)
