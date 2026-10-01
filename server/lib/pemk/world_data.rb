@@ -326,8 +326,56 @@ module PEMK
       @badge_sources.fetch(badge.to_i, [])
     end
 
-    # The badge sets the export could not read (a computed index): [{ where..., script: }].
+    # The badge sets the export could not read (a computed index, the game's own code):
+    # [{ where..., script: }].
     attr_reader :badge_unknown
+
+    # -> the badges a win over this trainer at this placement gives.
+    def win_bits(map_id, event_id, type, name, version)
+      return [] unless @badge_sources
+
+      id = [type.to_s, name.to_s, version.to_i]
+      @badge_sources.select do |_, sources|
+        sources.any? { |s| s[:map] == map_id && s[:event] == event_id && Array(s[:trainers]).include?(id) }
+      end.keys.sort
+    end
+
+    # Why the server could not own the badges this export gives: what gives a badge it
+    # cannot see, or a win no replay can prove. -> [why, ...] ([] when it can)
+    def badge_blockers(badges_max: nil)
+      return ["the exports predate the badge sources (one debug launch regenerates them)"] unless @badge_sources
+
+      out = @badge_unknown.map { |u| "a badge set the export cannot read: #{badge_where(u)} (#{u['script']})" }
+      wins = Hash.new { |h, k| h[k] = [] }   # [map, event, trainer] => badges its win gives
+      @badge_sources.sort.each do |badge, sources|
+        out << "badge #{badge} is over the cap of #{badges_max}" if badges_max && badge >= badges_max
+        sources.each do |s|
+          where = badge_where(s.transform_keys(&:to_s))
+          if s[:trainers].nil?
+            out << "badge #{badge} is given with no battle (#{where})"
+          elsif s[:trainers].length > 1
+            out << "badge #{badge} is a battle against several trainers (#{where}): no replay proves it"
+          elsif s[:no_money]
+            out << "badge #{badge}'s battle pays nothing (#{where}): no claim proves it"
+          else
+            wins[[s[:map], s[:event], s[:trainers][0]]] << badge
+          end
+        end
+      end
+      wins.each do |(map, event, t), badges|
+        next if badges.uniq.length < 2
+
+        out << "#{t[0]} #{t[1]} v#{t[2]} (map #{map} event #{event}) gives badges #{badges.uniq.join(', ')}: which, the win cannot say"
+      end
+      out
+    end
+
+    def badge_where(u)
+      return "common event #{u['common_event']}" if u["common_event"]
+      return "#{u['file']}:#{u['line']}" if u["file"]
+
+      "map #{u['map']} event #{u['event']} page #{u['page']}"
+    end
 
     # Money authority: the versions of +type+ / +name+ the game registers as a partner
     # trainer (pbRegisterPartner), whose party may hold an Amulet Coin. nil when the export
@@ -561,7 +609,7 @@ module PEMK
                      [t[0].to_s, t[1].to_s, t[2]].freeze if t.is_a?(Array) && t.length == 3 && t[2].is_a?(Integer)
                    end
                    { map: e["map"], event: e["event"], page: e["page"].is_a?(Integer) ? e["page"] : 0,
-                     trainers: trainers.empty? ? nil : trainers.freeze }
+                     trainers: trainers.empty? ? nil : trainers.freeze, no_money: e["no_money"] == true }
                  end
         by_badge[e["badge"]] << source.freeze if source
       end

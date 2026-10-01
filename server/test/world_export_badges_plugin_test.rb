@@ -1,5 +1,7 @@
 require "minitest/autorun"
 require "rbconfig"
+require "tmpdir"
+require "fileutils"
 
 # Badge authority B0 (docs/BADGE-AUTHORITY-DESIGN.md): the world export says what gives
 # each badge. A badge set at the own level of a trainer battle's win branch names that
@@ -43,7 +45,14 @@ class WorldExportBadgesPluginTest < Minitest::Test
       c.(355, ["pbPlayer.badges[5] = true"], 1),
       c.(412, [], 0), c.(0, [])
     ])])
-    print PEMK::WorldExport.badge_sources([[10, gym], [11, pair], [12, npc], [13, lost]]).inspect
+    # a battle that pays nothing: no prize, no claim to prove its win
+    free = Ev.new(7, 4, 4, [Page.new(nil, [
+      c.(355, [%q{setBattleRule("noMoney")}]),
+      c.(111, [12, %q{TrainerBattle.start(:LEADER_D, "D")}]),
+      c.(355, ["$player.badges[6] = true"], 1),
+      c.(412, [], 0), c.(0, [])
+    ])])
+    print PEMK::WorldExport.badge_sources([[10, gym], [11, pair], [12, npc], [13, lost], [14, free]]).inspect
   RUBY
 
   def test_what_gives_each_badge
@@ -57,7 +66,33 @@ class WorldExportBadgesPluginTest < Minitest::Test
                  list[2], "a double battle: either leader's win")
     assert_equal({ badge: 1, map: 12, event: 5, page: 0 }, list[3], "given by talking: no battle")
     assert_equal({ badge: 5, map: 13, event: 6, page: 0 }, list[4], "a negated battle's branch is the loss's")
-    assert_equal 5, list.size, "a test of a badge is no source"
+    assert_equal({ badge: 6, map: 14, event: 7, page: 0, trainers: [["LEADER_D", "D", 0]], no_money: true }, list[5])
+    assert_equal 6, list.size, "a test of a badge is no source"
     assert_equal [{ map: 12, event: 5, page: 1, script: "$player.badges[n] = true" }], got[:unknown]
+  end
+
+  # A game's own code setting a badge (a plugin, an edited script) is unknown to the
+  # server; PEMK's own and the engine's debug menu are not the game's.
+  CODE_RUNNER = <<~'RUBY'
+    module PEMK; def self.log(_m); end; end
+    module Settings; PHONE_REMATCHES_POSSIBLE_FROM_BEGINNING = false; end
+    module GameData; module Trainer; def self.each; end; end; end
+    load ARGV[0]
+    print PEMK::WorldExport.badge_code_writes.inspect
+  RUBY
+
+  def test_the_game_s_own_code_setting_badges
+    Dir.mktmpdir do |dir|
+      { "Plugins/MyGame/badges.rb" => "# $player.badges[0] = true\ndef win\n  $player.badges[2] = true\nend\n",
+        "Plugins/PEMK/004_Badges.rb" => "$player.badges[i] = v\n",
+        "Data/Scripts/020_Debug/menu.rb" => "24.times { |i| $player.badges[i] = true }\n",
+        "Data/Scripts/015_Player.rb" => "return $player.badges[1] == true\n" }.each do |path, text|
+        FileUtils.mkdir_p(File.join(dir, File.dirname(path)))
+        File.write(File.join(dir, path), text)
+      end
+      out = IO.popen([RbConfig.ruby, "-W0", "-e", CODE_RUNNER, EXPORT], err: %i[child out], chdir: dir, &:read)
+      assert $?.success?, "runner crashed:\n#{out}"
+      assert_equal [{ file: "Plugins/MyGame/badges.rb", line: 3, script: "$player.badges[2] = true" }], eval(out) # rubocop:disable Security/Eval
+    end
   end
 end

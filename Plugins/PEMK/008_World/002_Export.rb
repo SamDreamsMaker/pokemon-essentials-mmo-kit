@@ -777,7 +777,10 @@ module PEMK
             where = { :map => map_id, :event => event.id, :page => k }
             if (m = text.match(BADGE_SET))
               entry = { :badge => m[1].to_i }.merge(where)
-              entry[:trainers] = won[i] if won[i]
+              if won[i]
+                entry[:trainers] = won[i][0]
+                entry[:no_money] = true if won[i][1]   # no prize, so no claim to prove it
+              end
               list << entry
             else
               unknown << where.merge(:script => text.strip[0, 80])
@@ -793,7 +796,7 @@ module PEMK
           m ? list << { :badge => m[1].to_i, :common_event => ce.id } : unknown << { :common_event => ce.id, :script => text.strip[0, 80] }
         end
       end
-      { :list => list, :unknown => unknown }
+      { :list => list, :unknown => unknown + badge_code_writes }
     end
 
     # Yields each script line (355, 655) of +list+ that sets a badge: [index, text].
@@ -808,11 +811,21 @@ module PEMK
 
     # -> { command index => [[type, name, version], ...] } for the commands at the own
     # level of each trainer battle's win branch (up to its else or its end).
+    # ... with whether that battle pays nothing (a "noMoney" rule since the page's last
+    # battle): -> { index => [trainers, no_money] }
     def badge_win_branches(list)
       won = {}
+      rules = +""   # the scripts since the last battle: the next one's rules
       list.each_with_index do |cmd, i|
         params = cmd.respond_to?(:parameters) ? cmd.parameters : nil
-        next unless cmd.code == 111 && params && params[0] == 12 && params[1].to_s.match?(WIN_CONDITION)
+        next unless params
+
+        rules << params[0].to_s << "\n" if [355, 655].include?(cmd.code)
+        next unless cmd.code == 111 && params[0] == 12 && params[1].to_s.include?("TrainerBattle.start(")
+
+        free = rules.match?(NO_MONEY)
+        rules = +""
+        next unless params[1].to_s.match?(WIN_CONDITION)
 
         trainers = battle_calls(params[1].to_s).flatten(1)
         next if trainers.empty?
@@ -820,10 +833,26 @@ module PEMK
         list[(i + 1)..-1].each_with_index do |c, j|
           break if c.indent <= cmd.indent
 
-          won[i + 1 + j] = trainers if c.indent == cmd.indent + 1
+          won[i + 1 + j] = [trainers, free] if c.indent == cmd.indent + 1
         end
       end
       won
+    end
+
+    # The game's own code that sets a badge (plugins, edited engine scripts): unknown to the
+    # server. PEMK's own and the debug menu aside. -> [{ :file, :line, :script }]
+    def badge_code_writes
+      files = Dir.glob("Plugins/**/*.rb").reject { |f| f.start_with?("Plugins/PEMK/") } +
+              Dir.glob("Data/Scripts/**/*.rb").reject { |f| f.include?("020_Debug") }
+      files.sort.flat_map do |f|
+        File.readlines(f).each_with_index.filter_map do |text, i|
+          next if text.lstrip.start_with?("#") || !text.match?(BADGE_ANY)
+
+          { :file => f, :line => i + 1, :script => text.strip[0, 80] }
+        end
+      end
+    rescue StandardError
+      []
     end
 
     # Money authority: the partner trainers the game registers (pbRegisterPartner), whose

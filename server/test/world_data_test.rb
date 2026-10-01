@@ -213,10 +213,42 @@ class WorldDataTest < Minitest::Test
     }
     w = load(doc)
     assert w.badge_marks?
-    assert_equal [{ map: 10, event: 3, page: 0, trainers: [["LEADER_Brock", "Brock", 0]] }], w.badge_sources(0)
-    assert_equal [{ map: 12, event: 5, page: 1, trainers: nil }, { common_event: 7 }], w.badge_sources(1)
+    assert_equal [{ map: 10, event: 3, page: 0, trainers: [["LEADER_Brock", "Brock", 0]], no_money: false }],
+                 w.badge_sources(0)
+    assert_equal [{ map: 12, event: 5, page: 1, trainers: nil, no_money: false }, { common_event: 7 }], w.badge_sources(1)
     assert_equal [], w.badge_sources(2), "nothing the export read gives badge 2"
     assert_equal 1, w.badge_unknown.size
+    assert_equal [0], w.win_bits(10, 3, "LEADER_Brock", "Brock", 0)
+    assert_equal [], w.win_bits(10, 4, "LEADER_Brock", "Brock", 0), "another event"
+    assert_equal ["a badge set the export cannot read: map 12 event 5 page 2 ($player.badges[n] = true)",
+                  "badge 1 is given with no battle (map 12 event 5 page 1)",
+                  "badge 1 is given with no battle (common event 7)"], w.badge_blockers
+  end
+
+  # What keeps the server from owning the badges an export gives.
+  def test_badge_blockers
+    doc = sample
+    assert_match(/predate the badge sources/, load(doc).badge_blockers[0])
+    brock = ["LEADER_Brock", "Brock", 0]
+    doc["badge_sources"] = {
+      "list" => [{ "badge" => 0, "map" => 10, "event" => 3, "page" => 0, "trainers" => [brock] }],
+      "unknown" => [{ "file" => "Plugins/MyGame/x.rb", "line" => 3, "script" => "$player.badges[2] = true" }]
+    }
+    assert_equal ["a badge set the export cannot read: Plugins/MyGame/x.rb:3 ($player.badges[2] = true)"],
+                 load(doc).badge_blockers
+    doc["badge_sources"]["unknown"] = []
+    assert_equal [], load(doc).badge_blockers, "a single trainer's paying win: nothing blocks"
+    doc["badge_sources"]["list"] += [
+      { "badge" => 1, "map" => 10, "event" => 3, "page" => 0, "trainers" => [brock] },
+      { "badge" => 4, "map" => 11, "event" => 4, "page" => 0, "trainers" => [["A", "A", 0], ["B", "B", 0]] },
+      { "badge" => 6, "map" => 14, "event" => 7, "page" => 0, "trainers" => [["D", "D", 0]], "no_money" => true },
+      { "badge" => 9, "map" => 15, "event" => 1, "page" => 0, "trainers" => [["E", "E", 0]] }
+    ]
+    assert_equal ["badge 4 is a battle against several trainers (map 11 event 4 page 0): no replay proves it",
+                  "badge 6's battle pays nothing (map 14 event 7 page 0): no claim proves it",
+                  "badge 9 is over the cap of 8",
+                  "LEADER_Brock Brock v0 (map 10 event 3) gives badges 0, 1: which, the win cannot say"],
+                 load(doc).badge_blockers(badges_max: 8)
   end
 
   def test_prize_events
