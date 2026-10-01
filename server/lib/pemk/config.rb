@@ -243,9 +243,11 @@ module PEMK
       @money_unproven_daily = raw.match?(/\A\d+\z/) ? raw.to_i : 5_000
       # Badge authority (docs/BADGE-AUTHORITY-DESIGN.md): a badge is the server's when its
       # battle's win is proven. off = nothing; shadow = each new badge a client reports is
-      # judged and logged (explained / pending / would refuse); on = the server owns them,
-      # where trainer proof and money authority enforce and nothing keeps it from it - else
-      # as shadow.
+      # judged and logged (explained / pending / would refuse) - and, with trainer proof,
+      # the clients fight the battles that give one alone and wait longer for their seeds,
+      # so those wins are proven by the time it owns them; on = the server owns them, where
+      # trainer proof and money authority enforce and nothing keeps it from it - else as
+      # shadow.
       bmode = env.fetch("PEMK_BADGE_AUTHORITY", "off").to_s.strip.downcase
       @badge_authority = %w[off shadow on].include?(bmode) ? bmode.to_sym : :off
       # The badge writes the operator says are not the game's - a debug helper the export

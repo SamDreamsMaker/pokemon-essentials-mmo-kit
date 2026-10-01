@@ -84,7 +84,8 @@ Two of these need no edit to the game (2026-10-01, from the demo itself):
   badge and that a replay proves once fought alone (one trainer the export places, a
   prize, no size rule - the others change nothing by it); a client fighting one of them
   against that trainer alone (inside `TrainerBattle.start_core`, not a trainer who
-  waited for another) under no size rule sets the noPartner rule as the trainer loads -
+  waited for another), with no size rule or a single one, online and seeded, sets the
+  noPartner rule as the trainer loads -
   before the game decides whether the partner joins; the battle's own rules clear after
   it. The boot log counts them. From shadow on, so a win then is seeded, and proven by
   the time the server owns the badges. Owning them, the server needs `badge_alone`
@@ -199,16 +200,17 @@ Two of these need no edit to the game (2026-10-01, from the demo itself):
     (`badge_alone`, section 4). Login always carries `:badges` (0 without a row).
   - *Operator*: `bin/pemk_badges.rb list | grant | revoke | unowned` (the wins a player
     may have earned that own nothing: claimed with no seed, not replayable, refuted).
-  - Autotest 089, on the demo's own export since its maps were edited (2026-10-01: the
-    house help NPC gives no badges and no debug mode, Brock's battle has a noPartner
-    rule - the maps are not in the repository: a stock demo needs `PEMK_BADGE_IGNORE=3:7`,
-    and its clients fight Brock alone): an
-    honest badge shown at once, owned after the replay, kept across a relogin and a resume;
-    a badge frame before its claim keeps the badge and flags no one; killed before its
-    checkpoint: claim void, the badge gone while unproven, Brock again; a rogue's frame
-    never raises; a made-up record pending then refuted, and a record sent meanwhile
-    claiming the badge refuted; the cutover's cases; on, off (flag state off), on restores
-    every grant; an operator grant; a P4-era client gets update_required.
+  - Autotest 089, on the demo's own export (2026-10-01 Sam's maps were edited: the house
+    help NPC gives no badges and no debug mode, Brock's battle has a noPartner rule; the
+    maps are not in the repository, so `server/data/world.json` describes the edited demo
+    until a stock clone's first debug launch exports its own - safe: the server only
+    refuses more. 089 sets `PEMK_BADGE_IGNORE=3:7` for a stock demo's house, whose
+    clients fight Brock alone): an honest badge shown at once, owned after the replay,
+    kept across a relaunch; a rogue's frame never raises; a client that cannot hold its
+    badge frame gets update_required. The unit tests cover the rest: a refuted or
+    unreplayable win, the cutover's cases (`server_badge_enforce_test`), operator grants
+    and revocations (`ledger_test`, `badges_cli_test`), a badge frame held for its claim
+    (`badge_hold_plugin_test`).
   - Autotest 090: a copy of the demo's export says Camper Liam's win gives a badge (he has
     two Pokemon: a partner would join him), and May is the player's partner - Liam is
     fought alone, seeded, replayed, and his badge granted; a B2 client without

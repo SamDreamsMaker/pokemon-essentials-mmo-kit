@@ -14,6 +14,7 @@ require "tmpdir"
 # none): the server names it as what keeps it from owning the badges.
 WORLD_088 = File.join(Dir.tmpdir, "pemk_world_088.json")
 begin
+  File.delete(WORLD_088) if File.exist?(WORLD_088)   # never a stale copy: no file, no badges
   world = JSON.parse(File.read(File.join(Autotest::SERVER_DIR, "data", "world.json")))
   (world["badge_sources"] ||= { "list" => [], "unknown" => [] })["unknown"] <<
     { "map" => 3, "event" => 7, "page" => 0, "script" => "for i in 0...16; $player.badges[i] = true; end" }

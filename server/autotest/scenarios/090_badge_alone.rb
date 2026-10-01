@@ -12,6 +12,7 @@ require "tmpdir"
 # the badge. A client that cannot fight it alone must update.
 WORLD_090 = File.join(Dir.tmpdir, "pemk_world_090.json")
 begin
+  File.delete(WORLD_090) if File.exist?(WORLD_090)   # never a stale copy: no file, no badges
   world = JSON.parse(File.read(File.join(Autotest::SERVER_DIR, "data", "world.json")))
   (world["badge_sources"] ||= { "list" => [], "unknown" => [] })["list"] <<
     { "badge" => 1, "map" => 10, "event" => 4, "page" => 0, "trainers" => [["CAMPER", "Liam", 0]], "call" => 0 }
@@ -25,7 +26,7 @@ Autotest.scenario "a badge's battle is fought alone",
                            PEMK_GIFT_ENFORCE: "on", PEMK_SHOP_ENFORCE: "on", PEMK_BATTLE_ENFORCE_ENCOUNTERS: "on",
                            PEMK_BATTLE_ENFORCE_RNG: "on", PEMK_BATTLE_ENFORCE_TEAMS: "on",
                            PEMK_BATTLE_ENFORCE_EXP: "on", PEMK_TRAINER_PROOF: "on", PEMK_BADGE_AUTHORITY: "on",
-                           PEMK_WORLD: WORLD_090 },
+                           PEMK_WORLD: WORLD_090, PEMK_BADGE_IGNORE: "3:7" },   # a stock demo's house helper
                   budget: 480 do |s|
   s.check("the server owns the badges, its clients fight their battles alone") do
     s.server.grep(/badge authority ENFORCED .*badge_alone/).any?
@@ -55,10 +56,17 @@ Autotest.scenario "a badge's battle is fought alone",
   a.fight_battle
   a.converse
 
-  claim = s.db[:money_claims].where(account_id: id, kind: "trainer").first
-  s.check("its seed was asked: May did not join") { claim && !claim[:trainer_battle_id].nil? }
-  record = claim && s.db[:battle_records].where(trainer_battle_id: claim[:trainer_battle_id], outcome: 1).first
-  s.check("the win is recorded") { !record.nil? }
+  claim = record = nil
+  s.check("its seed was asked: May did not join") do
+    claim = s.wait_for("the prize claim on its seed", seconds: 30) do
+      s.db[:money_claims].where(account_id: id, kind: "trainer").exclude(trainer_battle_id: nil).first
+    end
+  end
+  s.check("the win is recorded") do
+    record = s.wait_for("the won record", seconds: 30) do
+      s.db[:battle_records].where(trainer_battle_id: claim[:trainer_battle_id], outcome: 1).first
+    end
+  end
   if record
     out, = Open3.capture2e({ "DATABASE_URL" => ENV.fetch("DATABASE_URL"), "REPLAY_ID" => record[:id].to_s,
                              "PEMK_WORLD" => WORLD_090 },
