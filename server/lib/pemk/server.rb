@@ -3450,6 +3450,8 @@ module PEMK
         trainer_seed: !@trainer_battles.nil?,                                # a trainer battle asks for its seed first
         trainer_proof: @trainer_enforce ? "on" : "off",                      # P4: a prize waits for its battle's proof
         record_ack: !@trainer_proofs.nil?,                                   # P4: a trainer battle's record is acknowledged
+        badge_hold: badge_enforce?,                                          # B2: a badge frame waits for its win's claim
+        badge_battles: (badge_enforce? ? @world.badge_battles : nil),        # B2: ... their seeds waited for longer
         flags_seq: (@flag_state ? (@flag_state.snapshot(account_id)&.fetch(:last_seq, 0) || 0) : 0),
         flag_policy: flag_policy,
         flag_facts: (@config.flag_state == :on && @flag_state ? @flag_state.materialize_facts(account_id) : nil) }

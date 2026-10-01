@@ -232,6 +232,7 @@ class WorldDataTest < Minitest::Test
     assert_equal [], w.badge_sources(2), "nothing the export read gives badge 2"
     assert_equal 1, w.badge_unknown.size
     assert_equal [0], w.win_bits(10, 3, "LEADER_Brock", "Brock", 0)
+    assert_equal [["LEADER_Brock", "Brock", 0, 10, 3]], w.badge_battles, "the battles whose win gives a badge"
     assert_equal [], w.win_bits(10, 4, "LEADER_Brock", "Brock", 0), "another event"
     assert_equal ["a badge set the export cannot read: map 12 event 5 page 2 ($player.badges[n] = true)",
                   "badge 1 is given with no battle (map 12 event 5 page 1)",

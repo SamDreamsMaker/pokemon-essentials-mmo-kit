@@ -56,6 +56,13 @@ class Player
     sb
   end
 
+  # The badges as the :badges bitmask (bits 0..62).
+  def pokemmo_badges_mask
+    mask = 0
+    badges.each_with_index { |v, i| mask |= (1 << i) if v && i < PEMK::BADGE_BITS }
+    mask
+  end
+
   # Trusted applier for server reconciliation (:econ_ack/:econ_rej for :badges, plus
   # reconcile-on-load): decode the authoritative bitmask onto the badges array. Silent
   # (never re-notifies) and ensure-guarded — an exception mid-loop must not leave the

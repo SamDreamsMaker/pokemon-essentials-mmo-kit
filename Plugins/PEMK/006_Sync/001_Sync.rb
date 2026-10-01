@@ -23,6 +23,7 @@ module PEMK
     SAVE_RETRY_FIRST  = 5.0     # a save not written goes out again after this; doubles each time
     SAVE_RETRY_MAX    = 60.0
     BLOB_CLAIMS_MAX   = 64      # prize claims a save names (the newest; the server keeps as many)
+    BADGE_HOLD_FRAMES = 1800    # ~30 s at most a badge frame waits for its win's claim and record (B2)
 
     @econ        = {}           # field => latest absolute value (coalesced; badges ride here as a :badges bitmask)
     @econ_sent   = {}           # field => [seq, value] of its latest frame (an answer to an older one is stale)
@@ -44,6 +45,8 @@ module PEMK
     @save_retry   = SAVE_RETRY_FIRST
     @save_wait    = nil     # mono before which a save not written is not sent again
     @save_failing = false   # the player was told saves fail: tell them when one lands
+    @badge_hold   = false   # the server owns the badges (login flag, B2): a badge frame waits for its win
+    @badge_hold_since = nil # frame the badges began waiting
 
     module_function
 
@@ -52,6 +55,8 @@ module PEMK
     def reset
       @econ = {}
       @econ_sent = {}
+      @badge_hold = false
+      @badge_hold_since = nil
       @inv_dirty = false
       @inv_last = nil
       @mon_dirty = false
@@ -166,6 +171,38 @@ module PEMK
       (PEMK::Checkpoint.request(:t1) rescue nil)
     end
 
+    # Badge authority B2 (login flag): the server owns the badges.
+    def adopt_badge_hold(v)
+      @badge_hold = v == true
+    end
+
+    # B2: while a trainer prize claim or a battle record of this connection has no answer,
+    # the badges wait - the server shows a badge once the win it comes from is in - at
+    # most BADGE_HOLD_FRAMES.
+    def badges_waiting?
+      return false unless @badge_hold
+
+      waiting = (PEMK::PrizeClaim.unanswered? rescue false) || (PEMK::BattleRng.records_unacked? rescue false)
+      unless waiting
+        @badge_hold_since = nil
+        return false
+      end
+      @badge_hold_since ||= frame
+      frame - @badge_hold_since < BADGE_HOLD_FRAMES
+    end
+
+    # B2: after a claim's or a record's answer the badges go out again - the server answers
+    # with what the client shows, the win just in included. No checkpoint.
+    def remark_badges
+      return unless @badge_hold && $player
+
+      mask = ($player.pokemmo_badges_mask rescue nil)
+      return unless mask.is_a?(Integer)
+
+      @econ[:badges] = mask
+      touch
+    end
+
     # What an :econ_ack / :econ_rej leaves +field+ at, or nil to leave it alone. Only the
     # answer to the field's latest frame counts: an older one carries a balance a newer
     # frame already moved past. While a newer change waits to go out, the answer lands as
@@ -255,9 +292,12 @@ module PEMK
       # M3: the money waits for the verdicts of the prizes the engine added this session,
       # so the server never judges a frame ahead of its claims.
       held = !doubt && (PEMK::PrizeClaim.holding? rescue false)
+      # B2: the badges wait for the claim and the record of the win that gives them.
+      bheld = !doubt && badges_waiting?
       unless doubt
         @econ.each do |field, value|
           next if held && field == :money
+          next if bheld && field == :badges
 
           seq = (@seq[:economy] += 1)
           c.send_message({ :type => :econ, :field => field, :value => value, :seq => seq })
@@ -342,7 +382,10 @@ module PEMK
         @mon_dirty = more ? true : false   # stay dirty while mints remain pending
       end
       unless doubt
-        @econ = held && @econ.key?(:money) ? { :money => @econ[:money] } : {}
+        kept = {}
+        kept[:money] = @econ[:money] if held && @econ.key?(:money)
+        kept[:badges] = @econ[:badges] if bheld && @econ.key?(:badges)
+        @econ = kept
       end
       # If a channel is still dirty (e.g. the bag couldn't be read this pass so
       # @inv_dirty stayed set), keep the debounce/staleness clocks armed so tick()

@@ -38,6 +38,7 @@ module PEMK
     @asked = {}   # nonce => when this connection last sent it (monotonic)
     @local = {}   # M3: nonce => [money the engine added here, when, released, dropped]
     @late  = {}   # M3: nonces still waiting in the save when a fresh login adopted the balance
+    @answered = {}   # B2: nonces this connection had an answer for (held ones too)
     @rng   = nil
 
     module_function
@@ -48,6 +49,13 @@ module PEMK
     def reset
       @mode  = :off
       @asked = {}
+      @answered = {}
+    end
+
+    # Badge authority B2: a trainer prize claim this connection has no answer for yet -
+    # the badges wait for it (the server shows a badge once its win's claim is in).
+    def unanswered?
+      claims.any? { |e| e[1].is_a?(Array) && !@answered[e[0]] }
     end
 
     def adopt_mode(v)
@@ -253,6 +261,8 @@ module PEMK
       return unless n.is_a?(Integer)
       return if msg[:verdict].to_s == "wait"
 
+      @answered[n] = true
+      (PEMK::Sync.remark_badges rescue nil)   # B2: the badges again, the claim in
       if msg[:verdict].to_s == "held"
         # held for room in the day's allowance: asked again when the server says
         wait = msg[:wait]
