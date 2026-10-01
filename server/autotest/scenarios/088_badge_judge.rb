@@ -5,8 +5,9 @@ require "open3"
 # Badge authority B1 (docs/BADGE-AUTHORITY-DESIGN.md), shadow: each badge a client
 # reports is judged by the battle that gives it. Brock's badge after a real win waits
 # for its replay, and the proven win would grant it. Modified clients' badges - Brock's
-# with no battle, every badge at once, Brock's after a claim with no record on its seed -
-# are what enforcement would refuse; one after a claim with no seed, no replay can prove.
+# with no battle, every badge at once - are what enforcement would refuse; Brock's after a
+# claim with no record on its seed waits for one; after a claim with no seed, no replay
+# can prove it.
 Autotest.scenario "a badge is judged by the battle that gives it",
                   flags: { PEMK_BATTLE_ENFORCE_RNG: "on", PEMK_BATTLE_ENFORCE_ENCOUNTERS: "on",
                            PEMK_MONEY_AUTHORITY: "shadow", PEMK_BATTLE_ENFORCE_TEAMS: "on",
@@ -80,7 +81,7 @@ Autotest.scenario "a badge is judged by the battle that gives it",
   seeded.send_env({ type: :econ, field: :badges, value: 0b1, seq: 1 })
   seeded.wait_for(:econ_ack, :econ_rej)
   s.check("a claim on Brock's seed with no battle recorded explains nothing") do
-    s.server.grep(/badge: account #{seeded.account_id} badge 0 WOULD-REFUSE: the win over LEADER_Brock Brock has no record/).any?
+    s.server.grep(/badge: account #{seeded.account_id} badge 0 WAITING: the win over LEADER_Brock Brock has no record yet/).any?
   end
 
   # Brock's prize claimed with no seed (the daily allowance's path): no replay proves it.

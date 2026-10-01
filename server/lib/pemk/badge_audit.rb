@@ -49,22 +49,27 @@ module PEMK
     end
 
     # B2: the badges the account's wins still waiting for their replay will give - shown,
-    # not owned. -> mask
-    def pending_bits(account_id)
+    # not owned. +before+: a record's id - only the wins recorded before it (what the
+    # client could show as that battle began; never the record's own). -> mask
+    def pending_bits(account_id, before: nil)
       claims, recorded = claims_seen(account_id)
-      claims.select { |c| !c[:voided_at] && c[:proof].nil? && record_state(recorded[c[:trainer_battle_id]]) == :open }
-            .flat_map { |c| wins_in(c) }.uniq.sum { |b| 1 << b }
+      claims.select do |c|
+        rec = recorded[c[:trainer_battle_id]]
+        !c[:voided_at] && c[:proof].nil? && record_state(rec) == :open && (before.nil? || rec[3] < before)
+      end.flat_map { |c| wins_in(c) }.uniq.sum { |b| 1 << b }
     end
 
-    # B2: the badges the account's wins no replay can prove would give - claimed with no
-    # seed, or not replayable. -> mask
-    def unprovable_bits(account_id)
+    # B2, the obedience check: the badges of wins the client showed pending that no replay
+    # could prove since (the server's side) - recorded before +before+, a record's id. A
+    # win claimed with no seed was never shown: it covers nothing. -> mask
+    def unprovable_bits(account_id, before: nil)
       claims, recorded = claims_seen(account_id)
       claims.select do |c|
         next false if c[:voided_at]
 
-        c[:proof] == "unprovable" ||
-          (c[:proof].nil? && (c[:trainer_battle_id].nil? || record_state(recorded[c[:trainer_battle_id]]) == :unprovable))
+        rec = recorded[c[:trainer_battle_id]]
+        id = c[:proof] == "unprovable" ? c[:proof_record_id] : (rec && record_state(rec) == :unprovable && rec[3])
+        id && (before.nil? || id < before)
       end.flat_map { |c| wins_in(c) }.uniq.sum { |b| 1 << b }
     end
 
@@ -75,7 +80,8 @@ module PEMK
 
     # B2's boot pass for one account whose ledger holds +held+: what it owns, at the first
     # cutover (+cutover+) its badges from before the authority too. -> { owned:, legacy:,
-    # proof: { badge => claim nonce }, pending:, refused: [[badge, why]], unprovable: [...] }
+    # proof: { badge => claim nonce }, pending:, refused:, unprovable:, waiting: [[badge,
+    # why], ...] } - waiting: a claim whose record is not in yet
     def plan(account_id, held, cutover:)
       granted = granted_bits(account_id)
       legacy = cutover ? legacy_of(account_id, held) & ~granted : 0
@@ -86,9 +92,9 @@ module PEMK
       owned = granted | legacy | proof.keys.sum { |b| 1 << b }
       pending = pending_bits(account_id) & ~owned
       verdicts = judge(account_id, held & ~(owned | pending))
-      { owned: owned, legacy: legacy, proof: proof, pending: held & pending,
-        refused: verdicts.reject { |_, v, _| v == :unprovable }.map { |b, _, why| [b, why] },
-        unprovable: verdicts.select { |_, v, _| v == :unprovable }.map { |b, _, why| [b, why] } }
+      words = ->(v) { verdicts.select { |_, verdict, _| verdict == v }.map { |b, _, why| [b, why] } }
+      { owned: owned, legacy: legacy, proof: proof, pending: held & pending, refused: words.(:refused),
+        unprovable: words.(:unprovable), waiting: words.(:waiting) }
     end
 
     # The ledger's badges before the account's first judged frame: B2's cutover takes them
@@ -147,7 +153,9 @@ module PEMK
       if (c = live.find { |x| state.(x) == :refuted })
         return [:refused, "the win over #{names(c)}: its replay disagrees"]
       end
-      return [:refused, "the win over #{names(live[0])} has no record"] unless live.empty?
+      # a claim and no won record on its seed yet: not shown, no sign (its record may be on
+      # its way - over its hourly cap, a reconnect)
+      return [:waiting, "the win over #{names(live[0])} has no record yet"] unless live.empty?
 
       [:refused, "no win over #{wins.flat_map { |s| s[:trainers] }.uniq.map { |t| "#{t[0]} #{t[1]}" }.join(' or ')} was claimed"]
     end
@@ -172,16 +180,18 @@ module PEMK
     # proven, and a verdict that pays (a claim away from its trainer, for a trainer the
     # exports do not place, or out of order explains nothing) - and the seed rows holding
     # a won record, with its replay's status.
+    # (on the maps whose battles give badges only: a player's claims elsewhere give none)
     def claims_seen(account_id)
-      claims = @db[:money_claims].where(account_id: account_id, kind: KINDS, verdict: MoneyClaims::KEYED)
+      claims = @db[:money_claims].where(account_id: account_id, kind: KINDS, verdict: MoneyClaims::KEYED,
+                                        map: @world.badge_maps)
                                  .where(Sequel.|({ voided_at: nil }, { proof: "proven" }))
-                                 .select(:nonce, :trainers, :proof, :trainer_battle_id, :voided_at).all
+                                 .select(:nonce, :trainers, :proof, :proof_record_id, :trainer_battle_id, :voided_at).all
       ids = claims.filter_map { |c| c[:trainer_battle_id] }
       recorded = {}
       unless ids.empty?
         @db[:battle_records].where(trainer_battle_id: ids, outcome: 1)
-                            .select(:trainer_battle_id, :replay_status, :team_check, :replay_detail).each do |r|
-          recorded[r[:trainer_battle_id]] = [r[:replay_status], r[:team_check], r[:replay_detail]]
+                            .select(:id, :trainer_battle_id, :replay_status, :team_check, :replay_detail).each do |r|
+          recorded[r[:trainer_battle_id]] = [r[:replay_status], r[:team_check], r[:replay_detail], r[:id]]
         end
       end
       [claims, recorded]
@@ -190,15 +200,15 @@ module PEMK
     # The account's proven wins, their claims voided since or not (B2 granted them at the
     # proof).
     def proven_claims(account_id)
-      @db[:money_claims].where(account_id: account_id, kind: KINDS, verdict: MoneyClaims::KEYED, proof: "proven")
+      @db[:money_claims].where(account_id: account_id, kind: KINDS, verdict: MoneyClaims::KEYED, proof: "proven",
+                               map: @world.badge_maps)
                         .select(:nonce, :trainers).all
     end
 
-    # The badges the account held before the authority judged it: its baseline, or (never
-    # judged) all it holds.
+    # The badges the account held before the authority judged it: its baseline - a bit a
+    # stale frame took from the ledger since comes back - or (never judged) all it holds.
     def legacy_of(account_id, held)
-      base = baseline_of(account_id)
-      base ? held & base : held
+      baseline_of(account_id) || held
     end
 
     # [[type, name, version, map, event], ...] (jsonb as text or as an array)

@@ -36,6 +36,8 @@ class BadgeHoldPluginTest < Minitest::Test
     $game_temp = Temp.new(false)
     load ARGV[0]
     s = PEMK::Sync
+    $now = 100.0
+    s.define_singleton_method(:mono) { $now }
     badges = -> { $sent.select { |m| m[:type] == :econ && m[:field] == :badges }.map { |m| m[:value] } }
     out = {}
     s.mark_econ(:badges, 0b1); s.flush_primitives
@@ -49,10 +51,10 @@ class BadgeHoldPluginTest < Minitest::Test
     out[:answered] = badges.()         # both in: out
     $unanswered = true
     s.mark_econ(:badges, 0b111); s.flush_primitives
-    Graphics.step(1799); s.flush_primitives
+    $now += 59.9; s.flush_primitives
     out[:bound_before] = badges.()
-    Graphics.step(2); s.flush_primitives
-    out[:bound] = badges.()            # at most ~30 s
+    $now += 0.2; s.flush_primitives
+    out[:bound] = badges.()            # at most 60 s, by the clock
     $unanswered = false
     s.remark_badges; s.flush_primitives
     out[:remark] = badges.()           # after an answer: the badges again
@@ -112,22 +114,15 @@ class BadgeHoldPluginTest < Minitest::Test
     out = {}
     login.()
     $up = false
-    rng.ask_trainer_seed(liam)
-    out[:offline_other] = asks.().size         # no badge: nothing asked while the link is down
     rng.ask_trainer_seed(brock)
-    out[:offline_badge] = asks.().size         # a badge: asked once the link is back
-    # 5 s later the link is back (a new connection: reset, then the login); the server answers
-    $on_pump = lambda do
-      if !$up && $now >= 105.0
-        $up = true
-        rng.reset
-        login.()
-      elsif (req = asks.().last) && $now >= 106.0
-        rng.on_trainer_seed({ type: :trainer_battle_seed, nonce: req[:nonce], seed: 77 })
-      end
+    out[:offline] = asks.().size               # the link down: nothing asked (no seed, an unprovable win)
+    $up = true
+    $on_pump = lambda do                       # the server answers 8 s later
+      req = asks.().last
+      rng.on_trainer_seed({ type: :trainer_battle_seed, nonce: req[:nonce], seed: 77 }) if req && $now >= 108.0
     end
-    t0 = $now
-    out[:reconnected] = [rng.trainer_seed(brock), asks.().size, ($now - t0).round(2)]
+    rng.ask_trainer_seed(brock)
+    out[:slow] = rng.trainer_seed(brock)       # a badge's battle waits past 6 s
     $on_pump = nil
     rng.ask_trainer_seed(brock)
     t0 = $now
@@ -135,29 +130,34 @@ class BadgeHoldPluginTest < Minitest::Test
     rng.ask_trainer_seed(liam)
     t0 = $now
     out[:other_late] = [rng.trainer_seed(liam), ($now - t0).round(2)]   # no badge: 6 s
+    rng.ask_trainer_seed(brock)
+    $on_pump = -> { $up = false if $now >= 120.0 }   # the link goes: no more waiting
+    t0 = $now
+    out[:dropped] = [rng.trainer_seed(brock), ($now - t0) < 30]
+    $on_pump = nil
+    $up = true
     out[:unacked] = rng.records_unacked?
     rng.adopt_record_ack(true)
     $PokemonGlobal.pemk_battle_records = [[5, { type: :battle_record }, "body"]]
     out[:kept] = rng.records_unacked?
     rng.on_record_ack({ rec_nonce: 5 })
+    rng.on_record_ack({ rec_nonce: 5 })        # an answer again: nothing new
     out[:acked] = [rng.records_unacked?, $remarks]
     print out.inspect
   RUBY
 
-  def test_a_badge_battle_waits_for_its_seed_across_a_reconnect
+  def test_a_badge_battle_waits_longer_for_its_seed
     out = IO.popen([RbConfig.ruby, "-W0", "-e", RNG_RUNNER, RNG], err: %i[child out], &:read)
     assert $?.success?, "rng runner crashed:\n#{out}"
     got = eval(out) # rubocop:disable Security/Eval
-    assert_equal 0, got[:offline_other]
-    assert_equal 0, got[:offline_badge]
-    assert_equal 77, got[:reconnected][0], "seeded, asked on the new connection"
-    assert_equal 1, got[:reconnected][1]
-    assert_operator got[:reconnected][2], :<=, 6.5
+    assert_equal 0, got[:offline]
+    assert_equal 77, got[:slow], "seeded after 8 s"
     assert_equal [nil, 30.0], got[:late]
     assert_equal [nil, 6.0], got[:other_late]
+    assert_equal [nil, true], got[:dropped], "the link gone: the start goes on"
     assert_equal false, got[:unacked]
     assert_equal true, got[:kept]
-    assert_equal [false, 1], got[:acked], "the badges go out again with the record in"
+    assert_equal [false, 1], got[:acked], "the badges go out again with the record in - once"
   end
 
   PRIZE_RUNNER = <<~'RUBY'
@@ -183,7 +183,8 @@ class BadgeHoldPluginTest < Minitest::Test
     pc.on_ack({ nonce: 1, verdict: "wait" })
     out[:wait] = [pc.unanswered?, $remarks]       # "wait" is no answer
     pc.on_ack({ nonce: 1, verdict: "held" })
-    out[:held] = [pc.unanswered?, $remarks]       # held for its proof: in, the badges again
+    pc.on_ack({ nonce: 1, verdict: "held" })      # asked again 10 s later: nothing new
+    out[:held] = [pc.unanswered?, $remarks]       # held for its proof: in, the badges again - once
     pc.reset
     out[:reset] = pc.unanswered?                  # a new connection: asked again
     print out.inspect

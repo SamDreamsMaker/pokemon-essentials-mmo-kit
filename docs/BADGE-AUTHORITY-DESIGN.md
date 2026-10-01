@@ -130,26 +130,37 @@ computed index, a fill, an assignment) and, in the game's code, any to the playe
     claim is no longer pending and the bit not yet owned.
   - *Frames never move the badges*: the frame's seq is recorded, the balance untouched
     (no raise, and no drop - a stale save's 0 erases nothing); the answer is `shown` (a
-    duplicate frame's too). Bits it shows that are neither owned nor pending: HELD, logged
-    and flagged as B1 does.
-  - *The proof checks count owned badges only* (the replay daemon, obedience): a record
-    claiming more badges than owned, where pending wins still undecided cover the excess,
-    gets no verdict yet (retried at the next pass); covered only by unprovable wins, it is
-    unprovable (the allowance, no flag); else refuted. Pending counted at the record's time
-    would let a made-up win open a window for another battle's record.
-  - *The boot pass*, before the reactor starts, at every enforcing boot - and logged as a
-    dry run at a shadow boot: owned := the grant rows, plus, at the first cutover only
-    (`badge_cutover`), the legacy bits (the baseline, or the whole mask of an account never
-    judged; not for an account born after the cutover), plus proof grants for proven
-    claims never granted; pending bits stripped from the ledger (shown still shows them);
-    refused bits removed and flagged; unprovable ones removed without a flag and listed
-    for the operator. A period with the authority off thus loses nothing granted.
-  - *Client* (`badge_hold`): the badge frame waits (bounded) while a prize claim or a kept
-    record is unanswered, and goes out again after each claim and record acknowledgement;
-    `login_ok` names the placements whose win gives a badge, and their seed is waited for
-    while online, across a reconnect. Login always carries `:badges` (0 without a row).
-  - *Operator*: `bin/pemk_badges.rb grant | list | list --unowned` (the unprovable or
-    refused wins a player may have earned).
+    duplicate frame's too). Bits it shows that are neither owned nor pending: REFUSED,
+    logged and flagged as B1 does - but WAITING (not shown, no flag) for a claim whose
+    won record is not in yet: over its hourly cap, a reconnect.
+  - *The proof checks count owned badges only* (the replay daemon, obedience; only with
+    `PEMK_BADGE_AUTHORITY=on` in its environment - otherwise P4's rule, no more than
+    owned): a record claiming more badges than owned, where wins recorded before it (its
+    own never - it would wait for itself) and still undecided cover the excess, gets no
+    verdict yet (retried at the next pass, at most ten minutes, then unprovable); covered
+    by earlier wins shown then not replayable, it is unprovable (the allowance, no flag);
+    else refuted. A win claimed with no seed was never shown: it covers nothing. Pending
+    counted at the record's time would let a made-up win open a window for another
+    battle's record.
+  - *The boot pass*, before the reactor starts, at every enforcing boot - a dry run when
+    `on` is held back by a blocker: owned := the grant rows, plus, at the first cutover
+    only (`badge_cutover`), the legacy bits (the baseline - a bit a stale frame took since
+    comes back - or the whole mask of an account never judged; not for an account born
+    after the cutover), plus proof grants for proven claims never granted; pending bits
+    stripped from the ledger (shown still shows them); refused bits removed (flagged at
+    the cutover only - a period off later trusted the clients); unprovable ones removed
+    without a flag and listed for the operator. Written under the row's lock, keeping a
+    grant made since the plan. After the cutover it looks only at accounts whose ledger
+    is not their grants, or with a win proven since its last whole pass; an account it
+    fails on keeps what it holds and the pass is done again at the next boot.
+  - *Client* (`badge_hold`): the badge frame waits (60 s at most, by the clock) while a
+    prize claim or a kept record is unanswered, and goes out again after each claim's and
+    record's first answer; `login_ok` names the placements whose win gives a badge, and
+    their seed is waited for 30 s while online (a dropped link ends the wait: no
+    reconnect happens in a battle - such a win is unprovable, the operator's to grant).
+    Login always carries `:badges` (0 without a row).
+  - *Operator*: `bin/pemk_badges.rb list | grant | revoke | unowned` (the wins a player
+    may have earned that own nothing: claimed with no seed, not replayable, refuted).
   - Autotest 089, on a fixture export (the demo's is blocked: the house's set, May): an
     honest badge shown at once, owned after the replay, kept across a relogin and a resume;
     a badge frame before its claim keeps the badge and flags no one; killed before its

@@ -47,11 +47,12 @@ class ReplayDaemonTrainerTest < Minitest::Test
                                 replay_status: "walk_ok", trainer_battle_id: row, battle_seed: seed, created_at: Time.now)
   end
 
-  def replay(id)
-    env = { "DATABASE_URL" => ENV.fetch("DATABASE_URL"), "REPLAY_ID" => id.to_s, "PEMK_GAME_ROOT" => @game_root }
+  def replay(id, extra = {})
+    env = { "DATABASE_URL" => ENV.fetch("DATABASE_URL"), "REPLAY_ID" => id.to_s, "PEMK_GAME_ROOT" => @game_root }.merge(extra)
     out, status = Open3.capture2e(env, RbConfig.ruby, "-W0", File.join(SERVER_ROOT, "bin", "pemk_replay.rb"),
                                   chdir: SERVER_ROOT)
     assert status.success?, out
+    @out = out
     @db[:battle_records].where(id: id).first
   end
 
@@ -86,24 +87,28 @@ class ReplayDaemonTrainerTest < Minitest::Test
     W.encode_primitive(base.merge(mode: "on", seed: seed, kind: "trainer", trainers: [["LEADER_Brock", "Brock", 0]]))
   end
 
-  # Badge authority B2: a record saying the player had a badge that a win still waiting for
-  # its replay gives waits for that win - replayed once the count is decided.
+  # Badge authority B2 (PEMK_BADGE_AUTHORITY=on): a record saying the player had a badge that
+  # an earlier win still waiting for its replay gives waits for that win - replayed once the
+  # count is decided. With the authority off, no more badges than owned, as P4 had it.
   def test_a_record_waits_for_the_badges_it_counts
+    on = { "PEMK_BADGE_AUTHORITY" => "on" }
     win_row = seed_row(2001, 3)   # Brock's placement: the demo's export says his win gives badge 0
     @db[:battle_records].insert(account_id: @me, mode: "on", record: Sequel.blob("x"), outcome: 1, replay_status: "pending",
                                 trainer_battle_id: win_row, battle_seed: 2001, created_at: Time.now)
     @db[:money_claims].insert(account_id: @me, nonce: 1, kind: "trainer", verdict: "held", mode: "on", amount: 1400,
                               accepted: 1400, map: 10, trainers: [["LEADER_Brock", "Brock", 0, 10, 3]].to_json,
                               created_at: Time.now, trainer_battle_id: win_row)
-    body = W.decode_primitive(replayable_body(2002))
-    id = record(seed_row(2002, 4), 2002, W.encode_primitive(body.merge(init: body[:init].merge(badges: 1))))
-    env = { "DATABASE_URL" => ENV.fetch("DATABASE_URL"), "REPLAY_ID" => id.to_s, "PEMK_GAME_ROOT" => @game_root }
-    out, = Open3.capture2e(env, RbConfig.ruby, "-W0", File.join(SERVER_ROOT, "bin", "pemk_replay.rb"), chdir: SERVER_ROOT)
-    assert_match(/##{id}: waits - 1 badges in the record, the server knows 0, 1 more wait for their replay/, out)
-    assert_equal "walk_ok", row(id)[:replay_status], "no verdict yet"
+    counting = lambda do |seed, event|
+      body = W.decode_primitive(replayable_body(seed))
+      record(seed_row(seed, event), seed, W.encode_primitive(body.merge(init: body[:init].merge(badges: 1))))
+    end
+    id = counting.(2002, 4)
+    assert_equal "walk_ok", replay(id, on)[:replay_status], "no verdict yet"
+    assert_match(/##{id}: waits - 1 badges in the record, the server knows 0, 1 more wait for their replay/, @out)
+    refute_equal "walk_ok", replay(id)[:replay_status], "the authority off: nothing waits (no more than owned, P4)"
     @db[:money_claims].where(nonce: 1).update(proof: "proven")   # its win proven: the badge owned
     @db[:economy_balances].insert(account_id: @me, field: "badges", balance: 0b1, last_seq: 0)
-    refute_equal "walk_ok", replay(id)[:replay_status], "replayed"
+    refute_equal "walk_ok", replay(counting.(2003, 5), on)[:replay_status], "the badge owned: replayed"
   end
 
   # No record stops the tool: one it fails on is stored as an error (its prize

@@ -187,6 +187,26 @@ class ServerBadgeEnforceTest < Minitest::Test
     assert_equal 0b1, lo2[:econ][:badges], "a relogin shows what it owns"
   end
 
+  # Login shows what the client should: owned and pending, and the badges always (0 too).
+  def test_login_shows_owned_and_pending
+    start_server
+    _, fresh = login("fresh@t.co")
+    assert_equal 0, fresh[:econ][:badges], "an account with no badges row: 0, named"
+    s, lo = login
+    won(s, ANNA, 1, 400)
+    s.close
+    _, again = login   # a fresh login: no save named the claim - voided, its badge with it
+    assert_equal 0, again[:econ][:badges], "a claim no save sealed: void, nothing pending"
+    wait_log(/account #{lo[:account_id]} DROPPED badge 0 \(claim 1 is void/)
+    s, = login
+    won(s, ANNA, 2, 400)
+    @db[:money_claims].where(account_id: lo[:account_id], nonce: 2).update(sealed_at: Time.now)   # its save named it
+    s.close
+    _, again = login
+    assert_equal 0b1, again[:econ][:badges], "its win waiting for its replay: shown"
+    assert_equal 0, owned(lo)
+  end
+
   # A made-up win: pending until its replay refutes it, then gone from what it shows.
   def test_a_refuted_win_drops_its_badge
     start_server
@@ -207,6 +227,24 @@ class ServerBadgeEnforceTest < Minitest::Test
     assert_equal [:econ_rej, 0], badges(s, (1 << 62) - 1, 1).values_at(:type, :value)
     assert_equal 0, owned(lo)
     assert_equal 0, login("badge@t.co")[1][:econ][:badges], "login names the badges, 0 too"
+  end
+
+  # What keeps the server from owning the badges (a set the export cannot read): `on`
+  # runs as shadow - the frame applies as it did, nothing is held.
+  def test_on_with_a_blocker_runs_as_shadow
+    blocked = Tempfile.new(["pemk_world", ".json"])
+    doc = JSON.parse(File.read(WORLD.path))
+    doc["badge_sources"]["unknown"] = [{ "map" => 3, "event" => 7, "page" => 0, "script" => "$player.badges[i] = true" }]
+    blocked.write(JSON.generate(doc))
+    blocked.flush
+    start_server({ "PEMK_WORLD" => blocked.path })
+    s, lo = login(caps: CAPS - ["badge_hold"])
+    assert_equal :login_ok, lo[:type], "no client must update"
+    assert_equal [:econ_ack, 0b11], badges(s, 0b11, 1).values_at(:type, :value)
+    assert_equal 0b11, owned(lo)
+    refute @server.send(:badge_enforce?), "trainer proof and money enforce, the blocker stands"
+  ensure
+    blocked&.close!
   end
 
   def put_badges(id, mask) = @db[:economy_balances].insert(account_id: id, field: "badges", balance: mask, last_seq: 0)
@@ -251,5 +289,19 @@ class ServerBadgeEnforceTest < Minitest::Test
     @server.send(:badge_boot_pass)
     assert_equal 0, held.(d), "after the cutover, nothing is legacy"
     assert(logs.any? { |l| l.include?("boot pass: 1 account(s)") }, "the others own what they hold already")
+    assert_nil @db[:player_flags].where(account_id: d).get(:count), "a period off trusted the clients: no sign"
+
+    e = account("e@t.co")   # an account the pass fails on keeps what it holds; the pass is done again
+    put_badges(e, 0b11)
+    put_badges(account("f@t.co"), 0b1)
+    audit = @server.instance_variable_get(:@badge_audit)
+    real = audit.method(:plan)
+    audit.define_singleton_method(:plan) { |id, held, cutover:| id == e ? raise("a fault") : real.(id, held, cutover: cutover) }
+    pass_at = @db[:badge_cutover].get(:pass_at)
+    @server.send(:badge_boot_pass)
+    assert_equal 0b11, held.(e)
+    assert_equal 0, held.(@db[:accounts].where(email: "f@t.co").get(:id)), "the others judged"
+    assert(logs.any? { |l| l.include?("the boot pass skipped account #{e}: RuntimeError: a fault") })
+    assert_equal pass_at, @db[:badge_cutover].get(:pass_at), "not a whole pass"
   end
 end

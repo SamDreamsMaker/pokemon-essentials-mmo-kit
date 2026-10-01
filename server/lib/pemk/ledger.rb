@@ -133,10 +133,26 @@ module PEMK
       set_badges(account_id, reason: reason, grants: grants, now: now) { |cur| cur | mask }
     end
 
-    # The badges the ledger holds become exactly +mask+ (the boot pass: what the server
-    # owns). -> the mask after
+    # The badges the ledger holds become exactly +mask+. -> the mask after
     def set_badge_bits(account_id, mask, reason:, grants: [], now: Time.now)
       set_badges(account_id, reason: reason, grants: grants, now: now) { |_cur| mask }
+    end
+
+    # The boot pass: +add+ set and +remove+ cleared, under the lock - a bit granted since
+    # the plan was made (its row there) stays. -> the mask after
+    def rebase_badge_bits(account_id, add:, remove:, reason:, grants: [], now: Time.now)
+      set_badges(account_id, reason: reason, grants: grants, now: now) do |cur|
+        granted = @db[:badge_grants].where(account_id: account_id).select_map(:badge).sum { |b| 1 << b }
+        (cur | add) & ~(remove & ~granted)
+      end
+    end
+
+    # The operator takes badges back: their bits and their grants. -> the mask after
+    def revoke_bits(account_id, mask, reason:, now: Time.now)
+      set_badges(account_id, reason: reason, now: now) do |cur|
+        @db[:badge_grants].where(account_id: account_id, badge: (0...mask.bit_length).select { |b| mask[b] == 1 }).delete
+        cur & ~mask
+      end
     end
 
     # Was this (account, field, seq) already applied? (D4: attribute/consume budget only

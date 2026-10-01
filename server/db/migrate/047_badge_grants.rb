@@ -20,6 +20,7 @@ Sequel.migration do
     create_table(:badge_cutover) do
       Integer  :id, primary_key: true                 # 1
       DateTime :at, null: false
+      DateTime :pass_at                               # the last enforcing boot pass that ended whole
     end
   end
 end

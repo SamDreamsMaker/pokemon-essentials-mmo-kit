@@ -59,14 +59,16 @@ class BadgeAuditTest < Minitest::Test
                                          tr_name: "Brock", tr_version: 0, seed: rand(1 << 40) + 1, issued_at: Time.now,
                                          state: "closed")
     end
+    rec = nil
     if record
-      @db[:battle_records].insert(account_id: account, trainer_battle_id: row, mode: "on", record: Sequel.blob("x"),
-                                  outcome: 1, created_at: Time.now, replay_status: record == true ? "walk_ok" : record,
-                                  team_check: team, replay_detail: detail)
+      rec = @db[:battle_records].insert(account_id: account, trainer_battle_id: row, mode: "on", record: Sequel.blob("x"),
+                                        outcome: 1, created_at: Time.now, replay_status: record == true ? "walk_ok" : record,
+                                        team_check: team, replay_detail: detail)
     end
     @db[:money_claims].insert(account_id: account, nonce: nonce, kind: kind, verdict: verdict, mode: "on", amount: 1400,
                               accepted: 1400, map: 10, trainers: trainers.to_json, created_at: Time.now,
-                              trainer_battle_id: row, proof: proof, voided_at: voided ? Time.now : nil)
+                              trainer_battle_id: row, proof: proof, proof_record_id: proof && rec,
+                              voided_at: voided ? Time.now : nil)
   end
 
   def verdict(mask) = @audit.judge(@me, mask).map { |b, v, _| [b, v] }
@@ -85,7 +87,7 @@ class BadgeAuditTest < Minitest::Test
     claim(3, kind: "payday", record: true)
     assert_equal [[0, :refused]], verdict(1), "Pay Day's coins come won or lost"
     claim(4)
-    assert_equal ["the win over LEADER_Brock Brock has no record"], why(1), "a seed and a claim, but no battle"
+    assert_equal ["the win over LEADER_Brock Brock has no record yet"], why(1), "a seed and a claim, but no battle"
     claim(5, proof: "refuted", record: true)
     assert_equal ["the win over LEADER_Brock Brock is refuted"], why(1)
     claim(6, seeded: false)
@@ -148,26 +150,34 @@ class BadgeAuditTest < Minitest::Test
   end
 
   # B2, the replay's obedience check: a record may say the player had the badges it owns -
-  # past them, those its wins waiting for their replay give (judged once decided), or that
-  # no replay can prove (unprovable); more is refuted. A count of shown badges at the
-  # record's time would let a made-up win open a window for another battle.
+  # past them, those its earlier wins waiting for their replay give (judged once decided,
+  # at most ten minutes after), or shown and no replay could prove since (unprovable); more
+  # is refuted. A count of shown badges at the record's time would let a made-up win open
+  # a window for another battle; a record waiting on its own win would wait forever.
   def test_a_record_s_badges_past_the_owned
     liam = ["CAMPER", "Liam", 0, 10, 4]
     audit = PEMK::BadgeAudit.new(@db, world("list" => [*SOURCES["list"], { "badge" => 2, "map" => 10, "event" => 4, "page" => 0,
                                                                             "trainers" => [liam[0, 3]] }], "unknown" => []))
     @db[:economy_balances].insert(account_id: @me, field: "badges", balance: 0b10, last_seq: 0)   # owns badge 1
-    excess = ->(n, badges = audit) { PEMK::ProofChecks.badge_excess(@db, @me, n, badges: badges)&.first }
+    later = 2**40   # a record after every one here
+    excess = lambda do |n, badges = audit, id: later, at: Time.now|
+      PEMK::ProofChecks.badge_excess(@db, @me, n, badges: badges, record_id: id, record_at: at)&.first
+    end
     assert_nil excess.(1)
     assert_equal :refuted, excess.(2)
     claim(1, record: true)               # Brock's win waits for its replay: badge 0
     assert_equal :defer, excess.(2)
-    claim(2, trainers: [liam], seeded: false)   # Liam's, claimed with no seed: badge 2
+    assert_equal :refuted, excess.(2, id: @db[:battle_records].max(:id)), "its own win covers nothing"
+    assert_equal :unprovable, excess.(2, at: Time.now - 700), "ten minutes on: no more waiting"
+    claim(2, trainers: [liam], seeded: false)   # Liam's, claimed with no seed: never shown
+    assert_equal :refuted, excess.(3), "a win claimed with no seed covers nothing"
+    claim(3, trainers: [liam], proof: "unprovable", record: true)   # Liam's, shown, then not replayable
     assert_equal :unprovable, excess.(3)
     assert_equal :refuted, excess.(4)
     assert_equal :unprovable, excess.(2, :unknown), "no badge sources to tell"
     assert_equal :refuted, excess.(2, nil)
     assert_equal :unprovable, PEMK::ProofChecks.player_team(@db, @me, { init: { player: [{ uid: 1 }], badges: 3 } },
-                                                            badges: audit)[0], "a team check says it unprovable"
+                                                            badges: audit, record_id: later)[0], "a team check says it unprovable"
   end
 
   # B2's boot pass: what an account owns, of what its ledger holds.
@@ -190,6 +200,7 @@ class BadgeAuditTest < Minitest::Test
     assert_equal 0b100101, plan[:owned]
     assert_equal 0, plan[:pending], "badge 0 is legacy"
     assert_equal [[1, "no battle gives it"], [3, "nothing the exports read gives it"]], plan[:refused]
+    assert_equal 0b1, audit.plan(@me, 0b1110, cutover: true)[:legacy], "its baseline, though a stale frame took it since"
     plan = audit.plan(@me, 0b1111, cutover: false)
     assert_equal 0, plan[:legacy], "after the cutover, nothing is legacy"
     assert_equal 0b1, plan[:pending], "pending: stripped from the ledger, still shown"
@@ -255,6 +266,6 @@ class BadgeAuditTest < Minitest::Test
     row = @db[:money_claims].where(nonce: 1).get(:trainer_battle_id)
     @db[:battle_records].insert(account_id: @me, trainer_battle_id: row, mode: "on", record: Sequel.blob("x"),
                                 outcome: 2, created_at: Time.now)
-    assert_equal [[0, :refused]], verdict(1)
+    assert_equal [[0, :waiting]], verdict(1), "a lost battle is no win: still waiting for one"
   end
 end

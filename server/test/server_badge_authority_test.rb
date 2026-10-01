@@ -267,7 +267,7 @@ class ServerBadgeAuthorityTest < Minitest::Test
                   trainers: [BROCK], seed: seed })
     recv_type(s, :money_claim_ack)
     badges(s, 0b1, 1)
-    wait_log(/account #{id} badge 0 WOULD-REFUSE: the win over LEADER_Brock Brock has no record/)
+    wait_log(/account #{id} badge 0 WAITING: the win over LEADER_Brock Brock has no record yet/)
     send_env(s, *walk_body(seed))   # its record comes: the badge it holds is not judged again
     sleep 0.3
     badges(s, 0b11, 2)

@@ -23,7 +23,8 @@ module PEMK
     SAVE_RETRY_FIRST  = 5.0     # a save not written goes out again after this; doubles each time
     SAVE_RETRY_MAX    = 60.0
     BLOB_CLAIMS_MAX   = 64      # prize claims a save names (the newest; the server keeps as many)
-    BADGE_HOLD_FRAMES = 1800    # ~30 s at most a badge frame waits for its win's claim and record (B2)
+    BADGE_HOLD_SEC    = 60.0    # seconds at most a badge frame waits for its win's claim and record (B2);
+                                # past a record's 30 s resend
 
     @econ        = {}           # field => latest absolute value (coalesced; badges ride here as a :badges bitmask)
     @econ_sent   = {}           # field => [seq, value] of its latest frame (an answer to an older one is stale)
@@ -46,7 +47,7 @@ module PEMK
     @save_wait    = nil     # mono before which a save not written is not sent again
     @save_failing = false   # the player was told saves fail: tell them when one lands
     @badge_hold   = false   # the server owns the badges (login flag, B2): a badge frame waits for its win
-    @badge_hold_since = nil # frame the badges began waiting
+    @badge_hold_since = nil # when the badges began waiting (monotonic)
 
     module_function
 
@@ -178,7 +179,7 @@ module PEMK
 
     # B2: while a trainer prize claim or a battle record of this connection has no answer,
     # the badges wait - the server shows a badge once the win it comes from is in - at
-    # most BADGE_HOLD_FRAMES.
+    # most BADGE_HOLD_SEC (the clock, not frames: a sped-up game waits as long).
     def badges_waiting?
       return false unless @badge_hold
 
@@ -187,8 +188,8 @@ module PEMK
         @badge_hold_since = nil
         return false
       end
-      @badge_hold_since ||= frame
-      frame - @badge_hold_since < BADGE_HOLD_FRAMES
+      @badge_hold_since ||= mono
+      mono - @badge_hold_since < BADGE_HOLD_SEC
     end
 
     # B2: after a claim's or a record's answer the badges go out again - the server answers

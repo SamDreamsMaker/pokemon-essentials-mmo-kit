@@ -6,6 +6,7 @@
 # Usage (WSL, from server/):
 #   DATABASE_URL=... bundle exec ruby bin/pemk_badges.rb list <account>             # owned and why, pending, shown
 #   DATABASE_URL=... bundle exec ruby bin/pemk_badges.rb grant <account> <badge> [note...]
+#   DATABASE_URL=... bundle exec ruby bin/pemk_badges.rb revoke <account> <badge> [note...]
 #   DATABASE_URL=... bundle exec ruby bin/pemk_badges.rb unowned [<account>]         # wins no replay proved
 # PEMK_OPERATOR names who acts in the record (default: the shell user). A grant reaches the
 # player at their next login or badge frame. `unowned` lists the wins over a badge's trainer
@@ -47,20 +48,26 @@ when "list"
     puts "  badge #{g[:badge]}: #{g[:evidence]} #{g[:source]} (#{g[:granted_at]})"
   end
 
-when "grant"
+when "grant", "revoke"
   acct = account.(ARGV.shift)
   badge = Integer(ARGV.shift.to_s, exception: false)
   abort "name a badge: 0 to #{config.badges_max - 1}" unless badge&.between?(0, config.badges_max - 1)
   note = ARGV.join(" ")
   source = [operator, note].reject(&:empty?).join(": ")[0, 160]
-  after = ledger.grant_bits(acct[:id], 1 << badge, reason: "badge:operator:#{operator}"[0, 64],
-                                                  grants: [{ badge: badge, evidence: "operator", source: source }])
-  puts "granted badge #{badge} to #{label.(acct)} - it owns #{bits.(after)}"
+  if cmd == "grant"
+    after = ledger.grant_bits(acct[:id], 1 << badge, reason: "badge:operator:#{operator}"[0, 64],
+                                                    grants: [{ badge: badge, evidence: "operator", source: source }])
+    puts "granted badge #{badge} to #{label.(acct)} - it owns #{bits.(after)}"
+  else
+    after = ledger.revoke_bits(acct[:id], 1 << badge, reason: "badge:revoked:#{source}"[0, 64])
+    puts "revoked badge #{badge} of #{label.(acct)} - it owns #{bits.(after)}"
+  end
 
 when "unowned"
   key = ARGV.shift
-  # a trainer's prize claims, not voided, not proven (NULL included: no proof)
-  unproven = db[:money_claims].where(kind: PEMK::BadgeAudit::KINDS, voided_at: nil)
+  # a trainer's prize claims that pay (one away from its trainer, for a trainer no export
+  # places, out of order, explains nothing), not voided, not proven (NULL: no proof)
+  unproven = db[:money_claims].where(kind: PEMK::BadgeAudit::KINDS, verdict: PEMK::MoneyClaims::KEYED, voided_at: nil)
                               .where(Sequel.|({ proof: nil }, Sequel.~(proof: "proven")))
   ids = key ? [account.(key)[:id]] : unproven.distinct.select_map(:account_id)
   found = 0
@@ -81,5 +88,5 @@ when "unowned"
   puts "#{found} win(s) owning no badge"
 
 else
-  abort "usage: pemk_badges.rb list <account> | grant <account> <badge> [note...] | unowned [<account>]"
+  abort "usage: pemk_badges.rb list <account> | grant|revoke <account> <badge> [note...] | unowned [<account>]"
 end

@@ -261,8 +261,9 @@ module PEMK
       return unless n.is_a?(Integer)
       return if msg[:verdict].to_s == "wait"
 
+      # B2: the badges again, the claim in - once (a held claim is asked again every 10 s)
+      (PEMK::Sync.remark_badges rescue nil) unless @answered[n]
       @answered[n] = true
-      (PEMK::Sync.remark_badges rescue nil)   # B2: the badges again, the claim in
       if msg[:verdict].to_s == "held"
         # held for room in the day's allowance: asked again when the server says
         wait = msg[:wait]
