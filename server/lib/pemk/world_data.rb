@@ -330,6 +330,22 @@ module PEMK
     # [{ where..., script: }].
     attr_reader :badge_unknown
 
+    # Badge authority: the maps of the battles whose win gives a badge.
+    def badge_maps
+      return [] unless @badge_sources
+
+      @badge_sources.values.flatten.filter_map { |s| s[:map] if s[:trainers] }.uniq
+    end
+
+    # Badge authority B2: the battles whose win gives a badge, as a client names a trainer
+    # battle - [[type, name, version, map, event], ...]: their seed is waited for longer.
+    def badge_battles
+      return [] unless @badge_sources
+
+      @badge_sources.values.flatten.select { |s| s[:trainers]&.length == 1 }
+                    .map { |s| [*s[:trainers][0], s[:map], s[:event]] }.uniq
+    end
+
     # -> the badges a win over this trainer at this placement gives.
     def win_bits(map_id, event_id, type, name, version)
       return [] unless @badge_sources
