@@ -11,7 +11,7 @@ module Autotest
                face interact warp events event_pages grass battle decide fast advance screenshot save
                set_switch get_switch set_var get_var set_selfswitch get_selfswitch
                add_item get_item add_pokemon heal money bp set_raw_var set_raw_switch abort
-               hold_saves pc_deposit pc_withdraw get_pc give_held take_held get_held].freeze
+               hold_saves pc_deposit pc_withdraw get_pc give_held take_held get_held partner].freeze
 
     attr_reader :name, :instance, :email, :pid
 

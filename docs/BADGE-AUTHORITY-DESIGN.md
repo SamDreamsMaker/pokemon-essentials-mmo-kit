@@ -1,7 +1,8 @@
 # The server owns the badges
 
-Status (2026-10-01): designed and reviewed; B0 (the export) and B1 (shadow) built. Off
-by default (`PEMK_BADGE_AUTHORITY` off | shadow | on; `on` runs as shadow until B2).
+Status (2026-10-01): designed and reviewed; B0 (the export), B1 (shadow) and B2
+(enforcement) built. Off by default (`PEMK_BADGE_AUTHORITY` off | shadow | on; `on` runs
+as shadow while a blocker stands, section 4).
 
 ## 1. Why
 
@@ -47,7 +48,7 @@ later step consumes the server's mask for them.
   waits, as its prize does (the replay daemon's silence is an alarm). The honest player
   sees the badge at once; it becomes the ledger's when the replay proves the win. Login,
   the acknowledgements and the proof checks use the same `ledger | pending`.
-- **`badge_grants`** (account, badge, evidence `legacy | proof | local | operator`, source,
+- **`badge_grants`** (account, badge, evidence `legacy | proof | operator | revoked`, source,
   claim nonce, granted_at; one row per account and badge) records why each bit is owned.
   `Ledger#grant_bits` sets bits bitwise (a server transaction, like `adjust`).
 - **Cutover**: at the first `on` boot, the bits an account held before the badge
@@ -65,17 +66,41 @@ later step consumes the server's mask for them.
 ## 4. Blockers (`on` runs as shadow and names each)
 
 Trainer proof not enforcing; an export without `badge_sources`; any unknown source (the
-demo's house); any source no battle gives, unless the operator lists it as local
-(`PEMK_BADGE_LOCAL=badge@map:event`, named at boot as the client's word); a win source no
-replay can prove (several trainers in its call, a battle paying no money - no claim, so
-no proof - or one trainer in two battles giving different badges); a win source fought
-with no seed (a trainer the export does not place, one sharing a battle call, a battle
-rule sizing it other than single, or a partner possible: the game registers one - in an
-event or in its code - or computes one, and the battle has no noPartner rule); a badge
-index at or over `badges_max`. The export must see every badge write for a refusal to
-mean anything: it lists as unknown any write to `$player.badges` it cannot read (a
-computed index, a fill, an assignment) and, in the game's code, any to the player's own
-`@badges` / `self.badges` but the new game's reset.
+demo's house); any source no battle gives; a win source no replay can prove (several
+trainers in its call, a battle paying no money - no claim, so no proof - or one trainer
+in two battles giving different badges); a win source fought with no seed (a trainer the
+export does not place, one sharing a battle call, a battle rule sizing it other than
+single, or - in shadow - a partner possible: the game registers one - in an event or in
+its code - or computes one, and the battle has no noPartner rule); a badge index at or
+over `badges_max`. The export must see every badge write for a refusal to mean anything:
+it lists as unknown any write to `$player.badges` it cannot read (a computed index, a
+fill, an assignment) and, in the game's code, any to the player's own `@badges` /
+`self.badges` but the new game's reset.
+
+Two of these need no edit to the game (2026-10-01, from the demo itself):
+- *A partner* keeps nothing from owning the badges: the clients fight a badge's battle
+  alone. Wherever the server judges the badges and proves trainer battles (shadow or
+  `on`, with trainer proof), `login_ok` / `auth_ok` name the placements whose win gives a
+  badge and that a replay proves once fought alone (one trainer the export places, a
+  prize, no size rule - the others change nothing by it); a client fighting one of them
+  against that trainer alone (inside `TrainerBattle.start_core`, not a trainer who
+  waited for another), with no size rule or a single one, online and seeded, sets the
+  noPartner rule as the trainer loads -
+  before the game decides whether the partner joins; the battle's own rules clear after
+  it. The boot log counts them. From shadow on, so a win then is seeded, and proven by
+  the time the server owns the badges. Owning them, the server needs `badge_alone`
+  from every client (older ones get update_required: a partner the export cannot see -
+  one a plugin sets - is fought alone too). Before that, a client from before
+  `badge_alone` may still fight with the partner: its win has no seed, and the cutover
+  lists it for the operator (`pemk_badges.rb unowned`, then `grant`); so in shadow, and
+  in `on` held back, a partner the export lists keeps the flags off (said at boot).
+- *A write that is not the game's* - a debug helper, like the demo's house help NPC:
+  `PEMK_BADGE_IGNORE=map:event,ce:N,file:line` names unknown writes and sources no battle
+  gives (map 3 event 7 for the demo's house). It keeps nothing from owning the badges;
+  its badges are refused like any no win explains, and flag like them: a player who uses
+  it asks for badges no battle earned (remove it from the game when you can). A name that
+  matches no such write is said at boot. It is not for a badge the game means to give
+  with no battle: that one stays a blocker (the server could not tell who earned it).
 
 ## 5. Steps
 
@@ -116,8 +141,8 @@ computed index, a fill, an assignment) and, in the game's code, any to the playe
   (`wrong_seed`); a record dropped over its hourly cap leaves an honest badge WOULD-REFUSE
   until it comes.
 - **B2 - enforcement** (reviewed 2026-10-01, before any code). `on` enforces when trainer
-  proof and money enforce and no blocker stands; its clients advertise `badge_hold`
-  (older ones get update_required). Its review changed the plan:
+  proof and money enforce and no blocker stands; its clients advertise `badge_hold` and
+  `badge_alone` (older ones get update_required). Its review changed the plan:
   - *Owned, pending, shown.* Owned = the ledger, which only the server raises:
     `Ledger#grant_bits` ORs bits under `SELECT ... FOR UPDATE` of the badges row (never an
     `adjust` delta: two grants of one bit would carry into a badge nobody earned) and
@@ -168,16 +193,26 @@ computed index, a fill, an assignment) and, in the game's code, any to the playe
     server's (run it where the server runs: proofs and revocations compare times).
   - *Client* (`badge_hold`): the badge frame waits (60 s at most, by the clock) while a
     prize claim or a kept record is unanswered, and goes out again after each claim's and
-    record's first answer; `login_ok` names the placements whose win gives a badge, and
-    their seed is waited for 30 s while online (a dropped link ends the wait: no
-    reconnect happens in a battle - such a win is unprovable, the operator's to grant).
-    Login always carries `:badges` (0 without a row).
+    record's first answer; `login_ok` / `auth_ok` name the placements whose win gives a
+    badge (from shadow on, section 4), and their seed is waited for 30 s while online (a
+    dropped link ends the wait: no reconnect happens in a battle - such a win is
+    unprovable, the operator's to grant). Those battles are fought with no partner
+    (`badge_alone`, section 4). Login always carries `:badges` (0 without a row).
   - *Operator*: `bin/pemk_badges.rb list | grant | revoke | unowned` (the wins a player
     may have earned that own nothing: claimed with no seed, not replayable, refuted).
-  - Autotest 089, on a fixture export (the demo's is blocked: the house's set, May): an
-    honest badge shown at once, owned after the replay, kept across a relogin and a resume;
-    a badge frame before its claim keeps the badge and flags no one; killed before its
-    checkpoint: claim void, the badge gone while unproven, Brock again; a rogue's frame
-    never raises; a made-up record pending then refuted, and a record sent meanwhile
-    claiming the badge refuted; the cutover's cases; on, off (flag state off), on restores
-    every grant; an operator grant; a P4-era client gets update_required.
+  - Autotest 089, on the demo's own export (2026-10-01 Sam's maps were edited: the house
+    help NPC gives no badges and no debug mode, Brock's battle has a noPartner rule; the
+    maps are not in the repository, so `server/data/world.json` describes the edited demo
+    until a stock clone's first debug launch exports its own - safe: the server only
+    refuses more. 089 sets `PEMK_BADGE_IGNORE=3:7` for a stock demo's house, whose
+    clients fight Brock alone): an honest badge shown at once, owned after the replay,
+    kept across a relaunch; a rogue's frame never raises; a client that cannot hold its
+    badge frame gets update_required. The unit tests cover the rest: a refuted or
+    unreplayable win, the cutover's cases (`server_badge_enforce_test`), operator grants
+    and revocations (`ledger_test`, `badges_cli_test`), a badge frame held for its claim
+    (`badge_hold_plugin_test`).
+  - Autotest 090: a copy of the demo's export says Camper Liam's win gives a badge (he has
+    two Pokemon: a partner would join him), and May is the player's partner - Liam is
+    fought alone, seeded, replayed, and his badge granted; a B2 client without
+    `badge_alone` gets update_required. Its counter-check (the seed ask from before)
+    turns the battle into a double with May.

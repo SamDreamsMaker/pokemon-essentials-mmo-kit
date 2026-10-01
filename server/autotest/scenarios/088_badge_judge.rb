@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require "json"
 require "open3"
+require "tmpdir"
 
 # Badge authority B1 (docs/BADGE-AUTHORITY-DESIGN.md), shadow: each badge a client
 # reports is judged by the battle that gives it. Brock's badge after a real win waits
@@ -8,11 +10,24 @@ require "open3"
 # with no battle, every badge at once - are what enforcement would refuse; Brock's after a
 # claim with no record on its seed waits for one; after a claim with no seed, no replay
 # can prove it.
+# On a copy of the demo's export with the stock house's badge write (an edited demo has
+# none): the server names it as what keeps it from owning the badges.
+WORLD_088 = File.join(Dir.tmpdir, "pemk_world_088.json")
+begin
+  File.delete(WORLD_088) if File.exist?(WORLD_088)   # never a stale copy: no file, no badges
+  world = JSON.parse(File.read(File.join(Autotest::SERVER_DIR, "data", "world.json")))
+  (world["badge_sources"] ||= { "list" => [], "unknown" => [] })["unknown"] <<
+    { "map" => 3, "event" => 7, "page" => 0, "script" => "for i in 0...16; $player.badges[i] = true; end" }
+  File.write(WORLD_088, JSON.generate(world))
+rescue StandardError => e
+  warn "088: no fixture world (#{e.class}: #{e.message})"
+end
+
 Autotest.scenario "a badge is judged by the battle that gives it",
                   flags: { PEMK_BATTLE_ENFORCE_RNG: "on", PEMK_BATTLE_ENFORCE_ENCOUNTERS: "on",
                            PEMK_MONEY_AUTHORITY: "shadow", PEMK_BATTLE_ENFORCE_TEAMS: "on",
                            PEMK_BATTLE_ENFORCE_EXP: "on", PEMK_TRAINER_PROOF: "shadow",
-                           PEMK_BADGE_AUTHORITY: "shadow" },
+                           PEMK_BADGE_AUTHORITY: "shadow", PEMK_WORLD: WORLD_088 },
                   budget: 480 do |s|
   s.check("the server says what keeps it from owning the badges: the house's debug badges") do
     s.server.grep(/badge authority cannot own: a badge set the export cannot read: map 3 event 7/).any?
@@ -40,7 +55,8 @@ Autotest.scenario "a badge is judged by the battle that gives it",
     s.db[:money_claims].where(account_id: id, kind: "trainer").exclude(trainer_battle_id: nil).first
   end
   record = s.db[:battle_records].where(trainer_battle_id: claim[:trainer_battle_id], outcome: 1).first
-  out, = Open3.capture2e({ "DATABASE_URL" => ENV.fetch("DATABASE_URL"), "REPLAY_ID" => record[:id].to_s },
+  out, = Open3.capture2e({ "DATABASE_URL" => ENV.fetch("DATABASE_URL"), "REPLAY_ID" => record[:id].to_s,
+                           "PEMK_WORLD" => WORLD_088 },
                          "bundle", "exec", "ruby", "bin/pemk_replay.rb", chdir: Autotest::SERVER_DIR)
   File.write(File.join(s.dir, "replay.txt"), out.lines.grep(/^  #/).join)
   s.check("Brock's battle replays as it was played") do

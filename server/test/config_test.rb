@@ -174,4 +174,14 @@ class ConfigTest < Minitest::Test
     assert_equal :on,     PEMK::Config.new(env: ENV.to_h.merge("PEMK_BADGE_AUTHORITY" => " ON ")).badge_authority
     assert_equal :off,    PEMK::Config.new(env: ENV.to_h.merge("PEMK_BADGE_AUTHORITY" => "junk")).badge_authority
   end
+
+  # The badge writes the operator says are not the game's: none by default.
+  def test_badge_ignore_defaults_empty_and_reads_env
+    env = ENV.to_h
+    env.delete("PEMK_BADGE_IGNORE")
+    assert_equal [], PEMK::Config.new(env: env).badge_ignore
+    list = PEMK::Config.new(env: ENV.to_h.merge("PEMK_BADGE_IGNORE" => " 3:7, CE:12,,Plugins/My Game/x.rb:40 ,3:7")).badge_ignore
+    assert_equal ["3:7", "ce:12", "Plugins/My Game/x.rb:40"], list
+    assert list.frozen?
+  end
 end

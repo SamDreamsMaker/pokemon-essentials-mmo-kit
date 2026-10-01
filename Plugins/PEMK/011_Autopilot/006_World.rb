@@ -453,6 +453,10 @@ module PEMK
           when "set_raw_switch"
             $game_switches.instance_variable_get(:@data)[a[0].to_i] = on?(a[1])
             { "switch" => a[0].to_i, "value" => $game_switches[a[0].to_i] ? true : false }
+          when "partner"                     # trainer_type name version | none: at the player's side
+            a[0].to_s.downcase == "none" ? pbDeregisterPartner : pbRegisterPartner(a[0].to_s.to_sym, a[1].to_s, a[2].to_i)
+            partner = $PokemonGlobal.partner
+            { "partner" => partner ? [partner[0].to_s, partner[1].to_s, partner[3].size] : nil }
           end
         Autopilot.respond(id, { "ok" => true }.merge(result))
       end
@@ -468,7 +472,7 @@ module PEMK
       Autopilot.verb("warp")     { |id, rest| cmd_warp(id, rest) }
       %w[set_switch set_var set_selfswitch add_item add_pokemon heal money bp
          get_switch get_var get_selfswitch get_item set_raw_var set_raw_switch
-         pc_deposit pc_withdraw get_pc give_held take_held get_held].each do |name|
+         pc_deposit pc_withdraw get_pc give_held take_held get_held partner].each do |name|
         Autopilot.verb(name) do |id, rest|
           next Autopilot.respond(id, "ok" => false, "error" => "no game loaded yet") unless $player
 
