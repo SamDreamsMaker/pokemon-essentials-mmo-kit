@@ -215,7 +215,6 @@ module PEMK
         # whose output never drains (a dead link, its send buffer full) goes after
         # CLOSE_GRACE - until then its map would keep it.
         if conn.closing
-          conn.data[:closing_at] ||= now
           close_conn(conn) if conn.outbuf.empty? || now - conn.data[:closing_at] > CLOSE_GRACE
           next
         end

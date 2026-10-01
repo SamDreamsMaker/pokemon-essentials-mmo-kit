@@ -473,10 +473,12 @@ module PEMK
               rec  = reconcile_block(acct[:id], fresh: true)
               pos  = (@characters.load_position(acct[:id]) rescue nil)   # M4-B: seed last_pos (never brick login)
               @reactor.post do
-                if @reactor.alive?(conn)   # never bind a dead conn into @online
+                if @reactor.alive?(conn) && conn.data[:account_id].nil?   # never bind a dead conn, or one bound meanwhile
                   bind(conn, acct[:id])
                   conn.data[:last_pos] = pos if pos
                   reply_body(conn, { type: :login_ok, account_id: acct[:id], token: token }.merge(rec, presence_v2: conn.data[:presence_v2] ? true : false), blob)
+                elsif @reactor.alive?(conn)
+                  reply(conn, type: :login_err, reason: "already_authed")   # two logins in one write
                 end
               end
             end
@@ -512,10 +514,12 @@ module PEMK
               rec  = reconcile_block(account_id, fresh: fresh)
               pos  = (@characters.load_position(account_id) rescue nil)   # M4-B: seed last_pos (never brick login)
               @reactor.post do
-                if @reactor.alive?(conn)   # never bind a dead conn into @online
+                if @reactor.alive?(conn) && conn.data[:account_id].nil?   # never bind a dead conn, or one bound meanwhile
                   bind(conn, account_id)
                   conn.data[:last_pos] = pos if pos
                   reply_body(conn, { type: :auth_ok, account_id: account_id }.merge(rec, presence_v2: conn.data[:presence_v2] ? true : false), blob)
+                elsif @reactor.alive?(conn)
+                  reply(conn, type: :auth_err, reason: "already_authed")   # two auths in one write
                 end
               end
             end
@@ -3664,7 +3668,7 @@ module PEMK
       # map's zone. In :off/:shadow correct_to is never set, so the frame flows on.
       @pos_audit.check(account_id, env, conn.data)
       if (tgt = conn.data.delete(:correct_to))
-        conn.data.delete(:sync_at)   # a snap-back clears the client's remotes: its next ask is honoured
+        conn.data.delete(:sync_at) if tgt[0] != map   # a snap-back to another map clears the client's remotes: its next ask is honoured
         reply(conn, type: :pos_correct, map: tgt[0], x: tgt[1], y: tgt[2])
         return
       end

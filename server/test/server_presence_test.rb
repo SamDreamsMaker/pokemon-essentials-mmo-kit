@@ -233,6 +233,22 @@ class ServerPresenceTest < Minitest::Test
     [a, b].each(&:close)
   end
 
+  # Two logins in one write: the bind happens after the pool and mailbox hops, so each
+  # login checks again, on the reactor thread, that the socket is still nobody's.
+  def test_two_logins_in_one_write_bind_once
+    a, a_id = open_authed("Aone", "passwordA1")
+    b, b_id = open_authed("Bone", "passwordB1")
+    [a, b].each(&:close)
+    c = TCPSocket.new("127.0.0.1", @port)
+    c.write(W.encode_split({ type: :login, email: "Aone@t.co", password: "passwordA1" }) +
+            W.encode_split({ type: :login, email: "Bone@t.co", password: "passwordB1" }))
+    replies = drain(c).map { |e| [e[:type], e[:reason]] }.sort_by(&:to_s)
+    assert_equal [[:login_err, "already_authed"], [:login_ok, nil]], replies
+    bound = on_reactor { @server.instance_variable_get(:@online).values_at(a_id, b_id).compact }
+    assert_equal 1, bound.size, "one account on the socket"
+    c.close
+  end
+
   # A snapshot goes at most every few seconds, the one at a map's entry counted: the
   # client's asks right after entering add no second one. A snap-back to another map
   # clears the client's remotes without a map change on the server: its next ask is
@@ -248,10 +264,15 @@ class ServerPresenceTest < Minitest::Test
     send_env(a, { type: :pos, map: 2, x: 1, y: 1, sync: true })
     assert_empty nothing(a), "no second snapshot within SYNC_EVERY of the entry"
     on_reactor { @server.instance_variable_get(:@online)[a_id].data[:correct_to] = [2, 1, 1] }
-    send_env(a, { type: :pos, map: 2, x: 5, y: 5 })                # refused: a snap-back
+    send_env(a, { type: :pos, map: 2, x: 5, y: 5 })                # refused: a snap-back on its map
     assert_equal [:pos_correct], drain(a).map { |e| e[:type] }
-    send_env(a, { type: :pos, map: 2, x: 1, y: 1, sync: true })    # its remotes cleared, it asks again
-    assert_equal [b_id], drain(a).map { |e| e[:id] }, "honoured at once after a snap-back"
+    send_env(a, { type: :pos, map: 2, x: 1, y: 1, sync: true })
+    assert_empty nothing(a), "a snap-back on the same map clears no remote: no new snapshot"
+    on_reactor { @server.instance_variable_get(:@online)[a_id].data[:correct_to] = [2, 1, 1] }
+    send_env(a, { type: :pos, map: 9, x: 5, y: 5 })                # refused: a snap-back from another map
+    assert_equal [:pos_correct], drain(a).map { |e| e[:type] }
+    send_env(a, { type: :pos, map: 2, x: 1, y: 1, sync: true })    # its remotes cleared by the transfer, it asks again
+    assert_equal [b_id], drain(a).map { |e| e[:id] }, "honoured at once after a snap-back to another map"
     [a, b].each(&:close)
   end
 
