@@ -338,4 +338,30 @@ check(results, "a_stuck_command_times_out") do
   r && r["ok"] == false && r["error"].include?("timeout")
 end
 
+# Where the server denies debug mode (PEMK::DebugLock, 003_Game), the autopilot only reads.
+module PEMK
+  module DebugLock
+    @allowed = true
+    def self.autopilot_allowed?; @allowed; end
+    def self.allowed=(value); @allowed = value; end
+  end
+end
+
+check(results, "a_denied_autopilot_only_reads") do
+  PEMK::DebugLock.allowed = false
+  send_cmd("30 press USE")
+  refused = await
+  send_cmd("31 state")
+  state = await
+  send_cmd("32 wait 1")
+  waited = await
+  PEMK::DebugLock.allowed = true
+  send_cmd("33 press USE")
+  pressed = await
+  3.times { frame! }
+  refused && refused["ok"] == false && refused["error"].include?("locked by the server") &&
+    state && state["ok"] == true && state["debug"] == true && waited && waited["ok"] == true &&
+    pressed && pressed["ok"] == true
+end
+
 puts JSON.generate(results)

@@ -105,8 +105,13 @@ Then, from Git Bash or WSL: `tools/autopilot/ap.sh autopilot/ap1 <verb> [args]`.
 ## Safety
 
 - The autopilot is off unless the launch is `debug` **and** `PEMK_AUTOPILOT` is set: a
-  player build is never remote-controlled. A debug launch already has the F9 debug
-  menu, so the autopilot gives it no new power.
+  player build is never remote-controlled. Any player can make such a launch, though, so
+  the server decides what it may do once logged in (`PEMK_CLIENT_DEBUG`): `deny` (the
+  default) keeps debug mode off and lets the autopilot only read (state, screenshot,
+  events, waits - no key, no setter); `autopilot` keeps debug mode off and obeys it (the
+  harness's level: never a public server); `allow` changes nothing (a dev server,
+  `server/bin/dev-server.sh`). A scenario that needs debug mode itself sets
+  `PEMK_CLIENT_DEBUG: "allow"` in its flags (080 surfs with no badge).
 - Its channel is two files in a local folder; it opens no port.
 - Its setters go through the game's normal code, so an online server sees them as the
   client claims they are, like any other change.

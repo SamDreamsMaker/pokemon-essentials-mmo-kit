@@ -138,12 +138,19 @@ module PEMK
       @verbs.keys.sort
     end
 
+    # What the autopilot still does where the server denies debug mode: look and wait.
+    READ_ONLY = %w[ping verbs keys state screenshot events event_pages grass wait wait_until abort
+                   get_switch get_var get_selfswitch get_item get_pc get_held].freeze
+
     def run(line)
       id, name, rest = line.strip.split(/\s+/, 3)
       return if id.nil? || id.empty?
 
       handler = @verbs[name.to_s]
       return respond(id, "ok" => false, "error" => "unknown verb #{name.inspect}", "verbs" => verbs) unless handler
+      unless READ_ONLY.include?(name.to_s) || !defined?(PEMK::DebugLock) || PEMK::DebugLock.autopilot_allowed?
+        return respond(id, "ok" => false, "error" => "locked by the server (PEMK_CLIENT_DEBUG=deny)")
+      end
 
       handler.call(id, rest.to_s)
     rescue StandardError => e
