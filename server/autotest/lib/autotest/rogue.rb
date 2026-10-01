@@ -28,7 +28,10 @@ module Autotest
       login[:caps] = @caps if @caps
       send_env(login)
       reply = wait_for(:login_ok, :login_err)
-      raise Failure, "rogue: login refused (#{reply[:env][:reason]})" unless reply[:env][:type] == :login_ok
+      unless reply[:env][:type] == :login_ok
+        close
+        raise Failure, "rogue: login refused (#{reply[:env][:reason]})"
+      end
 
       @account_id = reply[:env][:account_id]
       self
