@@ -57,6 +57,8 @@ module PEMK
       @trainer_places  = {} # map_id => { event_id => frozen Array of [type, name, version, rematch, repeatable] } (M1a)
       @trainer_marks   = false # does the export say which battles can be fought again?
       @partners        = nil   # frozen Array of [type, name, version] the game registers as partners
+      @badge_sources   = nil   # badge => frozen Array of sources (badge authority B0); nil: not exported
+      @badge_unknown   = []    # the badge sets the export could not read
       @gifts        = {}    # [map,event_id] => frozen gift/prize object (step 6 payout gate)
       @shops        = {}    # [map,event_id] => frozen mart / bp_shop object (item authority)
       @loaded       = false
@@ -310,6 +312,91 @@ module PEMK
       @trainer_places.any? { |_, events| events.any? { |_, list| list.any? { |t| t[3] } } }
     end
 
+    # Badge authority B0: does the export say what gives each badge?
+    def badge_marks?
+      !@badge_sources.nil?
+    end
+
+    # -> the sources of +badge+: [{ map:, event:, page:, trainers: [[type, name, version]] | nil }
+    # | { common_event: }] - a source with trainers is their battle's win; one without is no
+    # battle's. [] when nothing the export read gives it (nil: not exported).
+    def badge_sources(badge)
+      return nil unless @badge_sources
+
+      @badge_sources.fetch(badge.to_i, [])
+    end
+
+    # The badge sets the export could not read (a computed index, the game's own code):
+    # [{ where..., script: }].
+    attr_reader :badge_unknown
+
+    # -> the badges a win over this trainer at this placement gives.
+    def win_bits(map_id, event_id, type, name, version)
+      return [] unless @badge_sources
+
+      id = [type.to_s, name.to_s, version.to_i]
+      @badge_sources.select do |_, sources|
+        sources.any? { |s| s[:map] == map_id && s[:event] == event_id && Array(s[:trainers]).include?(id) }
+      end.keys.sort
+    end
+
+    # Why the server could not own the badges this export gives: what gives a badge it
+    # cannot see, or a win no replay can prove. -> [why, ...] ([] when it can)
+    def badge_blockers(badges_max: nil)
+      return ["the exports predate the badge sources (one debug launch regenerates them)"] unless @badge_sources
+
+      out = @badge_unknown.map { |u| "a badge set the export cannot read: #{badge_where(u)} (#{u['script']})" }
+      wins = Hash.new { |h, k| h[k] = [] }   # [map, event, trainer] => [[badge, its page and call], ...]
+      @badge_sources.sort.each do |badge, sources|
+        out << "badge #{badge} is over the cap of #{badges_max}" if badges_max && badge >= badges_max
+        sources.each do |s|
+          where = badge_where(s.transform_keys(&:to_s))
+          if s[:trainers].nil?
+            out << "badge #{badge} is given with no battle (#{where})"
+          elsif s[:trainers].length > 1
+            out << "badge #{badge} is a battle against several trainers (#{where}): no replay proves it"
+          elsif s[:no_money]
+            out << "badge #{badge}'s battle pays nothing (#{where}): no claim proves it"
+          elsif (why = unseeded(s))
+            out << "badge #{badge}'s battle gets no seed (#{where}): #{why}"
+          else
+            wins[[s[:map], s[:event], s[:trainers][0]]] << [badge, [s[:page], s[:call]]]
+          end
+        end
+      end
+      # one battle giving two badges gives both; two battles with one trainer giving
+      # different badges: a win cannot say which it was
+      wins.each do |(map, event, t), given|
+        badges = given.map(&:first).uniq
+        next if badges.length < 2 || given.map(&:last).uniq.length < 2
+
+        out << "#{t[0]} #{t[1]} v#{t[2]} (map #{map} event #{event}) gives badges #{badges.join(', ')} in different battles: " \
+               "which, the win cannot say"
+      end
+      out
+    end
+
+    # Why a win source's battle is fought with no seed - so no replay proves it - or nil.
+    # The server seeds a trainer it places, alone in its call; the client asks no seed
+    # with a partner at the player's side (the game registers one, or computes one).
+    def unseeded(source)
+      type, name, version = source[:trainers][0]
+      return "the export does not place #{type} #{name}" unless trainer_place(source[:map], source[:event], type, name, version)
+      return "#{type} #{name} shares a battle call" unless trainer_alone?(source[:map], source[:event], type, name, version)
+      return "it is a #{source[:size]} battle" if source[:size]
+      return nil if source[:no_partner]
+      return "a partner may join it (the export cannot list the game's partners)" if @partners.nil?
+
+      "a partner may join it (#{@partners.map { |t| t.first(2).join(' ') }.join(', ')})" unless @partners.empty?
+    end
+
+    def badge_where(u)
+      return "common event #{u['common_event']}" if u["common_event"]
+      return "#{u['file']}:#{u['line']}" if u["file"]
+
+      "map #{u['map']} event #{u['event']} page #{u['page']}"
+    end
+
     # Money authority: the versions of +type+ / +name+ the game registers as a partner
     # trainer (pbRegisterPartner), whose party may hold an Amulet Coin. nil when the export
     # cannot say: from before it, or a partner computed at runtime.
@@ -389,6 +476,7 @@ module PEMK
       # ... and whether its maps mark water.
       @water_marks = doc["water_marks"] == true
       @partners = load_partners(doc["partners"])
+      @badge_sources, @badge_unknown = load_badge_sources(doc["badge_sources"])
       @connections = freeze_connections(doc["connections"])
       @home  = coord_array(doc["home"], 4) || coord_array(doc["home"], 3)
       @start = coord_array(doc["start"], 3)
@@ -526,6 +614,31 @@ module PEMK
 
     # { "list" => [[type, name, version], ...], "computed" => bool } -> the list, or nil
     # when a partner is computed at runtime (or the export predates the list).
+    # -> [{ badge => [source, ...] } | nil, [unknown, ...]]
+    def load_badge_sources(doc)
+      return [nil, [].freeze] unless doc.is_a?(Hash) && doc["list"].is_a?(Array)
+
+      by_badge = Hash.new { |h, k| h[k] = [] }
+      doc["list"].each do |e|
+        next unless e.is_a?(Hash) && e["badge"].is_a?(Integer) && e["badge"] >= 0
+
+        source = if e["common_event"].is_a?(Integer)
+                   { common_event: e["common_event"] }
+                 elsif [e["map"], e["event"]].all? { |v| v.is_a?(Integer) }
+                   trainers = Array(e["trainers"]).filter_map do |t|
+                     [t[0].to_s, t[1].to_s, t[2]].freeze if t.is_a?(Array) && t.length == 3 && t[2].is_a?(Integer)
+                   end
+                   { map: e["map"], event: e["event"], page: e["page"].is_a?(Integer) ? e["page"] : 0,
+                     trainers: trainers.empty? ? nil : trainers.freeze, no_money: e["no_money"] == true,
+                     no_partner: e["no_partner"] == true, size: e["size"].is_a?(String) ? e["size"].freeze : nil,
+                     call: e["call"].is_a?(Integer) ? e["call"] : nil }
+                 end
+        by_badge[e["badge"]] << source.freeze if source
+      end
+      unknown = Array(doc["unknown"]).select { |u| u.is_a?(Hash) }.map { |u| deep_freeze(u) }
+      [by_badge.transform_values(&:freeze).to_h.freeze, unknown.freeze]
+    end
+
     def load_partners(doc)
       return nil unless doc.is_a?(Hash) && doc["computed"] != true && doc["list"].is_a?(Array)
 

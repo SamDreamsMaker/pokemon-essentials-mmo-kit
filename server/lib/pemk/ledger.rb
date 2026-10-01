@@ -119,7 +119,14 @@ module PEMK
     # Was this (account, field, seq) already applied? (D4: attribute/consume budget only
     # for a genuinely new frame, never a reconnect replay.)
     def recorded?(account_id, field, seq)
+      return false unless Ledger.seq_ok?(seq)   # never applied - and never a query the database refuses
+
       !@db[:economy_ledger].where(account_id: account_id, field: field.to_s, seq: seq).empty?
+    end
+
+    # A client frame's seq: an Integer above zero and below SEQ_MAX.
+    def self.seq_ok?(seq)
+      seq.is_a?(Integer) && seq.positive? && seq < SEQ_MAX
     end
 
     # Canonical economy for login_ok reconciliation: { balances: {field=>value},
