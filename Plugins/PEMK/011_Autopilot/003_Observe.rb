@@ -75,7 +75,7 @@ module PEMK
         s = { "frame" => PEMK::Autopilot.frame, "scene" => ($scene ? $scene.class.name : nil),
               "screens" => @screens.dup, "instance" => PEMK.instance, "online" => online,
               "flags" => temp_flags, "message" => @messages.last, "menus" => menus,
-              "held" => VInput.held_names }
+              "held" => VInput.held_names, "debug" => $DEBUG ? true : false }
         s["map"]     = map_info if $game_map
         s["player"]  = player_info if $game_player
         s["trainer"] = trainer_info if $player

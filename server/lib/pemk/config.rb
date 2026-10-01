@@ -16,7 +16,7 @@ module PEMK
                 :gift_enforce, :peer_check, :peer_classes, :trade_redelivery, :item_record,
                 :shop_enforce, :item_authority, :item_local, :item_grace, :money_authority,
                 :money_payday_daily, :money_local_daily, :money_repeat_daily, :trainer_proof,
-                :money_unproven_daily, :badge_authority, :badge_ignore
+                :money_unproven_daily, :badge_authority, :badge_ignore, :client_debug
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -53,6 +53,16 @@ module PEMK
       # item ball infinitely. Advertised to the client (reconcile_block) so the F9 dev
       # tool only offers the reset when the server actually honors it.
       @pickup_reset_allowed = env.fetch("PEMK_ALLOW_PICKUP_RESET", "off").to_s.strip.downcase == "on"
+
+      # Debug mode on the clients (Essentials' $DEBUG: walking through walls, deciding a
+      # trainer battle, field moves with no badge, the debug menus - a `debug` launch or an
+      # event's `$DEBUG = true` turns it on, with no modified client). deny = it stays off
+      # while they play here, and their autopilot only reads (a closed cheat path: on by
+      # default); autopilot = it stays off, the autopilot is obeyed (the autotest's level -
+      # never a public server); allow = as the client has it (a dev server's kill switch).
+      # Unknown -> deny (never boot looser than asked).
+      dmode = env.fetch("PEMK_CLIENT_DEBUG", "deny").to_s.strip.downcase
+      @client_debug = %w[deny autopilot allow].include?(dmode) ? dmode.to_sym : :deny
 
       # M4 Layer D: team/set legality enforcement mode, same off/shadow/on tri-state as
       # PEMK_POS_ENFORCE. Default off. D1 is detection-only (there is no battle-entry

@@ -98,6 +98,7 @@ Then, from Git Bash or WSL: `tools/autopilot/ap.sh autopilot/ap1 <verb> [args]`.
 | `set_raw_var`, `set_raw_switch`, `hold_saves on\|off` | change a value the way a memory edit does; keep the save from reaching the server, to kill the game before it lands |
 | `pc_deposit`, `pc_withdraw`, `get_pc`, `give_held`, `take_held`, `get_held` | move items between the bag, the PC and a party Pokemon the way the engine does, and read them back |
 | `partner TYPE NAME VERSION`, `partner none` | put a trainer at the player's side the way an event does (`pbRegisterPartner`), or take them away |
+| `set_debug on\|off` | set `$DEBUG` the way an event's script does (the stock demo's house helper): a server that keeps debug mode off undoes it at once |
 | `fast`, `advance`, `abort` | skip animations and key-wait windows, cancel a running command |
 
 `verbs` lists them all.
@@ -105,8 +106,13 @@ Then, from Git Bash or WSL: `tools/autopilot/ap.sh autopilot/ap1 <verb> [args]`.
 ## Safety
 
 - The autopilot is off unless the launch is `debug` **and** `PEMK_AUTOPILOT` is set: a
-  player build is never remote-controlled. A debug launch already has the F9 debug
-  menu, so the autopilot gives it no new power.
+  player build is never remote-controlled. Any player can make such a launch, though, so
+  the server decides what it may do once logged in (`PEMK_CLIENT_DEBUG`): `deny` (the
+  default) keeps debug mode off and lets the autopilot only read (state, screenshot,
+  events, waits - no key, no setter); `autopilot` keeps debug mode off and obeys it (the
+  harness's level: never a public server); `allow` changes nothing (a dev server,
+  `server/bin/dev-server.sh`). A scenario that needs debug mode itself sets
+  `PEMK_CLIENT_DEBUG: "allow"` in its flags (080 surfs with no badge).
 - Its channel is two files in a local folder; it opens no port.
 - Its setters go through the game's normal code, so an online server sees them as the
   client claims they are, like any other change.

@@ -98,6 +98,13 @@ world.json`, `battle_data.json`) so the server always sees your latest maps and
 tables. **You never run a manual export.** Restart the server (`PlayMMO-server.bat`)
 to pick up the regenerated data.
 
+Debug mode online is the server's call (`PEMK_CLIENT_DEBUG`): the dev server that
+`PlayMMO-server.bat` starts allows it, so F9 works while you test. A server left at
+its default (`deny`) keeps debug mode off on every client of this kit's version that
+logs in - players get no F9, no walking through walls, whatever their launch or an
+event says (an older or modified client ignores it: the server's own checks stay the
+guard).
+
 ### What you edit with what
 
 - **Game DATA — species, moves, abilities, items, trainers, and wild

@@ -184,4 +184,14 @@ class ConfigTest < Minitest::Test
     assert_equal ["3:7", "ce:12", "Plugins/My Game/x.rb:40"], list
     assert list.frozen?
   end
+
+  # Debug mode on the clients: deny by default (a closed cheat path), junk never looser.
+  def test_client_debug_defaults_deny_and_reads_env
+    env = ENV.to_h
+    env.delete("PEMK_CLIENT_DEBUG")
+    assert_equal :deny,      PEMK::Config.new(env: env).client_debug
+    assert_equal :autopilot, PEMK::Config.new(env: ENV.to_h.merge("PEMK_CLIENT_DEBUG" => "autopilot")).client_debug
+    assert_equal :allow,     PEMK::Config.new(env: ENV.to_h.merge("PEMK_CLIENT_DEBUG" => " ALLOW ")).client_debug
+    assert_equal :deny,      PEMK::Config.new(env: ENV.to_h.merge("PEMK_CLIENT_DEBUG" => "on")).client_debug
+  end
 end

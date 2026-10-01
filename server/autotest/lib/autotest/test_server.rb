@@ -116,7 +116,8 @@ module Autotest
     private
 
     def boot
-      env = ENV.to_h.merge("PEMK_BIND" => "0.0.0.0", "PEMK_PORT" => @port.to_s)
+      # debug mode locked, the autopilot obeyed: every scenario plays as a locked client
+      env = ENV.to_h.merge("PEMK_BIND" => "0.0.0.0", "PEMK_PORT" => @port.to_s, "PEMK_CLIENT_DEBUG" => "autopilot")
       @flags.each { |k, v| env[k.to_s] = v.to_s }
       @server = PEMK::Server.new(config: PEMK::Config.new(env: env), logger: method(:log))
       @server.start

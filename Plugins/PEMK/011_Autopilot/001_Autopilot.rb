@@ -54,6 +54,29 @@ module PEMK
       !@dir.nil?
     end
 
+    # Active, and not denied by the server (PEMK::DebugLock): it may drive the game -
+    # keys, battles, text entry, item choice. Denied, the game is the player's alone.
+    def driving?
+      active? && (!defined?(PEMK::DebugLock) || PEMK::DebugLock.autopilot_allowed?)
+    end
+
+    # The server denied it (DebugLock, at login): the running command ends, and the
+    # settings commands left on go - held keys, a battle mode, auto-advance, the `fast`
+    # options, held saves. A queued `type` / `pick` stays, never read: the hooks run the
+    # game's own screens once it no longer drives.
+    def disarm
+      job = @job ? @job_id : nil
+      @job = nil
+      (VInput.release_all rescue nil)
+      ((BattleControl.mode = :keys) rescue nil) if defined?(BattleControl)
+      ((Actions.advance = false) rescue nil) if defined?(Actions)
+      (Actions.restore_options rescue nil) if defined?(Actions)
+      ((SaveHold.on = false) rescue nil) if defined?(SaveHold) && SaveHold.on
+      PEMK.log("autopilot: disarmed - the server denies debug mode; it only reads now")
+      # last: a channel that cannot be written to leaves the game the player's anyway
+      (respond(job, "ok" => false, "error" => "locked by the server (PEMK_CLIENT_DEBUG=deny)") rescue nil) if job
+    end
+
     def dir
       @dir
     end
@@ -138,12 +161,19 @@ module PEMK
       @verbs.keys.sort
     end
 
+    # What the autopilot still does where the server denies debug mode: look and wait.
+    READ_ONLY = %w[ping verbs keys state screenshot events event_pages grass wait wait_until abort
+                   get_switch get_var get_selfswitch get_item get_pc get_held].freeze
+
     def run(line)
       id, name, rest = line.strip.split(/\s+/, 3)
       return if id.nil? || id.empty?
 
       handler = @verbs[name.to_s]
       return respond(id, "ok" => false, "error" => "unknown verb #{name.inspect}", "verbs" => verbs) unless handler
+      unless READ_ONLY.include?(name.to_s) || !defined?(PEMK::DebugLock) || PEMK::DebugLock.autopilot_allowed?
+        return respond(id, "ok" => false, "error" => "locked by the server (PEMK_CLIENT_DEBUG=deny)")
+      end
 
       handler.call(id, rest.to_s)
     rescue StandardError => e

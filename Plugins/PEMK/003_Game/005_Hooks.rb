@@ -58,6 +58,7 @@ module Graphics
       alias_method :pemk_orig_update, :update
       def update(*args)
         pemk_orig_update(*args)   # mkxp-z may raise SystemExit HERE on window close
+        (PEMK::DebugLock.tick rescue nil)   # every frame, every scene, logged in or not
         PEMK::Pump.tick
       rescue SystemExit
         # THE reliable exit backstop: the terminate exception unwinds through here

@@ -417,4 +417,40 @@ check(results, "setters_refuse_before_a_game_is_loaded") do
   r && r["ok"] == false
 end
 
+# Where the server denies debug mode (PEMK::DebugLock, 003_Game), the game's own text
+# entry runs: the autopilot could not answer it.
+module PEMK
+  module DebugLock
+    @allowed = true
+    def self.autopilot_allowed?; @allowed; end
+    def self.allowed=(value); @allowed = value; end
+  end
+end
+
+check(results, "a_denied_autopilot_leaves_text_entry_to_the_game") do
+  PEMK::DebugLock.allowed = false
+  got = [pbEnterText("Your name?", 1, 7, ""), pbMessageFreeText("Hi", "", false, 10),
+         PokemonBagScreen.new(FakeBag.new([nil, [[:POTION, 1]]])).pbChooseItemScreen(nil)]
+  PEMK::DebugLock.allowed = true
+  got == %i[ui ui bag_ui] && PEMK::Autopilot::TextEntry.awaiting.nil? && PEMK::Autopilot::ItemChoice.awaiting.nil?
+end
+
+# A prompt already waiting for the autopilot when the server denies it (a re-login under a
+# stricter server): the game's own screen takes over instead of waiting for ever.
+check(results, "a_prompt_left_waiting_goes_to_the_game_when_denied") do
+  got = [[-> { pbEnterText("Your name?", 1, 7, "") }, -> { PEMK::Autopilot::TextEntry.awaiting }],
+         [-> { PokemonBagScreen.new(FakeBag.new([nil, [[:POTION, 1]]])).pbChooseItemScreen(nil) },
+          -> { PEMK::Autopilot::ItemChoice.awaiting }]].map do |prompt, waiting|
+    PEMK::DebugLock.allowed = true
+    t = Thread.new { prompt.call }
+    deadline = Time.now + 5
+    sleep 0.001 until waiting.call || Time.now > deadline
+    asked = !waiting.call.nil?
+    PEMK::DebugLock.allowed = false
+    [asked, t.join(5) ? t.value : :stuck]
+  end
+  PEMK::DebugLock.allowed = true
+  got == [[true, :ui], [true, :bag_ui]]
+end
+
 puts JSON.generate(results)

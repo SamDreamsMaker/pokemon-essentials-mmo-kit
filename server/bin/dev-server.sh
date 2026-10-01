@@ -29,7 +29,11 @@ cd "$(dirname "$0")/.."   # -> server/
 # corrects a player. Override with PEMK_POS_ENFORCE=off (silent) or =on (real
 # snap-back) once the shadow telemetry is confirmed clean.
 : "${PEMK_POS_ENFORCE:=shadow}"
+# The dev server keeps a debug launch's debug mode (F9, Ctrl): PEMK_CLIENT_DEBUG=allow.
+# A public server leaves it unset - debug mode then stays off on the clients.
+: "${PEMK_CLIENT_DEBUG:=allow}"
 
 bundle exec rake db:migrate
-echo "PEMK server starting on 0.0.0.0:9998 (enforce=$PEMK_POS_ENFORCE, Ctrl-C to stop)"
-exec env PEMK_BIND=0.0.0.0 PEMK_PORT=9998 PEMK_POS_ENFORCE="$PEMK_POS_ENFORCE" bundle exec ruby bin/pemk_server.rb
+echo "PEMK server starting on 0.0.0.0:9998 (enforce=$PEMK_POS_ENFORCE, client debug=$PEMK_CLIENT_DEBUG, Ctrl-C to stop)"
+exec env PEMK_BIND=0.0.0.0 PEMK_PORT=9998 PEMK_POS_ENFORCE="$PEMK_POS_ENFORCE" PEMK_CLIENT_DEBUG="$PEMK_CLIENT_DEBUG" \
+  bundle exec ruby bin/pemk_server.rb

@@ -21,6 +21,8 @@
 # (how many the bag holds). And save.
 # set_raw_var ID VALUE / set_raw_switch ID on|off change a value without the game's
 # setter (what a memory edit does), to test that the server repairs it.
+# partner TYPE NAME VERSION | none puts a trainer at the player's side (pbRegisterPartner);
+# set_debug on|off sets $DEBUG as an event's script does (a locking server undoes it).
 #===============================================================================
 module PEMK
   module Autopilot
@@ -453,6 +455,9 @@ module PEMK
           when "set_raw_switch"
             $game_switches.instance_variable_get(:@data)[a[0].to_i] = on?(a[1])
             { "switch" => a[0].to_i, "value" => $game_switches[a[0].to_i] ? true : false }
+          when "set_debug"                   # on|off: what an event's `$DEBUG = true` does
+            $DEBUG = on?(a[0])
+            { "debug" => $DEBUG ? true : false }
           when "partner"                     # trainer_type name version | none: at the player's side
             a[0].to_s.downcase == "none" ? pbDeregisterPartner : pbRegisterPartner(a[0].to_s.to_sym, a[1].to_s, a[2].to_i)
             partner = $PokemonGlobal.partner
@@ -472,7 +477,7 @@ module PEMK
       Autopilot.verb("warp")     { |id, rest| cmd_warp(id, rest) }
       %w[set_switch set_var set_selfswitch add_item add_pokemon heal money bp
          get_switch get_var get_selfswitch get_item set_raw_var set_raw_switch
-         pc_deposit pc_withdraw get_pc give_held take_held get_held partner].each do |name|
+         pc_deposit pc_withdraw get_pc give_held take_held get_held partner set_debug].each do |name|
         Autopilot.verb(name) do |id, rest|
           next Autopilot.respond(id, "ok" => false, "error" => "no game loaded yet") unless $player
 
