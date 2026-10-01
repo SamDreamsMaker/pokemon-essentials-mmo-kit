@@ -254,7 +254,9 @@ class ServerTrainerEnforceTest < Minitest::Test
     assert_equal ["held", 0], claim(s, 2, TWINS, 320).values_at(:verdict, :accepted), "still no room"
     team(s, ["MEOWTH", 12, %w[PAYDAY]])
     assert_equal "unproven", payday(s, 6, 60, trainer_claim: 2)[:verdict], "no replay will prove its prize: no wait"
-    @db[:money_daily].where(account_id: lo[:account_id]).update(day: Date.today - 1)   # the next day
+    # the next day - the server's days are UTC (between midnight and 2 am in Paris, a local
+    # "yesterday" is still its today)
+    @db[:money_daily].where(account_id: lo[:account_id]).update(day: Time.now.utc.to_date - 1)
     assert_equal ["allowance", 320, true], claim(s, 2, TWINS, 320).values_at(:verdict, :accepted, :first)
     assert_equal before + 720, balance(lo)
 
