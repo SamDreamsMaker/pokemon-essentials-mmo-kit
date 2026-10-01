@@ -60,8 +60,10 @@ module PEMK
       active? && (!defined?(PEMK::DebugLock) || PEMK::DebugLock.autopilot_allowed?)
     end
 
-    # The server denied it (DebugLock, at login): the running command ends, and every
-    # setting a command left on goes - held keys, a battle mode, auto-advance, held saves.
+    # The server denied it (DebugLock, at login): the running command ends, and the
+    # settings commands left on go - held keys, a battle mode, auto-advance, the `fast`
+    # options, held saves. A queued `type` / `pick` stays, never read: the hooks run the
+    # game's own screens once it no longer drives.
     def disarm
       job = @job ? @job_id : nil
       @job = nil
