@@ -433,8 +433,8 @@ set items, money, Pokemon and switches.
   on), and each frame checks again; a logout or a lost link does not give it back. The
   autopilot then only reads. The player is told once ("Debug mode is off on this
   server.").
-- `autopilot`: the same, but the autopilot is obeyed - the autotest's level, never a
-  public server (a WARNING at boot).
+- `autopilot`: the same, but the autopilot is obeyed and the player is not told - the
+  autotest's level, never a public server (a WARNING at boot).
 - `allow`: nothing changes - a dev server (`server/bin/dev-server.sh` sets it, so F9 works
   while you test; a WARNING at boot).
 

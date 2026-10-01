@@ -54,6 +54,12 @@ module PEMK
         @mode = name.to_sym
       end
 
+      # The player is at the keys: keys mode, or a server that took the autopilot's hands
+      # off (PEMK::DebugLock) - the engine's own UI runs.
+      def at_keys?
+        @mode == :keys || !Autopilot.driving?
+      end
+
       def attach(scene)
         @scene = scene
         @awaiting = nil
@@ -83,10 +89,8 @@ module PEMK
         @decision = nil
         count_ask
         loop do
-          case @mode
-          when :keys then return :keys
-          when :auto then return auto ? auto.call : :keys
-          end
+          return :keys if at_keys?
+          return auto ? auto.call : :keys if @mode == :auto
           scene.pbUpdate   # renders; the autopilot tick stores a "decide" meanwhile
           next unless @decision
 
@@ -420,7 +424,7 @@ if PEMK::Autopilot.active? && defined?(Battle::Scene)
 
       # A screen that only waits for a key: skipped unless someone is at the keys.
       def pbShowPokedex(species)
-        return pemk_ap_orig_pbShowPokedex(species) if PEMK::Autopilot::BattleControl.mode == :keys
+        return pemk_ap_orig_pbShowPokedex(species) if PEMK::Autopilot::BattleControl.at_keys?
 
         PEMK::Autopilot::Observe.note("Pokédex entry for #{species} (skipped)", "battle")
       end
@@ -433,7 +437,7 @@ if PEMK::Autopilot.active? && defined?(Battle::Scene)
       # A paused message waits for a key at the end of a battle; with nobody at the
       # keys it would wait forever, so it closes on its own like a regular one.
       def pbDisplayPausedMessage(msg, &block)
-        return pemk_ap_orig_pbDisplayPausedMessage(msg, &block) if PEMK::Autopilot::BattleControl.mode == :keys
+        return pemk_ap_orig_pbDisplayPausedMessage(msg, &block) if PEMK::Autopilot::BattleControl.at_keys?
 
         PEMK::Autopilot::Observe.note(msg, "battle")
         pemk_ap_orig_pbDisplayMessage(msg, &block)

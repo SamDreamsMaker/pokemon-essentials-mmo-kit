@@ -562,10 +562,21 @@ check(results, "a_disarmed_autopilot_leaves_the_game_alone") do
   ap::BattleControl.mode = :auto
   ap::Actions.advance = true
   ap::VInput.hold(ap::VInput.key("USE"), nil)
-  driving = ap.driving? && ap::Actions.advance? && !ap::VInput.held_names.empty?
+  driving = ap.driving? && ap::Actions.advance? && !ap::VInput.held_names.empty? && !ap::BattleControl.at_keys?
   PEMK::DebugLock.allowed = false
-  gated = !ap::Actions.advance?     # denied: no auto-advance, even before the disarm
-  ap.disarm
+  # denied: no auto-advance and the player's keys in battle, even before the disarm
+  gated = !ap::Actions.advance? && ap::BattleControl.at_keys?
+  # a command still running, and a channel that cannot be written to: everything is reset
+  ap.instance_variable_set(:@job, -> { false })
+  ap.instance_variable_set(:@job_id, "77")
+  respond = ap.method(:respond)
+  ap.define_singleton_method(:respond) { |*_args| raise Errno::ENOENT, "the channel is gone" }
+  begin
+    ap.disarm
+  ensure
+    ap.define_singleton_method(:respond, respond)
+  end
+  gated &&= ap.instance_variable_get(:@job).nil?
   after = [ap.driving?, ap::Actions.advance?, ap::BattleControl.mode, ap::VInput.held_names]
   PEMK::DebugLock.allowed = true
   after[1] = ap::Actions.advance?   # its own setting is off too, not only the gate

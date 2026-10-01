@@ -63,17 +63,16 @@ module PEMK
     # The server denied it (DebugLock, at login): the running command ends, and every
     # setting a command left on goes - held keys, a battle mode, auto-advance, held saves.
     def disarm
-      if @job
-        respond(@job_id, "ok" => false, "error" => "locked by the server (PEMK_CLIENT_DEBUG=deny)")
-        @job = nil
-      end
-      VInput.release_all
-      (BattleControl.mode = :keys) if defined?(BattleControl)
-      (Actions.advance = false) if defined?(Actions)
-      (SaveHold.on = false) if defined?(SaveHold) && SaveHold.on
+      job = @job ? @job_id : nil
+      @job = nil
+      (VInput.release_all rescue nil)
+      ((BattleControl.mode = :keys) rescue nil) if defined?(BattleControl)
+      ((Actions.advance = false) rescue nil) if defined?(Actions)
+      (Actions.restore_options rescue nil) if defined?(Actions)
+      ((SaveHold.on = false) rescue nil) if defined?(SaveHold) && SaveHold.on
       PEMK.log("autopilot: disarmed - the server denies debug mode; it only reads now")
-    rescue StandardError => e
-      PEMK.log("autopilot: disarm error #{e.class}: #{e.message}")
+      # last: a channel that cannot be written to leaves the game the player's anyway
+      (respond(job, "ok" => false, "error" => "locked by the server (PEMK_CLIENT_DEBUG=deny)") rescue nil) if job
     end
 
     def dir

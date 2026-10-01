@@ -212,14 +212,23 @@ module PEMK
         return Autopilot.respond(id, "ok" => false, "error" => "no game loaded yet") unless sys
 
         if rest.strip == "off"
-          (@saved_options || {}).each { |k, v| sys.send("#{k}=", v) }
-          @saved_options = nil
+          restore_options
         else
           @saved_options ||= FAST_OPTIONS.keys.to_h { |k| [k, sys.send(k)] }
           FAST_OPTIONS.each { |k, v| sys.send("#{k}=", v) }
+          (MessageConfig.pbSetTextSpeed(MessageConfig.pbSettingToTextSpeed(sys.textspeed)) rescue nil)
         end
-        (MessageConfig.pbSetTextSpeed(MessageConfig.pbSettingToTextSpeed(sys.textspeed)) rescue nil)
         Autopilot.respond(id, "ok" => true, "fast" => !@saved_options.nil?)
+      end
+
+      # The player's own options back, if `fast` changed them (also when disarmed).
+      def restore_options
+        sys = $PokemonSystem
+        return unless sys && @saved_options
+
+        @saved_options.each { |k, v| sys.send("#{k}=", v) }
+        @saved_options = nil
+        (MessageConfig.pbSetTextSpeed(MessageConfig.pbSettingToTextSpeed(sys.textspeed)) rescue nil)
       end
 
       Autopilot.verb("wait_until") { |id, rest| cmd_wait_until(id, rest) }
@@ -245,6 +254,8 @@ module PEMK
         @awaiting
       end
 
+      # -> the text, or nil when the server took the autopilot's hands off meanwhile (the
+      # game's own text entry then runs).
       def ask(prompt, min, max, initial, secret = false)
         Observe.note(prompt, "text")
         if @queued
@@ -258,6 +269,7 @@ module PEMK
         loop do
           Graphics.update   # the autopilot tick answers "type" from in here
           Input.update
+          return nil unless Autopilot.driving?
           break unless @answer.nil?
         end
         text = @answer
@@ -303,7 +315,8 @@ module PEMK
         []
       end
 
-      # -> the chosen item id, or nil for cancel.
+      # -> the chosen item id, nil for cancel, or :undriven when the server took the
+      # autopilot's hands off meanwhile (the game's own screen then runs).
       def ask(bag, filter)
         items = allowed(bag, filter)
         if @queued
@@ -316,6 +329,7 @@ module PEMK
         loop do
           Graphics.update
           Input.update
+          return :undriven unless Autopilot.driving?
           break unless @answer.nil?
         end
         pick = @answer
@@ -359,9 +373,8 @@ if PEMK::Autopilot.active? && defined?(PokemonBagScreen) &&
     alias_method :pemk_ap_orig_pbChooseItemScreen, :pbChooseItemScreen
 
     def pbChooseItemScreen(proc = nil)
-      return pemk_ap_orig_pbChooseItemScreen(proc) unless PEMK::Autopilot.driving?
-
-      PEMK::Autopilot::ItemChoice.ask(@bag, proc)
+      pick = PEMK::Autopilot.driving? ? PEMK::Autopilot::ItemChoice.ask(@bag, proc) : :undriven
+      pick == :undriven ? pemk_ap_orig_pbChooseItemScreen(proc) : pick
     end
   end
 end
@@ -375,7 +388,8 @@ if PEMK::Autopilot.active? && defined?(PokemonMart_Scene) &&
     def pbChooseSellItem
       return pemk_ap_orig_pbChooseSellItem unless @subscene && $bag && PEMK::Autopilot.driving?
 
-      PEMK::Autopilot::ItemChoice.ask($bag, nil)
+      pick = PEMK::Autopilot::ItemChoice.ask($bag, nil)
+      pick == :undriven ? pemk_ap_orig_pbChooseSellItem : pick
     end
   end
 end
@@ -384,20 +398,20 @@ if PEMK::Autopilot.active?
   if defined?(pbEnterText) && !defined?(pemk_ap_orig_pbEnterText)
     alias pemk_ap_orig_pbEnterText pbEnterText
     def pbEnterText(helptext, minlength, maxlength, initialText = "", mode = 0, pokemon = nil, nofadeout = false)
-      unless PEMK::Autopilot.driving?
-        return pemk_ap_orig_pbEnterText(helptext, minlength, maxlength, initialText, mode, pokemon, nofadeout)
-      end
+      text = PEMK::Autopilot.driving? ? PEMK::Autopilot::TextEntry.ask(helptext, minlength, maxlength, initialText) : nil
+      return text unless text.nil?
 
-      PEMK::Autopilot::TextEntry.ask(helptext, minlength, maxlength, initialText)
+      pemk_ap_orig_pbEnterText(helptext, minlength, maxlength, initialText, mode, pokemon, nofadeout)
     end
   end
 
   if defined?(pbMessageFreeText) && !defined?(pemk_ap_orig_pbMessageFreeText)
     alias pemk_ap_orig_pbMessageFreeText pbMessageFreeText
-    def pbMessageFreeText(message, currenttext, passwordbox, maxlength, width = 240)
-      return pemk_ap_orig_pbMessageFreeText(message, currenttext, passwordbox, maxlength, width) unless PEMK::Autopilot.driving?
+    def pbMessageFreeText(message, currenttext, passwordbox, maxlength, width = 240, &block)
+      text = PEMK::Autopilot.driving? ? PEMK::Autopilot::TextEntry.ask(message, 0, maxlength, currenttext, passwordbox) : nil
+      return text unless text.nil?
 
-      PEMK::Autopilot::TextEntry.ask(message, 0, maxlength, currenttext, passwordbox)
+      pemk_ap_orig_pbMessageFreeText(message, currenttext, passwordbox, maxlength, width, &block)
     end
   end
 end
