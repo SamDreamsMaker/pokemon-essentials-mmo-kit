@@ -1,7 +1,7 @@
 # The server owns the badges
 
-Status (2026-09-30): designed and reviewed; B0 (the export) built. Off by default when
-built (`PEMK_BADGE_AUTHORITY` off | shadow | on).
+Status (2026-10-01): designed and reviewed; B0 (the export) and B1 (shadow) built. Off
+by default (`PEMK_BADGE_AUTHORITY` off | shadow | on; `on` runs as shadow until B2).
 
 ## 1. Why
 
@@ -39,16 +39,26 @@ later step consumes the server's mask for them.
 - **A frame never raises the ledger's badges.** Under `on` the new bits of an econ frame
   are dropped (bitwise), and the answer is the mask the client should show.
 - **The client shows `ledger | pending`**: pending is the win-source bits of this
-  account's seeded held claims (verdict held, not voided, a seed row, no refusal) - no
-  table, and every refusal and void ends it by itself (they unlink the claim). The honest
-  player sees the badge at once; it becomes the ledger's when the replay proves the win.
-  Login, the acknowledgements and the proof checks use the same `ledger | pending`.
+  account's seeded held claims (verdict held, not voided, a seed row, no refusal) whose
+  seed holds a won record the seed walk did not refute - no table, and every refusal and
+  void ends it by itself (they unlink the claim and its record). A claim alone is no win:
+  voided at each fresh login and claimed again on its open seed, it would keep a badge
+  pending without a battle (B1's review). No age limit: a record waiting for its replay
+  waits, as its prize does (the replay daemon's silence is an alarm). The honest player
+  sees the badge at once; it becomes the ledger's when the replay proves the win. Login,
+  the acknowledgements and the proof checks use the same `ledger | pending`.
 - **`badge_grants`** (account, badge, evidence `legacy | proof | local | operator`, source,
   claim nonce, granted_at; one row per account and badge) records why each bit is owned.
   `Ledger#grant_bits` sets bits bitwise (a server transaction, like `adjust`).
-- **Cutover**: at the first `on` boot, every bit the ledger holds is a `legacy` grant - no
-  proof exists for wins before P4, and judging them would take them away. B1 counts the
-  accounts whose saves hold bits the ledger lacks, so the operator can grant them first.
+- **Cutover**: at the first `on` boot, the bits an account held before the badge
+  authority judged it are `legacy` grants - no proof exists for wins before P4, and
+  judging them would take them away. B1 keeps that mask, `badge_baselines` (the ledger's
+  badges before the account's first judged frame); an account without one was never
+  judged, and its whole mask predates the authority. A bit gained after the baseline is
+  judged at the cutover like a new one: a shadow period is no window to keep what it
+  logged WOULD-REFUSE (B1's review). A period with the authority off trusts the clients:
+  what an account never judged gained then is legacy. The server reads no badge from a
+  save: a bit only a save holds is lost at the next login today, and stays so.
 - A rematch sets a bit already owned: nothing to judge (the union, and `badge_grants`
   first).
 
@@ -57,23 +67,57 @@ later step consumes the server's mask for them.
 Trainer proof not enforcing; an export without `badge_sources`; any unknown source (the
 demo's house); any source no battle gives, unless the operator lists it as local
 (`PEMK_BADGE_LOCAL=badge@map:event`, named at boot as the client's word); a win source no
-replay can prove (several trainers in its call, a partner possible, a battle paying no
-money - no claim, so no proof - or one trainer in two calls giving different badges); a
-badge index at or over `badges_max`.
+replay can prove (several trainers in its call, a battle paying no money - no claim, so
+no proof - or one trainer in two battles giving different badges); a win source fought
+with no seed (a trainer the export does not place, one sharing a battle call, a battle
+rule sizing it other than single, or a partner possible: the game registers one - in an
+event or in its code - or computes one, and the battle has no noPartner rule); a badge
+index at or over `badges_max`. The export must see every badge write for a refusal to
+mean anything: it lists as unknown any write to `$player.badges` it cannot read (a
+computed index, a fill, an assignment) and, in the game's code, any to the player's own
+`@badges` / `self.badges` but the new game's reset.
 
 ## 5. Steps
 
-- **B0 - the export** (built): `badge_sources` - each literal set, at the own level of a
-  win branch whose condition is exactly the battle call (then it names that call's
-  trainers) or anywhere else (it names none); unknown sets listed. WorldData reads them.
-  Still to add: the call index and its no-money mark per win source, `pbPlayer` and plugin
-  scripts, `win_bits(map, event, type, name, version)` and `badge_blockers`.
-- **B1 - shadow**: for each new bit of a frame, log EXPLAINED / PENDING / WOULD-REFUSE (and
-  why), flag `badge_unexplained`; at settle, WOULD-GRANT. Autotest 088: an honest Brock win
-  is PENDING, then WOULD-GRANT after the replay; three modified clients (a badge set on
-  Brock's map, an allowance claim and a badge, all badges from the house) are WOULD-REFUSE.
+- **B0 - the export** (built): `badge_sources` - each literal set of a script line, at the
+  own level of a win branch whose condition is exactly the battle call (then it names
+  that call's trainers, `no_money` after a noMoney rule, `no_partner` after a noPartner
+  one) or anywhere else (it names none); a line with a write it cannot read is listed
+  unknown, with the badge writes of the game's own scripts and plugins (`$player`,
+  `$Trainer`, `pbPlayer`). WorldData reads them: `win_bits(map, event, type, name,
+  version)` and `badge_blockers`. A win is matched by its trainers at the event's map and
+  event, not by a call index: a claim names its trainers, not its call - so a win over
+  the same trainer on a page that gives no badge explains it too (a real win over him).
+- **B1 - shadow** (built): for each new bit of a frame - over the ledger's and the
+  baseline's, bitwise; not a frame the ledger refuses or has applied - log EXPLAINED (a
+  proven win, its claim voided since or not), PENDING (a won record on the claim's seed,
+  not refuted by the seed walk, waits for its replay), UNPROVABLE (a win claimed with no
+  seed, or one the harness cannot replay) or WOULD-REFUSE, and why: one line per verdict
+  and reason, a verdict already said for a badge not said again. The claims that count
+  pay (verdicts paid, suspect, held, allowance): one away from its trainer, for a trainer
+  the exports do not place or out of order explains nothing. When nothing keeps the
+  server from owning the badges (else the game itself may give one), once per frame, a
+  refusal flags `badge_unexplained` (one opens a review) and an unprovable win, from a
+  client that asks for its battles' seeds, `badge_unprovable` (two do). The first judged
+  frame keeps the account's baseline. On the account's mailbox: at the proof sweep,
+  WOULD-GRANT for a proven win's badges, WOULD-DROP (flagged) for those another verdict
+  leaves unexplained; at a fresh login, WOULD-DROP (not flagged: an honest client killed
+  before its save is one) for those a voided claim showed. Autotest 088: an honest Brock
+  win is PENDING, then WOULD-GRANT after the replay; a modified client's Brock badge with
+  no battle, all sixteen at once, Brock's after a claim on his seed with no battle
+  recorded, are WOULD-REFUSE; after a claim with no seed, UNPROVABLE.
+- **For B2, from B1's review**: a win claimed with no seed is an honest player's too (the
+  battle began offline, or its seed came late) and its badge would be lost for good (the
+  gym's event is done): the client waits for the seed of a battle that gives a badge, and
+  the operator grant covers the rest. A proven win's badge is granted at the proof, and
+  stays when a fresh login voids its unsealed claim (the battle fought again sets a badge
+  already owned) - 089 checks that rather than a lost badge. The proof checks, the login
+  and the acknowledgements count `ledger | pending`. A shadow claim naming a seed that is
+  not its own is unlinked - B1 says UNPROVABLE where `on` refuses it (`wrong_seed`); a
+  record dropped over its hourly cap leaves an honest badge WOULD-REFUSE until it comes.
 - **B2 - enforcement**: the rules above, the client holding its badge frame with its money
   frame and marking it again after each claim answer, an operator grant command. Autotest
   089: an honest badge shown at once, owned after the proof, kept across a relogin; a
-  client killed before its checkpoint loses its claim and its badge and fights Brock
-  again; a modified client holding a claim then logging in again is never granted.
+  client killed before its checkpoint loses its claim - and its badge while its win is
+  unproven - and fights Brock again; a modified client holding a claim then logging in
+  again is never granted.

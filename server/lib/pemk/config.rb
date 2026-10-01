@@ -16,7 +16,7 @@ module PEMK
                 :gift_enforce, :peer_check, :peer_classes, :trade_redelivery, :item_record,
                 :shop_enforce, :item_authority, :item_local, :item_grace, :money_authority,
                 :money_payday_daily, :money_local_daily, :money_repeat_daily, :trainer_proof,
-                :money_unproven_daily
+                :money_unproven_daily, :badge_authority
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -241,6 +241,12 @@ module PEMK
       # and paid from a small allowance. A number (0: never). Default 5000.
       raw = env.fetch("PEMK_MONEY_UNPROVEN_DAILY", "").to_s.strip
       @money_unproven_daily = raw.match?(/\A\d+\z/) ? raw.to_i : 5_000
+      # Badge authority (docs/BADGE-AUTHORITY-DESIGN.md): a badge is the server's when its
+      # battle's win is proven. off = nothing; shadow = each new badge a client reports is
+      # judged and logged (explained / pending / would refuse); on is enforcement (B2) -
+      # until it exists, on runs as shadow.
+      bmode = env.fetch("PEMK_BADGE_AUTHORITY", "off").to_s.strip.downcase
+      @badge_authority = %w[off shadow on].include?(bmode) ? bmode.to_sym : :off
 
       caps = YAML.safe_load_file(File.join(root, "config", "economy_caps.yml"))
       @economy_caps = {

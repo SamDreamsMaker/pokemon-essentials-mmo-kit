@@ -4,6 +4,7 @@ require "sequel"
 lib = File.expand_path("../lib", __dir__)
 $LOAD_PATH.unshift(lib) unless $LOAD_PATH.include?(lib)
 require "pemk/ledger"
+require "pemk/config"
 
 # Economy ledger: absolute-value apply, cap validation, gap-safe idempotency by
 # ledger-row existence, materialized balance, login snapshot.
@@ -36,6 +37,18 @@ class LedgerTest < Minitest::Test
     # same seq, different value -> not re-applied; re-ACK the value on record (500)
     assert_equal [:dup, 500], @led.apply_econ(@acct, :money, 999, 1)
     assert_equal 500, @led.current(@acct, :money)
+  end
+
+  # A frame's seq is the client's: one the ledger never applies is never recorded, and
+  # asking is no query the database refuses (text, or past bigint).
+  def test_recorded_with_a_bad_seq_is_false
+    @led.apply_econ(@acct, :money, 500, 1)
+    assert @led.recorded?(@acct, :money, 1)
+    refute @led.recorded?(@acct, :money, "1")
+    refute @led.recorded?(@acct, :money, 1 << 70)
+    refute @led.recorded?(@acct, :money, 0)
+    refute PEMK::Ledger.seq_ok?(PEMK::Ledger::SEQ_MAX)
+    assert PEMK::Ledger.seq_ok?(PEMK::Ledger::SEQ_MAX - 1)
   end
 
   def test_a_new_lower_seq_still_applies_gap_safe

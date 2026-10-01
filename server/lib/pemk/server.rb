@@ -135,6 +135,15 @@ module PEMK
       # authority enforces, battle rng is on, and the team lock and EXP tracking run (the
       # team's checks); 'on' otherwise runs as shadow.
       @trainer_enforce = @config.trainer_proof == :on && @money_enforce && !@trainer_proofs.nil? && team_proof_gaps.empty?
+      # Badge authority B1: each new badge judged by the battle that gives it (shadow; `on`
+      # runs as shadow until B2). It reads the trainer prize claims and their proofs.
+      @badge_audit = BadgeAudit.new(@db, @world) if @config.badge_authority != :off && @money_claims
+      # A refusal is a sign only when nothing keeps the server from owning the badges: a
+      # badge set the export cannot read, or given with no battle, may be the game's own.
+      @badge_sure  = @badge_audit && @world.badge_blockers(badges_max: @config.badges_max).empty?
+      @badge_said  = {}   # [account, badge] => the verdict logged last (a frame sent again says nothing new)
+      @badge_based = {}   # account => its baseline (badge_baselines)
+      @badge_mutex = Mutex.new
       @last_item_sweep = nil
       @item_sweeping   = false
       @audit      = Audit.new(@world, logger: @log)
@@ -211,6 +220,7 @@ module PEMK
       @log.call("server: shop enforcement = #{@config.shop_enforce} (Mart purchases and sales made server-side when on)")
       log_money_authority
       log_trainer_proof
+      log_badge_authority
       @log.call("server: item authority = #{@config.item_authority} (item increases judged against server-known sources; logs only)")
       if @config.item_authority == :on
         if @item_enforce
@@ -571,6 +581,7 @@ module PEMK
       value = env[:value]
       seq   = env[:seq]
       current = @online[account_id].equal?(conn)   # read on the reactor: a replaced session's frames do not count (M1b)
+      seeds = Array(conn.data[:caps]).include?("trainer_proof")   # its trainer battles ask their seeds (P4)
       @mailbox.submit(account_id) do
         # D4: attribute a fresh MONEY change to a recent wild battle's budget window
         # (reason "battle:<n>"/"battle_suspect:<n>"), else "unattributed". Only on a
@@ -586,6 +597,8 @@ module PEMK
           end
         end
         before = money_row(account_id) if @money_shadow && field.to_s == "money"
+        # Badge authority B1: the badges this frame adds, judged by the battles giving them.
+        judge_badges(account_id, value, seq, seeds: seeds) if @badge_audit && field.to_s == "badges"
         # M3: money rises only through the server's own transactions (claims, deals).
         enforced = @money_enforce && field.to_s == "money"
         status = @ledger.apply_econ(account_id, field, value, seq, reason: reason, no_increase: enforced)
@@ -2259,6 +2272,121 @@ module PEMK
       @log.call("server: trainer proof: battles with more than one trainer, never proven: #{names.join(', ')}")
     end
 
+    # === badge authority (docs/BADGE-AUTHORITY-DESIGN.md) ============================
+
+    BADGE_VERDICTS = { explained: "EXPLAINED", pending: "PENDING", unprovable: "UNPROVABLE",
+                       refused: "WOULD-REFUSE" }.freeze
+    BADGE_SAID_MAX = 100_000
+
+    # B1: on the account's mailbox, before the frame is applied - the bits it adds to the
+    # ledger's and to its baseline, each judged; shadow logs and flags what enforcement
+    # would refuse. +seeds+: the client asks a trainer battle's seed (trainer proof).
+    def judge_badges(account_id, value, seq, seeds: false)
+      # what the ledger refuses (over the cap, a bad seq) or has applied already is not judged
+      return unless value.is_a?(Integer) && value.between?(0, @config.economy_caps[:badges]) && Ledger.seq_ok?(seq)
+      return if @ledger.recorded?(account_id, :badges, seq)
+
+      held = @ledger.current(account_id, :badges).to_i
+      # the baseline was earned before the authority (legacy at B2's cutover): a frame that
+      # dropped one of its bits and gives it back is not judged
+      verdicts = @badge_audit.judge(account_id, value & ~(held | badge_base(account_id, held)))
+      # what was said already for these badges is not said again (a mask sent back and forth)
+      fresh = @badge_mutex.synchronize do
+        @badge_said.clear if @badge_said.size > BADGE_SAID_MAX
+        verdicts.reject { |badge, verdict, why| @badge_said.fetch([account_id, badge], nil) == [verdict, why] }
+                .each { |badge, verdict, why| @badge_said[[account_id, badge]] = [verdict, why] }
+      end
+      # one line per verdict and reason: a frame of many badges is a few lines, not one each
+      fresh.group_by { |_, verdict, why| [verdict, why] }.each do |(verdict, why), list|
+        badges = list.map(&:first)
+        what = badges.one? ? "badge #{badges[0]}" : "badges #{badges.join(', ')}"
+        @log.call("badge: account #{account_id} #{what} #{BADGE_VERDICTS.fetch(verdict)}: #{why}")
+      end
+      badge_flags(account_id, fresh, seeds: seeds)
+    rescue StandardError => e
+      @log.call("badge: judging account #{account_id} failed #{e.class}: #{e.message}")
+    end
+
+    # The account's baseline: the one kept, or +held+ now kept as it (its first judged
+    # frame). Remembered, bounded.
+    def badge_base(account_id, held)
+      base = @badge_mutex.synchronize { @badge_based[account_id] }
+      return base if base
+
+      base = @badge_audit.baseline(account_id, held)
+      @badge_mutex.synchronize do
+        @badge_based.clear if @badge_based.size > BADGE_SAID_MAX
+        @badge_based[account_id] = base
+      end
+    end
+
+    # A refusal flags the account once per frame, when nothing keeps the server from owning
+    # the badges (else the game itself may give one); a win no replay can prove, too, from
+    # a client that asks for its battles' seeds - an honest one waits for them.
+    def badge_flags(account_id, verdicts, seeds: true)
+      return unless @badge_sure
+
+      flag_anomaly(account_id, :badge_unexplained) if verdicts.any? { |_, verdict, _| verdict == :refused }
+      flag_anomaly(account_id, :badge_unprovable) if seeds && verdicts.any? { |_, verdict, _| verdict == :unprovable }
+    end
+
+    # B1, at the proof sweep, on the account's mailbox (after the frames before it): a
+    # proven win would grant its badges; any other verdict drops those it showed.
+    def badge_proof_logs(account_id, nonce, proof)
+      wins = @badge_audit.wins_of(account_id, nonce)
+      return if wins.empty?
+
+      if proof == :proven
+        wins.each { |b| @log.call("badge: account #{account_id} WOULD-GRANT badge #{b} (claim #{nonce}'s win is proven)") }
+      else
+        badge_drops(account_id, wins, "claim #{nonce}'s win is #{proof}")
+      end
+    rescue StandardError => e   # the sweep's other verdicts go on
+      @log.call("badge: account #{account_id} claim #{nonce}'s badges failed #{e.class}: #{e.message}")
+    end
+
+    # B1: of the badges +wins+ gave, those the ledger holds over its baseline and nothing
+    # explains now (a refused or voided claim showed them): B2 drops them from what the
+    # client shows. An account never judged holds nothing gained since.
+    # +flag+: false for a void - an honest client killed before its save is one too.
+    def badge_drops(account_id, wins, cause, flag: true)
+      base = badge_based(account_id)
+      return unless base
+
+      held = @ledger.current(account_id, :badges).to_i & ~base
+      drops = @badge_audit.judge(account_id, wins.sum { |b| held[b] << b })
+                          .reject { |_, verdict, _| %i[explained pending].include?(verdict) }
+      drops.each { |badge, _, why| @log.call("badge: account #{account_id} WOULD-DROP badge #{badge} (#{cause}: #{why})") }
+      badge_flags(account_id, drops) if flag
+    rescue StandardError => e
+      @log.call("badge: account #{account_id}'s badges (#{cause}) failed #{e.class}: #{e.message}")
+    end
+
+    def badge_based(account_id)
+      @badge_mutex.synchronize { @badge_based[account_id] } || @badge_audit.baseline_of(account_id)
+    end
+
+    # At boot: the mode, what it relies on, and what keeps the server from owning a badge.
+    def log_badge_authority
+      mode = @config.badge_authority
+      what = @badge_audit ? "each new badge judged by the battle that gives it; logs only" : "nothing is judged"
+      @log.call("server: badge authority = #{mode} (#{what})")
+      return if mode == :off
+
+      @log.call("server: badge authority 'on' runs as shadow until its enforcement is built") if mode == :on
+      unless @badge_audit
+        @log.call("server: WARNING badge authority does nothing: it judges by the trainer prize claims " \
+                  "(PEMK_MONEY_AUTHORITY is off)")
+        return
+      end
+      unless @trainer_proofs
+        @log.call("server: WARNING badge authority: no trainer proof (PEMK_TRAINER_PROOF, PEMK_BATTLE_ENFORCE_RNG=on) - " \
+                  "no badge is ever explained")
+      end
+      blockers = @world.badge_blockers(badges_max: @config.badges_max)
+      @log.call("server: badge authority cannot own: #{blockers.join('; ')}") unless blockers.empty?
+    end
+
     # What keeps a replay from checking the player's team against the server's own: the
     # first-sight lock (IVs, shiny, gender) comes with D1, the EXP seen with D6.
     def team_proof_gaps
@@ -2341,6 +2469,12 @@ module PEMK
         end
       end
       @log.call("money: account #{account_id} voided #{voided.size} unsealed prize claim(s) at login") unless voided.empty?
+      # badge authority B1: a badge a voided claim's win showed goes with it (B2)
+      if @badge_audit
+        voided.select { |c| BadgeAudit::KINDS.include?(c[:kind]) }.each do |c|
+          badge_drops(account_id, @badge_audit.wins_in(c), "claim #{c[:nonce]} is void", flag: false)
+        end
+      end
       return if kept.zero?
 
       @log.call("money: account #{account_id} kept #{kept} unsealed prize claim(s): their money was spent")
@@ -2950,6 +3084,11 @@ module PEMK
           end
           # a refused battle is a sign as it is judged - not only once its client asks again
           flag_anomaly(account_id, :money_claim) if MoneyClaims::REFUSED_PROOFS.include?(proof.to_s)
+          # badge authority B1: a proven win is what grants its badges (B2) - judged on the
+          # account's mailbox, after the frames before it
+          if @badge_audit
+            @reactor.post { @mailbox.submit(account_id) { badge_proof_logs(account_id, nonce, proof) } }
+          end
         end
         note_stale_replays(@trainer_proofs.stale, now)
       rescue StandardError => e

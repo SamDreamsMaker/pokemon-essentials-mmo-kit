@@ -49,7 +49,13 @@ module PEMK
                                      # allow (money authority M1)
       "money_claim"         => 3,    # prizes claimed away from their trainers, for trainers the
                                      # exports do not place, or rematches out of order or cadence
-      "money_unexplained"   => 3     # money a frame shows that no claim or deal explains (M1b)
+      "money_unexplained"   => 3,    # money a frame shows that no claim or deal explains (M1b)
+      "badge_unexplained"   => 1,    # a badge no win explains, when the server could own them all
+                                     # (badge authority B1): an honest client's badge comes after
+                                     # its win's claim and record; once per frame, not per badge
+      "badge_unprovable"    => 2     # a badge whose win no replay can prove (claimed with no seed,
+                                     # a record the harness cannot replay): an honest client waits
+                                     # for its seed, so 2 tolerates one battle begun offline
     }.freeze
 
     FABRICATED_WILD_MIN = 5   # >= this many client-origin wild-table mons to report

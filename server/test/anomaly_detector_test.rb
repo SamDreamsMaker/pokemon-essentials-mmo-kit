@@ -78,6 +78,23 @@ class AnomalyDetectorTest < Minitest::Test
     assert_nil report(@a, "flags:reward_level")         # under threshold
   end
 
+  # Badge authority B1: one badge no win explains is worth a look (flagged only when the
+  # server could own every badge, once per frame).
+  def test_one_unexplained_badge_is_reported
+    @det.record_flag(@a, :badge_unexplained)
+    assert_equal 1, @det.sweep
+    refute_nil report(@a, "flags:badge_unexplained")
+  end
+
+  # ... a badge no replay can prove, from the second (one battle begun offline is honest)
+  def test_two_unprovable_badges_are_reported
+    @det.record_flag(@a, :badge_unprovable)
+    assert_equal 0, @det.sweep
+    @det.record_flag(@a, :badge_unprovable)
+    assert_equal 1, @det.sweep
+    refute_nil report(@a, "flags:badge_unprovable")
+  end
+
   # --- sweep: provenance mix (fabricated wild-table mons) ----------------------------
   def test_sweep_reports_fabricated_wild_provenance
     5.times { mon(@a, "PIDGEY", "client") }             # 5 client-origin wild-table mons
