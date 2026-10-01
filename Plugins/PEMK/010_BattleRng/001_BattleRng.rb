@@ -59,6 +59,7 @@ module PEMK
     @record_sent = {}      # rec_nonce => when this connection last sent it
     @rec_rng     = nil
     @badge_battles = []    # B2: [type, name, version, map, event] whose win gives a badge (login)
+    @core_single   = false # B2: TrainerBattle.start_core runs a battle against one trainer
 
     module_function
 
@@ -101,32 +102,80 @@ module PEMK
     # arms (P4): with no seed asked, a battle it cannot record is not one that dropped its
     # seed.
     def ask_trainer_seed(trainer)
-      return unless @mode == :on && @trainer_seed_ok && online? && single_rules?
+      return unless @mode == :on && @trainer_seed_ok && online?
 
       key = trainer.respond_to?(:pemk_key) ? trainer.pemk_key : nil
       ev  = trainer.respond_to?(:pemk_event) ? trainer.pemk_event : nil
       return unless key && ev
 
+      # B2: while the server judges the badges, a battle whose win gives one is fought alone
+      # - a partner's battle gets no seed, and no replay could prove the win. Only the battle
+      # TrainerBattle.start_core sets up against that trainer alone: its rules clear after it.
+      badge = @badge_battles.include?(key + ev)
+      ($game_temp.battle_rules["noPartner"] = true rescue nil) if badge && @core_single && single_size?
+      return unless single_rules?
+
       nonce = (@trainer_nonce += 1)
       @trainer_asks[nonce] = nil
       trainer.instance_variable_set(:@pemk_seed_nonce, nonce)
-      # B2: a battle whose win gives a badge waits for its seed longer
-      trainer.instance_variable_set(:@pemk_seed_badge, @badge_battles.include?(key + ev))
+      trainer.instance_variable_set(:@pemk_seed_badge, badge)   # ... and waits for its seed longer
       (PEMK::Presence.emit_now(:pos) rescue nil)   # asked where the server last saw the player
       PEMK.send_message(:type => :trainer_battle_req, :nonce => nonce, :trainers => [key + ev])
     rescue StandardError => e
       PEMK.log("battlerng: trainer seed ask error #{e.class}: #{e.message}")
     end
 
+    # B2: TrainerBattle.start_core, around the battle it sets up - against one trainer? Two
+    # (one waited for the other) make no badge's battle, and a trainer loaded anywhere else
+    # (a partner registered, the debug menu) is fought in no battle yet.
+    def core_begin(args)
+      @core_single = foe_count(args) == 1
+    end
+
+    def core_end
+      @core_single = false
+    end
+
+    # The trainers TrainerBattle.generate_foes reads from +args+, by its own parse: a
+    # trainer object or [type, name, version], or type, name and an optional version.
+    def foe_count(args)
+      n = 0
+      type = name = nil
+      args.each_with_index do |arg, i|
+        if arg.is_a?(Array) || (defined?(NPCTrainer) && arg.is_a?(NPCTrainer))
+          n += 1
+        elsif name                        # its version
+          n += 1
+          type = name = nil
+        elsif type                        # its name: a version follows, or not
+          if args[i + 1].is_a?(Integer)
+            name = arg
+          else
+            n += 1
+            type = nil
+          end
+        else
+          type = arg
+        end
+      end
+      n
+    end
+
     # The battle about to start is a single one, with no partner at the player's side -
     # the rules its event set, as TrainerBattle reads them (a partner joins when it can).
     def single_rules?
-      rules = ($game_temp.battle_rules rescue nil) || {}
-      size = rules["size"].to_s.downcase
-      return false unless size.empty? || size == "single" || size == "1v1"
+      return false unless single_size?
 
+      rules = ($game_temp.battle_rules rescue nil) || {}
       partner = ($PokemonGlobal.partner rescue nil)
       !partner || rules["noPartner"] ? true : false
+    end
+
+    # No size rule sizes the battle other than single (a tag battle stays one).
+    def single_size?
+      rules = ($game_temp.battle_rules rescue nil) || {}
+      size = rules["size"].to_s.downcase
+      size.empty? || size == "single" || size == "1v1"
     end
 
     # Dispatch: :trainer_battle_seed / :trainer_battle_deny, by nonce.
@@ -688,6 +737,22 @@ if defined?(EventHandlers)
   EventHandlers.add(:on_trainer_load, :pemk_trainer_seed,
     proc { |trainer| PEMK::BattleRng.ask_trainer_seed(trainer) })
   EventHandlers.add(:on_frame_update, :pemk_battle_records, proc { PEMK::BattleRng.send_records })
+end
+
+# B2: the battle a trainer is loaded for - a badge's battle is fought alone only there.
+if defined?(TrainerBattle) && TrainerBattle.respond_to?(:start_core) &&
+   !TrainerBattle.respond_to?(:pemk_rng_orig_start_core)
+  class TrainerBattle
+    class << self
+      alias_method :pemk_rng_orig_start_core, :start_core
+      def start_core(*args)
+        (PEMK::BattleRng.core_begin(args) rescue nil)
+        pemk_rng_orig_start_core(*args)
+      ensure
+        (PEMK::BattleRng.core_end rescue nil)
+      end
+    end
+  end
 end
 
 class Battle::AI

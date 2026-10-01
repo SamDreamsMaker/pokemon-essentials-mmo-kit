@@ -293,6 +293,68 @@ class WorldDataTest < Minitest::Test
     assert_equal ["badge 0's battle gets no seed (map 10 event 3 page 0): it is a double battle"], load(doc).badge_blockers
   end
 
+  # B2: owning the badges, the server has its clients fight a badge's battle alone - a
+  # partner keeps nothing from it; what else keeps a seed away still does.
+  def test_badge_battles_fought_alone
+    brock = { "badge" => 0, "map" => 10, "event" => 3, "page" => 0, "trainers" => [["LEADER_Brock", "Brock", 0]] }
+    [[["POKEMONTRAINER_May", "May", 0]], nil].each do |partners|
+      doc = gym_sample(partners: partners).merge("badge_sources" => { "list" => [brock], "unknown" => [] })
+      refute_empty load(doc).badge_blockers
+      assert_equal [], load(doc).badge_blockers(alone: true), "a partner never joins (#{partners.inspect})"
+    end
+    doc = gym_sample.merge("badge_sources" => { "list" => [brock.merge("size" => "double")], "unknown" => [] })
+    assert_equal ["badge 0's battle gets no seed (map 10 event 3 page 0): it is a double battle"],
+                 load(doc).badge_blockers(alone: true)
+    doc = gym_sample.merge("badge_sources" => { "list" => [brock.merge("map" => 11)], "unknown" => [] })
+    assert_equal ["badge 0's battle gets no seed (map 11 event 3 page 0): the export does not place LEADER_Brock Brock"],
+                 load(doc).badge_blockers(alone: true)
+  end
+
+  # The battles the clients fight alone are those a replay can prove once fought alone: a
+  # sized battle, one paying nothing, an unplaced trainer, several trainers - never.
+  def test_badge_battles_are_the_provable_ones
+    brock = { "badge" => 0, "map" => 10, "event" => 3, "page" => 0, "trainers" => [["LEADER_Brock", "Brock", 0]] }
+    listed = lambda do |*sources|
+      load(gym_sample(partners: [["POKEMONTRAINER_May", "May", 0]])
+             .merge("badge_sources" => { "list" => sources, "unknown" => [] })).badge_battles
+    end
+    assert_equal [["LEADER_Brock", "Brock", 0, 10, 3]], listed.(brock), "a partner may join: fought alone"
+    assert_equal [], listed.(brock.merge("size" => "double"))
+    assert_equal [], listed.(brock.merge("no_money" => true))
+    assert_equal [], listed.(brock.merge("map" => 11))
+    assert_equal [], listed.(brock.merge("trainers" => [["LEADER_Brock", "Brock", 0], ["CAMPER", "Liam", 0]]))
+    assert_equal [], listed.(brock.merge("trainers" => nil))
+    assert_equal [["LEADER_Brock", "Brock", 0, 10, 3]], listed.(brock, brock.merge("badge" => 1, "page" => 1)),
+                 "one battle, listed once"
+  end
+
+  # PEMK_BADGE_IGNORE: the badge writes the operator says are not the game's keep nothing -
+  # only those the export cannot read, or that give a badge with no battle.
+  def test_badge_blockers_ignore
+    brock = { "badge" => 0, "map" => 10, "event" => 3, "page" => 0, "trainers" => [["LEADER_Brock", "Brock", 0]] }
+    doc = gym_sample.merge("badge_sources" => {
+                             "list" => [brock,
+                                        { "badge" => 1, "map" => 3, "event" => 7, "page" => 1 },
+                                        { "badge" => 2, "common_event" => 4 },
+                                        { "badge" => 3, "map" => 12, "event" => 5, "page" => 0, "trainers" => [["A", "A", 0], ["B", "B", 0]] }],
+                             "unknown" => [{ "map" => 3, "event" => 7, "page" => 0, "script" => "$player.badges[i] = true" },
+                                           { "common_event" => 9, "script" => "$player.badges[n] = true" },
+                                           { "file" => "Plugins/MyGame/x.rb", "line" => 3, "script" => "$player.badges[2] = true" }]
+                           })
+    w = load(doc)
+    assert_equal %w[3:7 ce:9 Plugins/MyGame/x.rb:3 ce:4], w.badge_ignorable, "Brock's battle and a several-trainers win aside"
+    assert_equal 6, w.badge_blockers.length
+    assert_equal ["a badge set the export cannot read: common event 9 ($player.badges[n] = true)",
+                  "a badge set the export cannot read: Plugins/MyGame/x.rb:3 ($player.badges[2] = true)",
+                  "badge 2 is given with no battle (common event 4)",
+                  "badge 3 is a battle against several trainers (map 12 event 5 page 0): no replay proves it"],
+                 w.badge_blockers(ignore: %w[3:7]), "one event: all its pages"
+    assert_equal ["badge 3 is a battle against several trainers (map 12 event 5 page 0): no replay proves it"],
+                 w.badge_blockers(ignore: %w[3:7 ce:9 Plugins/MyGame/x.rb:3 ce:4 12:5]), "a win's battle is no write it ignores"
+    assert_equal 6, w.badge_blockers(ignore: %w[3:8 ce:7 Plugins/MyGame/x.rb:4 10:3]).length, "names that match nothing"
+    assert_equal [], load(gym_sample).badge_ignorable, "an export before the badges"
+  end
+
   def test_prize_events
     doc = sample
     doc["maps"]["7"]["objects"] = [{ "kind" => "prize", "item" => "MASTERBALL", "items" => %w[MASTERBALL PPUP],

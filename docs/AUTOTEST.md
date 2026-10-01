@@ -97,6 +97,7 @@ Then, from Git Bash or WSL: `tools/autopilot/ap.sh autopilot/ap1 <verb> [args]`.
 | `set_switch`, `get_switch`, `add_item`, `add_pokemon`, `heal`, `money`, `bp`, `save`... | set a scene up quickly and read it back (with `PEMK_ITEM_AUTHORITY` on, a scenario's `add_item!` credits the account first, so a setup item is not reported `UNEXPLAINED`; `s.unexplained_items(a)` lists what the ledger still owes) |
 | `set_raw_var`, `set_raw_switch`, `hold_saves on\|off` | change a value the way a memory edit does; keep the save from reaching the server, to kill the game before it lands |
 | `pc_deposit`, `pc_withdraw`, `get_pc`, `give_held`, `take_held`, `get_held` | move items between the bag, the PC and a party Pokemon the way the engine does, and read them back |
+| `partner TYPE NAME VERSION`, `partner none` | put a trainer at the player's side the way an event does (`pbRegisterPartner`), or take them away |
 | `fast`, `advance`, `abort` | skip animations and key-wait windows, cancel a running command |
 
 `verbs` lists them all.
