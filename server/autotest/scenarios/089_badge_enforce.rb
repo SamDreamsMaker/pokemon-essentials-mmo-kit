@@ -1,27 +1,17 @@
 # frozen_string_literal: true
 
 require "open3"
-require "json"
-require "tmpdir"
 
 # Badge authority B2 (docs/BADGE-AUTHORITY-DESIGN.md): the server owns the badges. An
 # honest win over Brock shows his badge at once - pending, not owned - and the replay that
 # proves the win grants it; it stays across a relaunch. A modified client's badge frame
 # raises nothing; a client that cannot hold its badge frame must update.
-# The demo's export keeps the server from owning badges (the house's debug badges, partner
-# May): this runs on a copy without them.
-WORLD_089 = File.join(Dir.tmpdir, "pemk_world_089.json")
-world = JSON.parse(File.read(File.join(Autotest::SERVER_DIR, "data", "world.json")))
-world["badge_sources"]["unknown"] = []
-world["badge_sources"]["list"].each { |src| src["no_partner"] = true if src["trainers"] }
-File.write(WORLD_089, JSON.generate(world))
-
+# On the demo itself: its house no longer gives badges, and Brock is fought alone.
 Autotest.scenario "the server owns the badges",
                   flags: { PEMK_MONEY_AUTHORITY: "on", PEMK_ITEM_AUTHORITY: "on", PEMK_PICKUP_ENFORCE: "on",
                            PEMK_GIFT_ENFORCE: "on", PEMK_SHOP_ENFORCE: "on", PEMK_BATTLE_ENFORCE_ENCOUNTERS: "on",
                            PEMK_BATTLE_ENFORCE_RNG: "on", PEMK_BATTLE_ENFORCE_TEAMS: "on",
-                           PEMK_BATTLE_ENFORCE_EXP: "on", PEMK_TRAINER_PROOF: "on", PEMK_BADGE_AUTHORITY: "on",
-                           PEMK_WORLD: WORLD_089 },
+                           PEMK_BATTLE_ENFORCE_EXP: "on", PEMK_TRAINER_PROOF: "on", PEMK_BADGE_AUTHORITY: "on" },
                   budget: 540 do |s|
   s.check("the server owns the badges") { s.server.grep(/badge authority ENFORCED/).any? }
   refused = begin
@@ -53,8 +43,7 @@ Autotest.scenario "the server owns the badges",
   end
   claim = s.db[:money_claims].where(account_id: id, kind: "trainer").exclude(trainer_battle_id: nil).first
   record = s.db[:battle_records].where(trainer_battle_id: claim[:trainer_battle_id], outcome: 1).first
-  out, = Open3.capture2e({ "DATABASE_URL" => ENV.fetch("DATABASE_URL"), "REPLAY_ID" => record[:id].to_s,
-                           "PEMK_WORLD" => WORLD_089 },
+  out, = Open3.capture2e({ "DATABASE_URL" => ENV.fetch("DATABASE_URL"), "REPLAY_ID" => record[:id].to_s },
                          "bundle", "exec", "ruby", "bin/pemk_replay.rb", chdir: Autotest::SERVER_DIR)
   File.write(File.join(s.dir, "replay.txt"), out.lines.grep(/^  #/).join)
   s.check("the replay proves the win, which grants the badge") do
