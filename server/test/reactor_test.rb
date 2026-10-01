@@ -33,6 +33,7 @@ class ReactorTest < Minitest::Test
     @last_conn = conn
     dec = W.decode_envelope(payload, false)
     @received << dec
+    return @reactor.send(:close_conn, conn) if @close_on_frame
     @reactor.send_frame(conn, W.encode_split({ type: :pong, t: dec[:env][:t] })) if dec && dec[:env][:type] == :ping
   end
 
@@ -92,6 +93,38 @@ class ReactorTest < Minitest::Test
     @reactor.post { @reactor.send(:sweep_idle, Process.clock_gettime(Process::CLOCK_MONOTONIC)) }
     assert eof?(sock)
     sock.close
+  end
+
+  # A closing socket whose output never drains (a dead link, its send buffer full) is
+  # closed once CLOSE_GRACE has passed - its map would keep it until then.
+  def test_the_sweep_closes_a_closing_socket_that_never_drains
+    sock = connected
+    open = Queue.new
+    @reactor.post do
+      @last_conn.outbuf << "stuck".b                  # what a dead link never takes
+      def (@last_conn.io).write_nonblock(*) = :wait_writable   # and never will
+      @reactor.finish(@last_conn)                      # the grace starts here
+      open << @reactor.instance_variable_get(:@conns).key?(@last_conn.io)
+      @reactor.send(:sweep_idle, Process.clock_gettime(Process::CLOCK_MONOTONIC) + PEMK::Reactor::CLOSE_GRACE + 1)
+      open << @reactor.instance_variable_get(:@conns).key?(@last_conn.io)
+    end
+    assert_equal [true, false], [Timeout.timeout(3) { open.pop }, Timeout.timeout(3) { open.pop }]
+    sock.close
+  end
+
+  # A frame that closes its socket (an overflow, a bad frame) takes the rest of the read
+  # with it: the frames after it in the same write are never dispatched.
+  def test_a_close_drops_the_rest_of_the_read
+    @close_on_frame = true
+    sock = TCPSocket.new("127.0.0.1", @reactor.port)
+    sock.write(W.encode_split({ type: :ping, t: 1 }) + W.encode_split({ type: :ping, t: 2 }))
+    first = Timeout.timeout(3) { @received.pop }
+    assert_equal 1, first[:env][:t]
+    assert eof?(sock)
+    assert @received.empty?, "the second frame was read with the one that closed the socket"
+    sock.close
+  ensure
+    @close_on_frame = false
   end
 
   def test_two_frames_in_one_write

@@ -16,7 +16,14 @@ records the server computes and clamps (economy ledger, badges, bag, Pokémon
 UIDs/ownership), an **opaque save blob** the client owns and the server only
 stores/returns (party, position, story flags), and **transient** presence that is
 never persisted. Zone-scoped presence (`map_id → set(conn)`) means a position
-update fans out only to same-map players.
+update fans out only to same-map players. Inside a map, a player standing still costs
+nothing (`PEMK_PRESENCE_DEDUP`, on by default): its heartbeat repeats reach only older
+clients; a client that keeps its peers until a leave (`presence_v2`) gets each change
+once, everyone already on a map as it enters it, and a leave when a player goes or falls
+silent for 15 s. All presence frames share one rate budget. `PEMK_PRESENCE_DEDUP=off`
+brings back the old fan-out (every frame to everyone, no snapshot, no silence sweep);
+the shared budget, the replaced session leaving its map at once and the forced close of
+a socket that never drains stay.
 
 ## What the server owns today
 

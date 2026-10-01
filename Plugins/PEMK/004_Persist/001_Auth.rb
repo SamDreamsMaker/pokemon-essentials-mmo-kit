@@ -25,8 +25,9 @@ module PEMK
     # badge_hold: it holds a badge's frame for its win's claim and record (B2).
     # badge_alone: it fights a badge's battle with no partner while the server judges them.
     # debug_lock: it keeps debug mode off where the server says (client_debug).
+    # presence_v2: it keeps its peers until a leave, so idle repeats need not reach it.
     CAPS = %w[flag_repair trade_redeliver gift_pos inv_correct money_claims save_ack trainer_proof badge_hold
-              badge_alone debug_lock].freeze
+              badge_alone debug_lock presence_v2].freeze
     ACCOUNT_FILE       = "mmo_account.dat"
     GUEST_ACCOUNT_FILE = "mmo_account_guest.dat"
 
@@ -203,6 +204,7 @@ module PEMK
       (PEMK::Sync.adopt_badge_hold(reply[:badge_hold]) rescue nil)                # B2: a badge frame waits for its win
       (PEMK::BattleRng.adopt_badge_battles(reply[:badge_battles]) rescue nil)    # B2: fought alone, seeds waited for longer
       (PEMK::DebugLock.adopt(reply[:client_debug]) rescue nil)                    # debug mode stays off where the server says
+      (PEMK::Presence.adopt_v2(reply[:presence_v2]) rescue nil)                   # peers kept until a leave; no timeout
       (PEMK::Flags.adopt_mode(reply[:flag_state]) rescue nil)                     # audit item 4: flag shadow
       (PEMK::Flags.adopt_policy(reply[:flag_policy]) rescue nil)   # build-time tier table (absent == local)
       (PEMK::Flags.note_facts(reply[:flag_facts]) rescue nil)      # applied after the save loads
@@ -265,6 +267,7 @@ module PEMK
       (PEMK::Sync.adopt_badge_hold(reply[:badge_hold]) rescue nil)                # B2: a badge frame waits for its win
       (PEMK::BattleRng.adopt_badge_battles(reply[:badge_battles]) rescue nil)    # B2: fought alone, seeds waited for longer
       (PEMK::DebugLock.adopt(reply[:client_debug]) rescue nil)                    # debug mode stays off where the server says
+      (PEMK::Presence.adopt_v2(reply[:presence_v2]) rescue nil)                   # peers kept until a leave; no timeout
       (PEMK::Flags.adopt_mode(reply[:flag_state]) rescue nil)                     # audit item 4: flag shadow
       (PEMK::Flags.adopt_policy(reply[:flag_policy]) rescue nil)   # build-time tier table (absent == local)
       (PEMK::Flags.note_facts(reply[:flag_facts]) rescue nil)      # applied after the save loads

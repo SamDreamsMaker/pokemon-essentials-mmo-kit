@@ -149,6 +149,9 @@ module PEMK
         (Flags.reset rescue nil)         # ... and the advertised flag-shadow mode
         (BattleRng.reset rescue nil)     # ... and any pending battle seed (M4-D7; a dead
                                          # session's seed must not arm a later battle)
+        (Remotes.clear_all rescue nil)   # ... and the players seen: no leave comes from a dead link
+                                         # (presence v2 keeps peers until one; the reconnect's
+                                         # first frame brings them back)
         NetStatus.on_disconnect   # player notice + reconnect FSM (no-op pre-login)
       end
     end

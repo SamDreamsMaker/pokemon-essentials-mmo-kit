@@ -147,9 +147,12 @@ module PEMK
     end
 
     # Drop remotes we haven't heard from for PRESENCE_TIMEOUT seconds (handles
-    # disconnects/crashes — the dumb relay doesn't send leave events).
+    # disconnects/crashes — the dumb relay doesn't send leave events). A server with
+    # presence v2 sends a leave for every player who goes (a silent one included) and
+    # no longer repeats idle ones: nothing times out there.
     def self.prune
       return if @players.empty?
+      return if (PEMK::Presence.v2? rescue false)
       now = (System.uptime rescue nil)
       return unless now
       @players.keys.each do |pid|
@@ -167,6 +170,7 @@ module PEMK
       dispose_sprites
       @players.clear
       @last_seen.clear
+      (PEMK::Presence.request_sync rescue nil)   # the next frame asks the server who is here
     end
 
     # Advance interpolation/animation for every remote each frame.
