@@ -78,7 +78,7 @@ class WorldExportBadgesPluginTest < Minitest::Test
     module Settings; PHONE_REMATCHES_POSSIBLE_FROM_BEGINNING = false; end
     module GameData; module Trainer; def self.each; end; end; end
     load ARGV[0]
-    print PEMK::WorldExport.badge_code_writes.inspect
+    print [PEMK::WorldExport.badge_code_writes, PEMK::WorldExport.badge_sources([])[:unknown]].inspect
   RUBY
 
   def test_the_game_s_own_code_setting_badges
@@ -92,7 +92,9 @@ class WorldExportBadgesPluginTest < Minitest::Test
       end
       out = IO.popen([RbConfig.ruby, "-W0", "-e", CODE_RUNNER, EXPORT], err: %i[child out], chdir: dir, &:read)
       assert $?.success?, "runner crashed:\n#{out}"
-      assert_equal [{ file: "Plugins/MyGame/badges.rb", line: 3, script: "$player.badges[2] = true" }], eval(out) # rubocop:disable Security/Eval
+      writes, unknown = eval(out) # rubocop:disable Security/Eval
+      assert_equal [{ file: "Plugins/MyGame/badges.rb", line: 3, script: "$player.badges[2] = true" }], writes
+      assert_equal writes, unknown, "listed as unknown by the export"
     end
   end
 end
