@@ -53,9 +53,12 @@ module PEMK
       "badge_unexplained"   => 1,    # a badge no win explains, when the server could own them all
                                      # (badge authority B1): an honest client's badge comes after
                                      # its win's claim and record; once per frame, not per badge
-      "badge_unprovable"    => 2     # a badge whose win no replay can prove (claimed with no seed,
+      "badge_unprovable"    => 2,    # a badge whose win no replay can prove (claimed with no seed,
                                      # a record the harness cannot replay): an honest client waits
                                      # for its seed, so 2 tolerates one battle begun offline
+      "mode_illegal"        => 2     # surfing or diving with no key (the badge the game requires):
+                                     # once per episode; 2 tolerates a swim an event the export
+                                     # missed started
     }.freeze
 
     FABRICATED_WILD_MIN = 5   # >= this many client-origin wild-table mons to report

@@ -300,10 +300,23 @@ it could never move again. An export from before these marks cannot tell water f
 walls: surfers are trusted there and a dive reads as an illegal warp, and the boot
 warns (one debug launch regenerates the export). Autotest `080_swim` surfs, dives,
 is sent back three ways and lands on Route 8, and flags a modified client that surfs
-into the cliff, dives from shallow water or walks through rock underwater. Still
-open: the mode is the client's word, so surfing without Surf (or its badge) is not
-checked, and a two-tile hop over a rock between two water tiles is only a (logged)
-teleport.
+into the cliff, dives from shallow water or walks through rock underwater.
+
+**Mode keys** (2026-10-02): a surfer or a diver needs the badge the game requires -
+the export carries `Settings::BADGE_FOR_SURF` / `BADGE_FOR_DIVE` and whether the game
+counts badges (`field_keys`), the server reads the player's badges once per swim
+(what the client is shown under badge authority B2 - owned or pending - the ledger's
+mask otherwise, which is then the client's word) and caches the verdict 30 s on the
+connection. A swim with no key is logged and flagged (`mode_illegal`); under
+`PEMK_POS_ENFORCE=on` it is refused and the player sent back to the land tile it left,
+every frame, until it moves another way. The export also lists the scripts that start a
+swim by themselves (a boat ride): with any, the server only logs - a player may then
+surf with no key. A server that allows debug clients (`PEMK_CLIENT_DEBUG=allow`) checks
+nothing: the game waives the keys there. The Dive key surfs too (surfacing). A bike
+with no bicycle is not checked yet: the game mounts one by itself on `always_bicycle`
+maps. Still open: a two-tile hop over a rock between two water tiles is only a (logged)
+teleport, and a party Pokemon knowing Surf is not required (the server's view of party
+moves is the team frame at battle start).
 
 The end state for Layer B:
 

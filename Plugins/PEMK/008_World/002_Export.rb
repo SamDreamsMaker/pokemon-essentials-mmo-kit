@@ -121,6 +121,8 @@ module PEMK
       doc[:partners] = partners if partners
       badges = (badge_sources(all_events) rescue nil)   # badge authority B0: what gives each badge
       doc[:badge_sources] = badges if badges
+      keys = (field_keys(all_events) rescue nil)        # mode keys: what Surf and Dive need
+      doc[:field_keys] = keys if keys
 
       File.open(File.expand_path(OUT_PATH), "w") { |f| f.write(pretty(doc, 0) + "\n") }
       counts.merge(:maps => maps.size, :connections => conns.size)
@@ -911,6 +913,57 @@ module PEMK
       end
     rescue StandardError
       []
+    end
+
+    # Mode keys: the badge Surf and Dive need, as the game counts badges (a number of
+    # them, or one in particular - Settings), and the event scripts and game code that
+    # start a swim by themselves (a boat ride): a player may then surf with no key, so
+    # the server only logs. -> { :count_badges, :surf, :dive, :mode_sources => [...] }
+    def field_keys(all_events)
+      surf = (Settings::BADGE_FOR_SURF rescue nil)
+      dive = (Settings::BADGE_FOR_DIVE rescue nil)
+      return nil unless surf.is_a?(Integer) && dive.is_a?(Integer)
+
+      { :count_badges => (Settings::FIELD_MOVES_COUNT_BADGES rescue false) == true,
+        :surf => surf, :dive => dive, :mode_sources => mode_sources(all_events) }
+    end
+
+    # A script line that puts the player on the water with no field move: the game's own
+    # Surf and Dive (FieldMoves.rb) and PEMK's snap-back aside.
+    MODE_SET   = /\$PokemonGlobal\.(surfing|diving)\s*(\|\|)?=\s*true\b|\bpbStartSurfing\b/.freeze
+    MODE_OWN   = %w[004_Overworld_FieldMoves.rb].freeze   # the engine's gated paths
+
+    def mode_sources(all_events)
+      out = []
+      all_events.each do |map_id, event|
+        next unless event && event.respond_to?(:pages) && event.pages
+
+        event.pages.each_with_index do |pg, k|
+          next unless pg && pg.list
+
+          mode_scripts(pg.list) { |text| out << { :map => map_id, :event => event.id, :page => k, :script => text.strip[0, 80] } }
+        end
+      end
+      Array((load_data("Data/CommonEvents.rxdata") rescue nil)).each do |ce|
+        next unless ce && ce.respond_to?(:list) && ce.list
+
+        mode_scripts(ce.list) { |text| out << { :common_event => ce.id, :script => text.strip[0, 80] } }
+      end
+      (code_lines rescue []).each do |f, n, text|
+        next if MODE_OWN.any? { |own| f.end_with?(own) } || !badge_code(text).match?(MODE_SET)
+
+        out << { :file => f, :line => n, :script => text.strip[0, 80] }
+      end
+      out
+    end
+
+    def mode_scripts(list)
+      list.each do |cmd|
+        next unless cmd.respond_to?(:code) && [355, 655].include?(cmd.code)
+
+        text = cmd.parameters[0].to_s
+        yield text if badge_code(text).match?(MODE_SET)
+      end
     end
 
     # The game's own code - its plugins and engine scripts, PEMK's own and the debug menu

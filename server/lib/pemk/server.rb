@@ -148,6 +148,7 @@ module PEMK
       @item_sweeping   = false
       @audit      = Audit.new(@world, logger: @log)
       @pos_audit  = PositionAudit.new(@world, logger: @log, mode: @config.position_enforcement)   # M4 Layer B
+      @mode_keys  = @world.field_keys   # what Surf and Dive need (nil: an export from before)
       @pickups    = Pickups.new(@db)   # M4 Layer C one-shot ledger
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
@@ -257,7 +258,8 @@ module PEMK
       @log.call("server: pickup enforcement = #{@config.pickup_enforce ? 'on' : 'off'} (M4 Layer C server-mint)")
       @log.call("server: WARNING pickup reset ALLOWED (PEMK_ALLOW_PICKUP_RESET=on) — DEV ONLY, disable in production") if @config.pickup_reset_allowed
       log_client_debug
-      @log.call("server: presence dedup = #{@config.presence_dedup ? 'on' : 'off'} " \
+      log_mode_keys
+      @log.call("server: presence dedup =#{@config.presence_dedup ? 'on' : 'off'} " \
                 "(#{@config.presence_dedup ? "an idle player's repeats reach only older clients; " \
                                              "a member silent #{PRESENCE_SILENCE.to_i}s leaves its map" : 'every frame to everyone'})")
       @pool.start
@@ -318,6 +320,7 @@ module PEMK
         return
       end
 
+      conn.data.delete(:mode_keys) if conn.data[:mode_keys] && %i[econ money_claim].include?(type)   # its keys may change
       dispatch_frame(conn, env, type, authed, dec[:body])
     rescue StandardError => e
       # A raise used to unwind to the reactor's blanket rescue, aborting the whole tick
@@ -3661,6 +3664,9 @@ module PEMK
       # socket, and a replaced session is closed as it is replaced)
       return unless map.is_a?(Integer) && !conn.closing
 
+      # A swim with no key (mode keys) is refused before the audit: last_pos stays on land.
+      return if mode_refused?(conn, env, account_id)
+
       # M4 Layer B: audit FIRST. In :on mode an enforceable violation stashes the
       # last-good tile in conn.data[:correct_to] — send a :pos_correct and REJECT the
       # frame: no zone change and no fan-out of the rejected position, so peers keep
@@ -3715,6 +3721,146 @@ module PEMK
       return false unless env[:sync] == true
 
       (at = conn.data[:sync_at]).nil? || now - at >= SYNC_EVERY
+    end
+
+    # Mode keys: a surfer or a diver needs the badge the game requires (the export's
+    # field_keys). On the first frame in such a mode the keys are read once, off the
+    # reactor - the badges the client may use: owned or pending under B2, the ledger's
+    # otherwise - and the verdict cached MODE_TTL on the connection (the account's own
+    # badge frames and claims clear it). With no key: logged and flagged once per
+    # MODE_TTL; under PEMK_POS_ENFORCE=on the frame is refused and the player sent back
+    # to the land tile it left - every later frame in that mode the same, until it moves
+    # another way. Never a DB read on the reactor thread, one read in flight at most.
+    KEYED_MODES = %i[surf dive].freeze
+    MODE_TTL    = 30.0
+
+    # A debug client is waived the keys by the game itself (pbCheckHiddenMoveBadge).
+    def mode_keys_checked?
+      !@mode_keys.nil? && @config.client_debug != :allow
+    end
+
+    # -> true when the frame is refused
+    def mode_refused?(conn, env, account_id)
+      mode = env[:mode]
+      conn.data[:mode_cur] = mode
+      unless mode_keys_checked? && KEYED_MODES.include?(mode)
+        conn.data.delete(:mode_denied)   # moving another way ends a denied episode
+        conn.data.delete(:mode_from)
+        return false
+      end
+      conn.data[:mode_from] ||= land_tile(conn.data[:last_pos])   # the land it left: before the audit moves on
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      cached = conn.data.dig(:mode_keys, mode)
+      if cached.nil? || now - cached[:at] >= MODE_TTL
+        mode_read(conn, account_id, mode) unless conn.data[:mode_job]   # the frame flows meanwhile
+      elsif !cached[:ok]
+        deny_mode(conn, mode, cached[:held], now)
+      end
+      conn.data[:mode_denied] == mode && refuse_mode(conn)
+    end
+
+    def mode_read(conn, account_id, mode)
+      token = conn.data[:mode_job] = conn.data[:mode_token].to_i + 1
+      conn.data[:mode_token] = token
+      @mailbox.submit(account_id) do   # after the claims before it: a win's badge counts
+        verdict = begin
+          held = badges_allowed(account_id)
+          [key_ok?(mode, held), held]
+        rescue StandardError => e
+          @log.call("posaudit: account #{account_id} mode key read failed #{e.class}: #{e.message}")
+          nil
+        end
+        @reactor.post { mode_verdict(conn, token, mode, verdict) }
+      end
+    end
+
+    # On the reactor: the read's verdict - cached; a stale one (it moves another way) only
+    # fills the cache; a read that failed leaves nothing (the next transition reads again).
+    def mode_verdict(conn, token, mode, verdict)
+      conn.data.delete(:mode_job) if conn.data[:mode_job] == token
+      return unless verdict && @reactor.alive?(conn)
+
+      ok, held = verdict
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      (conn.data[:mode_keys] ||= {})[mode] = { ok: ok, held: held, at: now }
+      deny_mode(conn, mode, held, now) if !ok && conn.data[:mode_cur] == mode
+    end
+
+    # Said once per MODE_TTL (a denied mode is a steady state), flagged with it; under
+    # `on` the mode is denied - unless a script of the game starts swims by itself.
+    def deny_mode(conn, mode, held, now)
+      id = conn.data[:account_id]
+      said = conn.data[:mode_said]
+      unless said && said[0] == mode && now - said[1] < MODE_TTL
+        conn.data[:mode_said] = [mode, now]
+        what = "account #{id} #{mode} with no key (#{key_text(mode)} needed, has #{badge_count(held)}: #{held.to_s(2)})"
+        case @config.position_enforcement
+        when :on     then @log.call("posaudit: #{what} -> #{mode_correctable?(conn) ? 'sent back to the shore' : 'refused'}")
+        when :shadow then @log.call("posenforce[shadow]: #{what} WOULD-CORRECT")
+        else              @log.call("posaudit: #{what}")
+        end
+        flag_anomaly(id, :mode_illegal)
+      end
+      return unless @config.position_enforcement == :on && @mode_keys[:sources].empty?
+
+      conn.data[:mode_denied] = mode
+    end
+
+    def mode_correctable?(conn)
+      @mode_keys[:sources].empty? && !conn.data[:mode_from].nil?
+    end
+
+    # A refused frame: no audit, no fan-out, and the way back to the land it left (none
+    # known - a session begun on the water: the frame is only dropped).
+    def refuse_mode(conn)
+      land = conn.data[:mode_from]
+      reply(conn, type: :pos_correct, map: land[0], x: land[1], y: land[2]) if land
+      true
+    end
+
+    # +pos+ when the export knows it as land
+    def land_tile(pos)
+      pos if pos && @world.water?(pos[0], pos[1], pos[2]) == false
+    end
+
+    # The badges the client may use: what it is shown under B2 (owned or pending), the
+    # ledger's mask otherwise (the client's own word then).
+    def badges_allowed(account_id)
+      badge_enforce? ? badge_shown(account_id) : @ledger.current(account_id, :badges).to_i
+    end
+
+    # A negative setting is no requirement; counting games need that many badges, the
+    # others that one; the Dive key surfs too (surfacing from a dive).
+    def key_ok?(mode, held)
+      keys = mode == :dive ? [@mode_keys[:dive]] : [@mode_keys[:surf], @mode_keys[:dive]]
+      keys.any? { |n| n.negative? || (@mode_keys[:count_badges] ? badge_count(held) >= n : held[n] == 1) }
+    end
+
+    def badge_count(mask)
+      mask.to_i.to_s(2).count("1")
+    end
+
+    def key_text(mode)
+      n = @mode_keys[mode]
+      return "no badge" if n.negative?
+
+      @mode_keys[:count_badges] ? "#{n} badges" : "badge #{n}"
+    end
+
+    def log_mode_keys
+      unless @mode_keys
+        @log.call("server: mode keys: the export predates them (one debug launch regenerates it) - a swim's key is not checked")
+        return
+      end
+      what = @config.position_enforcement == :on ? "a swim with no key is sent back to the shore" : "a swim with no key is logged"
+      @log.call("server: mode keys: surf needs #{key_text(:surf)}, dive #{key_text(:dive)} (#{what})")
+      @log.call("server: WARNING mode keys: client debug is allowed - the game waives the keys there, none is checked") if @config.client_debug == :allow
+      @log.call("server: mode keys: the badges are the client's word (badge authority does not enforce)") unless badge_enforce?
+      return if @mode_keys[:sources].empty?
+
+      where = @mode_keys[:sources].first(5).map { |s| @world.badge_where(s) }.join("; ")
+      @log.call("server: WARNING mode keys: #{@mode_keys[:sources].size} script(s) start a swim by themselves (#{where}) - " \
+                "a swim with no key is logged, never sent back")
     end
 
     # Presence zones (reactor thread). A client without presence_v2 is also in its
