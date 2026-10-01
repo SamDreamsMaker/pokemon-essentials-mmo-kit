@@ -68,13 +68,28 @@ class ServerPresenceTest < Minitest::Test
   # that expects nothing passes a short +first+.
   def drain(sock, quiet = 0.3, first: 2.0)
     out = []
-    loop { out << recv_env(sock, out.empty? ? first : quiet) }
+    loop do
+      env = recv_env(sock, out.empty? ? first : quiet)
+      break if env.nil?   # closed by the server
+
+      out << env
+    end
+    out
   rescue Timeout::Error
     out
   end
 
   def nothing(sock)
     drain(sock, first: 0.6)
+  end
+
+  # The account's last snapshot was SYNC_EVERY ago: what a wait of that long does.
+  def age_sync(account_id)
+    on_reactor do
+      data = @server.instance_variable_get(:@online)[account_id].data
+      data[:sync_at] -= PEMK::Server::SYNC_EVERY + 1 if data[:sync_at]
+      true
+    end
   end
 
   # login_ok's :presence_v2 for a new account logging in with +caps+
@@ -130,7 +145,7 @@ class ServerPresenceTest < Minitest::Test
     send_env(a, { type: :pos, map: 5, x: 1, y: 1 })
     send_env(b, { type: :pos, map: 5, x: 2, y: 2 })
     send_env(c, { type: :pos, map: 5, x: 3, y: 3 })
-    [a, b, c].each { |s| nothing(s) }
+    [a, b, c].each { |s| drain(s) }
 
     send_env(a, { type: :pos, map: 5, x: 1, y: 1 })   # the heartbeat of a player standing still
     assert_equal [[a_id, 1]], drain(c).map { |e| e.values_at(:id, :x) }, "the older client still hears it"
@@ -147,11 +162,12 @@ class ServerPresenceTest < Minitest::Test
     b, b_id = open_authed("Bent", "passwordB1", caps: %w[presence_v2])
     send_env(a, { type: :pos, map: 6, x: 1, y: 1 })
     send_env(b, { type: :pos, map: 6, x: 2, y: 2 })
-    [a, b].each { |s| nothing(s) }
+    [a, b].each { |s| drain(s) }
     d, d_id = open_authed("Dent", "passwordD1", caps: %w[presence_v2])
     send_env(d, { type: :pos, map: 6, x: 4, y: 4 })
     assert_equal [a_id, b_id].sort, drain(d).map { |e| e[:id] }.sort, "everyone already on the map"
     assert_equal [d_id], drain(a).map { |e| e[:id] }
+    age_sync(a_id)                                                  # its entry was a while ago
     send_env(a, { type: :pos, map: 6, x: 1, y: 1, sync: true })   # its remotes were cleared
     assert_equal [b_id, d_id].sort, drain(a).map { |e| e[:id] }.sort
     [a, b, d].each(&:close)
@@ -164,7 +180,7 @@ class ServerPresenceTest < Minitest::Test
     b, b_id = open_authed("Bsil", "passwordB1", caps: %w[presence_v2])
     send_env(a, { type: :pos, map: 7, x: 1, y: 1 })
     send_env(b, { type: :pos, map: 7, x: 2, y: 2 })
-    [a, b].each { |s| nothing(s) }
+    [a, b].each { |s| drain(s) }
     on_reactor do                                    # the reactor's own tick sweeps it
       conn = @server.instance_variable_get(:@online)[a_id]
       conn.data[:presence_seen] -= PEMK::Server::PRESENCE_SILENCE + 1
@@ -187,36 +203,66 @@ class ServerPresenceTest < Minitest::Test
     a, a_id = open_authed("Aghost", "passwordA1", caps: %w[presence_v2])
     b, = open_authed("Bghost", "passwordB1", caps: %w[presence_v2])
     send_env(b, { type: :pos, map: 4, x: 2, y: 2 })
-    nothing(b)
+    drain(b)
     reactor = @server.instance_variable_get(:@reactor)
     @server.define_singleton_method(:send_snapshot) { |c, _map| reactor.send(:close_conn, c) }   # it overflows
-    send_env(a, { type: :pos, map: 4, x: 1, y: 1 })
+    # two frames in one write: the second, read with the one that closed the socket, must
+    # not put it back on the map
+    a.write(W.encode_split({ type: :pos, map: 4, x: 1, y: 1 }) + W.encode_split({ type: :step, map: 4, x: 1, y: 2 }))
     assert_equal [[:pos, a_id], [:leave, a_id]], drain(b).map { |e| e.values_at(:type, :id) }
-    [a, b].each(&:close)
+    b.close
   end
 
-  # A socket logging in again as another account leaves its map under the first one.
-  def test_a_socket_logging_in_again_leaves_its_map
+  # A socket is one session: a second login or auth on it is refused, its map untouched
+  # (the game reconnects on a new socket).
+  def test_a_socket_is_one_session
     a, a_id = open_authed("Aagain", "passwordA1", caps: %w[presence_v2])
     b, = open_authed("Bagain", "passwordB1", caps: %w[presence_v2])
     send_env(a, { type: :pos, map: 3, x: 1, y: 1 })
     send_env(b, { type: :pos, map: 3, x: 2, y: 2 })
-    [a, b].each { |s| nothing(s) }
+    [a, b].each { |s| drain(s) }
     send_env(a, { type: :register, email: "Yagain@t.co", password: "passwordY1" })
     recv_env(a)
     send_env(a, { type: :login, email: "Yagain@t.co", password: "passwordY1", caps: %w[presence_v2] })
-    assert_equal :login_ok, recv_env(a)[:type]
-    assert_equal [[:leave, a_id]], drain(b).map { |e| e.values_at(:type, :id) }
+    assert_equal [:login_err, "already_authed"], recv_env(a).values_at(:type, :reason)
+    send_env(a, { type: :auth, token: "x", resume: true })
+    assert_equal [:auth_err, "already_authed"], recv_env(a).values_at(:type, :reason)
+    assert_empty nothing(b), "no leave: the first account is still on its map"
+    send_env(a, { type: :step, map: 3, x: 1, y: 2 })
+    assert_equal [[:step, a_id]], drain(b).map { |e| e.values_at(:type, :id) }, "and still plays as itself"
+    [a, b].each(&:close)
+  end
+
+  # A snapshot goes at most every few seconds, the one at a map's entry counted: the
+  # client's asks right after entering add no second one. A snap-back to another map
+  # clears the client's remotes without a map change on the server: its next ask is
+  # honoured at once.
+  def test_a_snapshot_at_entry_counts_and_a_snap_back_renews_it
+    a, a_id = open_authed("Aent2", "passwordA1", caps: %w[presence_v2])
+    b, b_id = open_authed("Bent2", "passwordB1", caps: %w[presence_v2])
+    send_env(b, { type: :pos, map: 2, x: 2, y: 2 })
+    drain(b)
+    send_env(a, { type: :pos, map: 2, x: 1, y: 1 })                # entering: the snapshot
+    assert_equal [b_id], drain(a).map { |e| e[:id] }
+    send_env(a, { type: :pos, map: 2, x: 1, y: 1, sync: true })    # the client's asks on its next frames
+    send_env(a, { type: :pos, map: 2, x: 1, y: 1, sync: true })
+    assert_empty nothing(a), "no second snapshot within SYNC_EVERY of the entry"
+    on_reactor { @server.instance_variable_get(:@online)[a_id].data[:correct_to] = [2, 1, 1] }
+    send_env(a, { type: :pos, map: 2, x: 5, y: 5 })                # refused: a snap-back
+    assert_equal [:pos_correct], drain(a).map { |e| e[:type] }
+    send_env(a, { type: :pos, map: 2, x: 1, y: 1, sync: true })    # its remotes cleared, it asks again
+    assert_equal [b_id], drain(a).map { |e| e[:id] }, "honoured at once after a snap-back"
     [a, b].each(&:close)
   end
 
   # A :sync is honoured at most every SYNC_EVERY: each is a frame per peer.
   def test_a_sync_is_honoured_once_every_few_seconds
-    a, = open_authed("Async", "passwordA1", caps: %w[presence_v2])
+    a, a_id = open_authed("Async", "passwordA1", caps: %w[presence_v2])
     b, b_id = open_authed("Bsync", "passwordB1", caps: %w[presence_v2])
     send_env(a, { type: :pos, map: 2, x: 1, y: 1 })
     send_env(b, { type: :pos, map: 2, x: 2, y: 2 })
-    [a, b].each { |s| nothing(s) }
+    [a, b].each { |s| drain(s) }
+    age_sync(a_id)                                                  # its entry was a while ago
     send_env(a, { type: :pos, map: 2, x: 1, y: 1, sync: true })
     assert_equal [b_id], drain(a).map { |e| e[:id] }
     send_env(a, { type: :pos, map: 2, x: 1, y: 1, sync: true })
@@ -232,7 +278,7 @@ class ServerPresenceTest < Minitest::Test
     a.close                                          # registered; this socket goes
     b, = open_authed("Brep", "passwordB1", caps: %w[presence_v2])
     send_env(b, { type: :pos, map: 8, x: 2, y: 2 })
-    nothing(b)
+    drain(b)
     dead = on_reactor do                             # the account on map 8 over a link that never drains
       c = PEMK::Reactor::Conn.new(Object.new, "dead")
       c.data.merge!(account_id: a_id, presence_v2: true, map_id: 8,
@@ -259,7 +305,7 @@ class ServerPresenceTest < Minitest::Test
     b, = open_authed("Bbud", "passwordB1", caps: %w[presence_v2])
     send_env(b, { type: :pos, map: 9, x: 0, y: 0 })
     send_env(a, { type: :pos, map: 9, x: 0, y: 0 })
-    [a, b].each { |s| nothing(s) }
+    [a, b].each { |s| drain(s) }
     types = %i[pos dir step]
     a.write((1..120).map { |i| W.encode_split({ type: types[i % 3], map: 9, x: i, y: 0, dir: 2 + (2 * (i % 4)) }) }.join)
     got = drain(b, 0.5).size

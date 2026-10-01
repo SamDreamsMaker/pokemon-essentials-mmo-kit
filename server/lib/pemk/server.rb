@@ -438,6 +438,9 @@ module PEMK
 
     def handle_login(conn, env)
       return reply(conn, type: :login_err, reason: "rate_limited") unless @limiter.allow?(conn.addr)
+      # A socket is one session: the game reconnects on a new one. A second login here
+      # would leave the first account's map, relays and claims pointing at this socket.
+      return reply(conn, type: :login_err, reason: "already_authed") if conn.data[:account_id]
 
       note_caps(conn, env)
       return reply(conn, type: :login_err, reason: "update_required") if money_update_required?(conn)
@@ -486,6 +489,8 @@ module PEMK
 
     def handle_auth(conn, env)
       token = env[:token].to_s
+      return reply(conn, type: :auth_err, reason: "already_authed") if conn.data[:account_id]   # one session a socket
+
       note_caps(conn, env)
       return reply(conn, type: :auth_err, reason: "update_required") if money_update_required?(conn)
       # A reconnect resuming a live session must not be judged like a fresh one: the
@@ -3648,7 +3653,9 @@ module PEMK
     # peer goes - or falls silent for PRESENCE_SILENCE.
     def handle_presence(conn, env, account_id)
       map = env[:map]
-      return unless map.is_a?(Integer)
+      # (closing: a backstop - the reactor drops the rest of a read once a frame closed its
+      # socket, and a replaced session is closed as it is replaced)
+      return unless map.is_a?(Integer) && !conn.closing
 
       # M4 Layer B: audit FIRST. In :on mode an enforceable violation stashes the
       # last-good tile in conn.data[:correct_to] — send a :pos_correct and REJECT the
@@ -3657,6 +3664,7 @@ module PEMK
       # map's zone. In :off/:shadow correct_to is never set, so the frame flows on.
       @pos_audit.check(account_id, env, conn.data)
       if (tgt = conn.data.delete(:correct_to))
+        conn.data.delete(:sync_at)   # a snap-back clears the client's remotes: its next ask is honoured
         reply(conn, type: :pos_correct, map: tgt[0], x: tgt[1], y: tgt[2])
         return
       end
@@ -3690,23 +3698,26 @@ module PEMK
       end
       # last: a snapshot that overflows the joiner's output closes it, and the leave that
       # close sends must follow its frame, not precede it (a ghost on every peer)
-      send_snapshot(conn, map) if dedup && (joined || sync_due?(conn, env, now))
+      return unless dedup && (joined || sync_due?(conn, env, now))
+
+      send_snapshot(conn, map)
+      conn.data[:sync_at] = now
     end
 
     # A client asks who is on its map (:sync) after it cleared its remotes - and again on
-    # the next frames, in case one was dropped. Honoured at most every SYNC_EVERY: each
-    # snapshot is a frame per peer.
+    # the next frames, in case one was dropped. A snapshot goes at most every SYNC_EVERY
+    # (one at the map's entry counts): each is a frame per peer.
     def sync_due?(conn, env, now)
       return false unless env[:sync] == true
-      return false if (at = conn.data[:sync_at]) && now - at < SYNC_EVERY
 
-      conn.data[:sync_at] = now
-      true
+      (at = conn.data[:sync_at]).nil? || now - at >= SYNC_EVERY
     end
 
     # Presence zones (reactor thread). A client without presence_v2 is also in its
     # zone's legacy set: the only members an idle repeat still reaches.
     def zone_join(conn, map)
+      return if conn.closing   # a frame read with the one that closed it
+
       @zones[map].add(conn)
       (@zone_legacy[map] ||= Set.new).add(conn) unless conn.data[:presence_v2]
       conn.data[:zone] = map
@@ -3754,13 +3765,15 @@ module PEMK
       @zones.each do |map, zone|
         zone.each { |c| stale << [c, map] if now - (c.data[:presence_seen] || now) > PRESENCE_SILENCE }
       end
+      leave = Hash.new { |h, id| h[id] = Wire.encode_split({ type: :leave, id: id }) }   # encoded once per sweep
       stale.each do |c, map|
         c.data.delete(:presence_content)
-        zone_leave(c, map, c.data[:account_id])
         # it drops everyone too: out of the zone it hears no leave, and the snapshot of
-        # its return only adds who is there then
-        leaves = @zones.fetch(map, nil)&.map { |p| Wire.encode_split({ type: :leave, id: p.data[:account_id] }) }
-        @reactor.send_frame(c, leaves.join) if leaves && !leaves.empty?
+        # its return only adds who is there then (the members as they are before its
+        # own leave goes out: that broadcast may close one of them)
+        peers = (@zones.fetch(map, nil) || []).reject { |p| p.equal?(c) }.map { |p| p.data[:account_id] }
+        zone_leave(c, map, c.data[:account_id])
+        @reactor.send_frame(c, peers.map { |id| leave[id] }.join) unless c.closing || peers.empty?
       end
     end
 
@@ -3895,12 +3908,6 @@ module PEMK
         # leave would hide the new session from its peers
         (pzone = previous.data[:zone]) && zone_leave(previous, pzone, account_id)
         @reactor.finish(previous)
-      end
-      # a socket logging in again (as another account, or with other caps) leaves its
-      # map, and comes back with its next frame under what it is now
-      if (zone = conn.data[:zone])
-        zone_leave(conn, zone, conn.data[:account_id])
-        conn.data.delete(:presence_content)
       end
       conn.data[:account_id] = account_id
       conn.data[:presence_v2] = @config.presence_dedup && Array(conn.data[:caps]).include?("presence_v2")

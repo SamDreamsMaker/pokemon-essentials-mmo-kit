@@ -25,8 +25,15 @@ module PEMK
     MAX_FRAME  = PEMK::Wire::MAX_MESSAGE_BYTES
 
     class Conn
-      attr_reader :io, :addr
-      attr_accessor :inbuf, :outbuf, :closing, :data
+      attr_reader :io, :addr, :closing
+      attr_accessor :inbuf, :outbuf, :data
+
+      # Marked closing (a replaced session, a bad frame, an idle one): CLOSE_GRACE counts
+      # from the first mark, whichever path set it.
+      def closing=(value)
+        @closing = value
+        @data[:closing_at] ||= Process.clock_gettime(Process::CLOCK_MONOTONIC) if value
+      end
 
       def initialize(io, addr)
         @io      = io
@@ -142,7 +149,6 @@ module PEMK
       return if conn.nil? || !@conns.key?(conn.io)
 
       conn.closing = true
-      conn.data[:closing_at] ||= Process.clock_gettime(Process::CLOCK_MONOTONIC)   # CLOSE_GRACE counts from here
       conn.outbuf.empty? ? close_conn(conn) : write_conn(conn)
     end
 
@@ -287,6 +293,7 @@ module PEMK
     def close_conn(conn)
       return unless conn && @conns.key?(conn.io)
 
+      conn.closing = true   # the rest of a batch read with the frame that closed it is dropped
       @conns.delete(conn.io)
       (conn.io.close rescue nil)
       @on_close&.call(conn)
