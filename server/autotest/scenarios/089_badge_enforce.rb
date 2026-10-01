@@ -6,12 +6,14 @@ require "open3"
 # honest win over Brock shows his badge at once - pending, not owned - and the replay that
 # proves the win grants it; it stays across a relaunch. A modified client's badge frame
 # raises nothing; a client that cannot hold its badge frame must update.
-# On the demo itself: its house no longer gives badges, and Brock is fought alone.
+# On the demo itself: an edited one's house gives no badges, and Brock is fought alone; a
+# stock one's house is the debug helper PEMK_BADGE_IGNORE names (nothing, on an edited one).
 Autotest.scenario "the server owns the badges",
                   flags: { PEMK_MONEY_AUTHORITY: "on", PEMK_ITEM_AUTHORITY: "on", PEMK_PICKUP_ENFORCE: "on",
                            PEMK_GIFT_ENFORCE: "on", PEMK_SHOP_ENFORCE: "on", PEMK_BATTLE_ENFORCE_ENCOUNTERS: "on",
                            PEMK_BATTLE_ENFORCE_RNG: "on", PEMK_BATTLE_ENFORCE_TEAMS: "on",
-                           PEMK_BATTLE_ENFORCE_EXP: "on", PEMK_TRAINER_PROOF: "on", PEMK_BADGE_AUTHORITY: "on" },
+                           PEMK_BATTLE_ENFORCE_EXP: "on", PEMK_TRAINER_PROOF: "on", PEMK_BADGE_AUTHORITY: "on",
+                           PEMK_BADGE_IGNORE: "3:7" },
                   budget: 540 do |s|
   s.check("the server owns the badges") { s.server.grep(/badge authority ENFORCED/).any? }
   refused = begin
@@ -60,7 +62,7 @@ Autotest.scenario "the server owns the badges",
   s.check("after a relaunch, the badge is still there") { s.wait_for("the badge", seconds: 20) { shown.call == 1 } }
 
   # A modified client: every badge in one frame.
-  rogue = s.rogue(:r, caps: %w[money_claims trainer_proof save_ack badge_hold])
+  rogue = s.rogue(:r, caps: %w[money_claims trainer_proof save_ack badge_hold badge_alone])
   rogue.send_env({ type: :pos, map: 10, x: 6, y: 6, dir: 8, speed: 3 })
   rogue.send_env({ type: :econ, field: :badges, value: 0xFFFF, seq: 1 })
   answer = rogue.wait_for(:econ_ack, :econ_rej)[:env]

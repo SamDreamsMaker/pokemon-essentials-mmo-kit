@@ -135,12 +135,10 @@ module PEMK
       # authority enforces, battle rng is on, and the team lock and EXP tracking run (the
       # team's checks); 'on' otherwise runs as shadow.
       @trainer_enforce = @config.trainer_proof == :on && @money_enforce && !@trainer_proofs.nil? && team_proof_gaps.empty?
-      # Badge authority B1: each new badge judged by the battle that gives it (shadow; `on`
-      # runs as shadow until B2). It reads the trainer prize claims and their proofs.
+      # Badge authority: each new badge judged by the battle that gives it (B1), owned on its
+      # proven win (B2). It reads the trainer prize claims and their proofs.
       @badge_audit = BadgeAudit.new(@db, @world) if @config.badge_authority != :off && @money_claims
-      # A refusal is a sign only when nothing keeps the server from owning the badges: a
-      # badge set the export cannot read, or given with no battle, may be the game's own.
-      @badge_sure  = @badge_audit && @world.badge_blockers(badges_max: @config.badges_max).empty?
+      weigh_badge_blockers
       @badge_said  = {}   # [account, badge] => the verdict logged last (a frame sent again says nothing new)
       @badge_based = {}   # account => its baseline (badge_baselines)
       @badge_mutex = Mutex.new
@@ -420,11 +418,12 @@ module PEMK
 
     # M3: a client that claims no prizes would see every one of them refused - it has to
     # update before it plays here. So does one that cannot wait for a prize's proof (P4),
-    # or hold its badge frame for its claim and record (badge authority B2).
+    # or hold its badge frame for its claim and record and fight a badge's battle alone
+    # (badge authority B2: a partner the export cannot see may join it too).
     def money_update_required?(conn)
       caps = Array(conn.data[:caps])
       (@money_enforce && !caps.include?("money_claims")) || (@trainer_enforce && !caps.include?("trainer_proof")) ||
-        (badge_enforce? && !caps.include?("badge_hold"))
+        (badge_enforce? && !(caps.include?("badge_hold") && caps.include?("badge_alone")))
     end
 
     def handle_login(conn, env)
@@ -2298,6 +2297,29 @@ module PEMK
       @config.badge_authority == :on && !@badge_audit.nil? && @trainer_enforce && @money_enforce && @badge_sure ? true : false
     end
 
+    # At boot. A refusal is a sign only when nothing keeps the server from owning the
+    # badges: a badge set the export cannot read, or given with no battle, may be the game's
+    # own. Owning them, every client fights a badge's battle alone (badge_alone): a partner
+    # who may join it keeps nothing from it. Until then a client from before may fight with
+    # the partner: there it keeps the flags off.
+    def weigh_badge_blockers
+      @badge_alone = @config.badge_authority == :on && @trainer_enforce && @money_enforce ? true : false
+      @badge_sure  = @badge_audit && badge_blockers(alone: @badge_alone).empty? ? true : false
+    end
+
+    # The battles whose win gives a badge, for the login: the clients fight them alone and
+    # wait longer for their seeds wherever the server judges the badges and proves trainer
+    # battles - from shadow on, so a win then is proven by the time the server owns them.
+    def badge_battles_alone
+      @badge_audit && @trainer_proofs ? @world.badge_battles : nil
+    end
+
+    # What keeps the server from owning the badges; +alone+: its clients fight a badge's
+    # battle with no partner. The badge writes the operator ignores keep nothing.
+    def badge_blockers(alone:)
+      @world.badge_blockers(badges_max: @config.badges_max, alone: alone, ignore: @config.badge_ignore)
+    end
+
     # What the client shows: pending (read first), then owned - a proof settled between the
     # two reads is in one or the other.
     def badge_shown(account_id)
@@ -2538,12 +2560,12 @@ module PEMK
 
       if badge_enforce?
         @log.call("server: badge authority ENFORCED - a frame never moves the badges, a proven win grants them " \
-                  "(clients need badge_hold)")
+                  "(clients need badge_hold and badge_alone)")
       elsif mode == :on
         why = []
         why << "trainer proof does not enforce" unless @trainer_enforce
         why << "money authority does not enforce" unless @money_enforce
-        why << "what keeps it from owning the badges (below)" if @badge_audit && !@badge_sure
+        why << "what keeps it from owning the badges (below)" if @badge_audit && !badge_blockers(alone: true).empty?
         @log.call("server: WARNING badge authority 'on' runs as shadow: #{why.join(', ')}") unless why.empty?
       end
       unless @badge_audit
@@ -2555,8 +2577,25 @@ module PEMK
         @log.call("server: WARNING badge authority: no trainer proof (PEMK_TRAINER_PROOF, PEMK_BATTLE_ENFORCE_RNG=on) - " \
                   "no badge is ever explained")
       end
-      blockers = @world.badge_blockers(badges_max: @config.badges_max)
+      alone = badge_battles_alone
+      unless alone.nil? || alone.empty?
+        @log.call("server: badge authority: #{alone.size} battle(s) whose win gives a badge are fought alone, " \
+                  "their seeds waited for longer")
+      end
+      unless @config.badge_ignore.empty?
+        hit, miss = @config.badge_ignore.partition { |k| @world.badge_ignorable.include?(k) }
+        @log.call("server: badge authority: no badge from #{hit.join(', ')} (PEMK_BADGE_IGNORE: refused, " \
+                  "as any no win explains)") unless hit.empty?
+        @log.call("server: WARNING PEMK_BADGE_IGNORE names #{miss.join(', ')}: no badge write it ignores there " \
+                  "(one the export cannot read, or that gives a badge with no battle)") unless miss.empty?
+      end
+      # what would keep it from owning them - its clients then fight a badge's battle alone
+      blockers = badge_blockers(alone: true)
       @log.call("server: badge authority cannot own: #{blockers.join('; ')}") unless blockers.empty?
+      return if badge_enforce? || !blockers.empty? || @badge_sure
+
+      @log.call("server: badge authority: a partner may join a badge's battle - until the server owns the badges " \
+                "(every client then fights it alone), a refusal flags no one")
     end
 
     # What keeps a replay from checking the player's team against the server's own: the
@@ -3511,7 +3550,7 @@ module PEMK
         trainer_proof: @trainer_enforce ? "on" : "off",                      # P4: a prize waits for its battle's proof
         record_ack: !@trainer_proofs.nil?,                                   # P4: a trainer battle's record is acknowledged
         badge_hold: badge_enforce?,                                          # B2: a badge frame waits for its win's claim
-        badge_battles: (badge_enforce? ? @world.badge_battles : nil),        # B2: ... their seeds waited for longer
+        badge_battles: badge_battles_alone,                                  # B2: fought alone, their seeds waited for longer
         flags_seq: (@flag_state ? (@flag_state.snapshot(account_id)&.fetch(:last_seq, 0) || 0) : 0),
         flag_policy: flag_policy,
         flag_facts: (@config.flag_state == :on && @flag_state ? @flag_state.materialize_facts(account_id) : nil) }

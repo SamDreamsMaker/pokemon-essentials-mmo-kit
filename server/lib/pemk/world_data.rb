@@ -337,12 +337,15 @@ module PEMK
       @badge_sources.values.flatten.filter_map { |s| s[:map] if s[:trainers] }.uniq
     end
 
-    # Badge authority B2: the battles whose win gives a badge, as a client names a trainer
-    # battle - [[type, name, version, map, event], ...]: their seed is waited for longer.
+    # Badge authority B2: the battles whose win gives a badge and that a replay proves once
+    # fought alone (one trainer the export places, a prize, no size rule), as a client names
+    # a trainer battle - [[type, name, version, map, event], ...]: fought alone, their seed
+    # waited for longer. The others change nothing by it.
     def badge_battles
       return [] unless @badge_sources
 
-      @badge_sources.values.flatten.select { |s| s[:trainers]&.length == 1 }
+      @badge_sources.values.flatten
+                    .select { |s| s[:trainers]&.length == 1 && !s[:no_money] && unseeded(s, alone: true).nil? }
                     .map { |s| [*s[:trainers][0], s[:map], s[:event]] }.uniq
     end
 
@@ -357,23 +360,27 @@ module PEMK
     end
 
     # Why the server could not own the badges this export gives: what gives a badge it
-    # cannot see, or a win no replay can prove. -> [why, ...] ([] when it can)
-    def badge_blockers(badges_max: nil)
+    # cannot see, or a win no replay can prove. +alone+: the clients fight a badge's battle
+    # with no partner (every client does while the server owns the badges). +ignore+: the badge writes
+    # the operator says give nothing (PEMK_BADGE_IGNORE, badge_key) - their badges refused,
+    # no blocker. -> [why, ...] ([] when it can)
+    def badge_blockers(badges_max: nil, alone: false, ignore: [])
       return ["the exports predate the badge sources (one debug launch regenerates them)"] unless @badge_sources
 
-      out = @badge_unknown.map { |u| "a badge set the export cannot read: #{badge_where(u)} (#{u['script']})" }
+      out = @badge_unknown.reject { |u| ignore.include?(badge_key(u)) }
+                          .map { |u| "a badge set the export cannot read: #{badge_where(u)} (#{u['script']})" }
       wins = Hash.new { |h, k| h[k] = [] }   # [map, event, trainer] => [[badge, its page and call], ...]
       @badge_sources.sort.each do |badge, sources|
         out << "badge #{badge} is over the cap of #{badges_max}" if badges_max && badge >= badges_max
         sources.each do |s|
           where = badge_where(s.transform_keys(&:to_s))
           if s[:trainers].nil?
-            out << "badge #{badge} is given with no battle (#{where})"
+            out << "badge #{badge} is given with no battle (#{where})" unless ignore.include?(badge_key(s.transform_keys(&:to_s)))
           elsif s[:trainers].length > 1
             out << "badge #{badge} is a battle against several trainers (#{where}): no replay proves it"
           elsif s[:no_money]
             out << "badge #{badge}'s battle pays nothing (#{where}): no claim proves it"
-          elsif (why = unseeded(s))
+          elsif (why = unseeded(s, alone: alone))
             out << "badge #{badge}'s battle gets no seed (#{where}): #{why}"
           else
             wins[[s[:map], s[:event], s[:trainers][0]]] << [badge, [s[:page], s[:call]]]
@@ -394,16 +401,34 @@ module PEMK
 
     # Why a win source's battle is fought with no seed - so no replay proves it - or nil.
     # The server seeds a trainer it places, alone in its call; the client asks no seed
-    # with a partner at the player's side (the game registers one, or computes one).
-    def unseeded(source)
+    # with a partner at the player's side (the game registers one, or computes one) -
+    # unless it fights the battle alone (+alone+).
+    def unseeded(source, alone: false)
       type, name, version = source[:trainers][0]
       return "the export does not place #{type} #{name}" unless trainer_place(source[:map], source[:event], type, name, version)
       return "#{type} #{name} shares a battle call" unless trainer_alone?(source[:map], source[:event], type, name, version)
       return "it is a #{source[:size]} battle" if source[:size]
-      return nil if source[:no_partner]
+      return nil if source[:no_partner] || alone
       return "a partner may join it (the export cannot list the game's partners)" if @partners.nil?
 
       "a partner may join it (#{@partners.map { |t| t.first(2).join(' ') }.join(', ')})" unless @partners.empty?
+    end
+
+    # PEMK_BADGE_IGNORE: what it can name - the badge writes the export cannot read, and
+    # those that give a badge with no battle. -> [badge_key, ...]
+    def badge_ignorable
+      return [] unless @badge_sources
+
+      given = @badge_sources.values.flatten.reject { |s| s[:trainers] }.map { |s| s.transform_keys(&:to_s) }
+      (@badge_unknown + given).map { |u| badge_key(u) }.uniq
+    end
+
+    # The operator's name for a badge write: "map:event", "ce:N" or "file:line".
+    def badge_key(u)
+      return "ce:#{u['common_event']}" if u["common_event"]
+      return "#{u['file']}:#{u['line']}" if u["file"]
+
+      "#{u['map']}:#{u['event']}"
     end
 
     def badge_where(u)

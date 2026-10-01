@@ -16,7 +16,7 @@ module PEMK
                 :gift_enforce, :peer_check, :peer_classes, :trade_redelivery, :item_record,
                 :shop_enforce, :item_authority, :item_local, :item_grace, :money_authority,
                 :money_payday_daily, :money_local_daily, :money_repeat_daily, :trainer_proof,
-                :money_unproven_daily, :badge_authority
+                :money_unproven_daily, :badge_authority, :badge_ignore
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -243,10 +243,17 @@ module PEMK
       @money_unproven_daily = raw.match?(/\A\d+\z/) ? raw.to_i : 5_000
       # Badge authority (docs/BADGE-AUTHORITY-DESIGN.md): a badge is the server's when its
       # battle's win is proven. off = nothing; shadow = each new badge a client reports is
-      # judged and logged (explained / pending / would refuse); on is enforcement (B2) -
-      # until it exists, on runs as shadow.
+      # judged and logged (explained / pending / would refuse); on = the server owns them,
+      # where trainer proof and money authority enforce and nothing keeps it from it - else
+      # as shadow.
       bmode = env.fetch("PEMK_BADGE_AUTHORITY", "off").to_s.strip.downcase
       @badge_authority = %w[off shadow on].include?(bmode) ? bmode.to_sym : :off
+      # The badge writes the operator says are not the game's - a debug helper the export
+      # cannot tell apart: "map:event", "ce:N" or "file:line", comma-separated, of those the
+      # export cannot read or that give a badge with no battle. Their badges are refused
+      # like any no win explains, and they keep the server from owning nothing. Default none.
+      @badge_ignore = env.fetch("PEMK_BADGE_IGNORE", "").split(",").map { |k| k.strip.sub(/\Ace:/i, "ce:") }
+                         .reject(&:empty?).uniq.freeze
 
       caps = YAML.safe_load_file(File.join(root, "config", "economy_caps.yml"))
       @economy_caps = {

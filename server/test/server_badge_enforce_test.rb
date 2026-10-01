@@ -49,7 +49,7 @@ class ServerBadgeEnforceTest < Minitest::Test
 
   ANNA = ["LASS", "Anna", 0, 31, 7].freeze
   LIAM = ["CAMPER", "Liam", 0, 31, 8].freeze
-  CAPS = %w[money_claims trainer_proof save_ack badge_hold].freeze
+  CAPS = %w[money_claims trainer_proof save_ack badge_hold badge_alone].freeze
 
   def setup
     @db = PEMK::DB.connect(ENV.fetch("DATABASE_URL"))
@@ -63,6 +63,7 @@ class ServerBadgeEnforceTest < Minitest::Test
   def teardown
     @server&.stop
     @db&.disconnect
+    @worlds&.each(&:close!)
   end
 
   # +enforce+: as if trainer proof and money enforced (a fixture clears none of their
@@ -78,6 +79,37 @@ class ServerBadgeEnforceTest < Minitest::Test
 
     @server.instance_variable_set(:@money_enforce, true)
     @server.instance_variable_set(:@trainer_enforce, true)
+    @server.send(:weigh_badge_blockers)
+  end
+
+  # The server stopped, and another started (its boot logs only)
+  def restart(extra = {}, enforce: true)
+    @server.stop
+    @server = nil
+    @seen = nil
+    @logs.clear
+    start_server(extra, enforce: enforce)
+  end
+
+  # The account's flag of +kind+, once its write lands (a pool job) -> true, or false
+  def wait_flag(lo, kind, timeout = 5)
+    deadline = Time.now + timeout
+    until @db[:player_flags].where(account_id: lo[:account_id], kind: kind).any?
+      return false if Time.now > deadline
+
+      sleep 0.05
+    end
+    true
+  end
+
+  # A copy of the world with +change+ made to it -> its path
+  def world_with
+    doc = JSON.parse(File.read(WORLD.path))
+    yield doc
+    (@worlds ||= []) << (f = Tempfile.new(["pemk_world", ".json"]))
+    f.write(JSON.generate(doc))
+    f.flush
+    f.path
   end
 
   def logs
@@ -258,6 +290,67 @@ class ServerBadgeEnforceTest < Minitest::Test
     refute @server.send(:badge_enforce?), "trainer proof and money enforce, the blocker stands"
   ensure
     blocked&.close!
+  end
+
+  # A partner may join a badge's battle (the game registers one): the clients fight it
+  # alone - named from shadow on (with seeds), so a win then is seeded too. Owning the
+  # badges, the server needs badge_alone from every client - a partner the export cannot
+  # see is fought alone too. Until then a partner keeps the flags off.
+  def test_a_partner_keeps_nothing_from_a_badge_battle_fought_alone
+    partnered = world_with { |doc| doc["partners"]["list"] = [["POKEMONTRAINER_May", "May", 0]] }
+    start_server({ "PEMK_WORLD" => partnered })
+    assert @server.send(:badge_enforce?)
+    _, lo = login(caps: CAPS - ["badge_alone"])
+    assert_equal [:login_err, "update_required"], lo.values_at(:type, :reason)
+    s, lo = login("alone@t.co")
+    assert_equal :login_ok, lo[:type]
+    assert_equal [ANNA, LIAM], lo[:badge_battles], "the battles it fights alone"
+    assert_equal [:econ_rej, 0], badges(s, 0b11, 1).values_at(:type, :value)
+    assert wait_flag(lo, "badge_unexplained"), "owning the badges, a refusal is a sign"
+    restart({ "PEMK_WORLD" => partnered, "PEMK_BADGE_AUTHORITY" => "shadow" })
+    refute @server.instance_variable_get(:@badge_sure), "shadow: a client from before may fight with May"
+    wait_log(/badge authority: a partner may join a badge's battle - until the server owns the badges/)
+    wait_log(/badge authority: 2 battle\(s\) whose win gives a badge are fought alone, their seeds waited for longer/)
+    refute logs.any? { |l| l.include?("cannot own") }, "once it owns them, a partner keeps nothing from it"
+    _, lo = login("shadow@t.co", caps: CAPS - %w[badge_hold badge_alone])
+    assert_equal :login_ok, lo[:type], "shadow: no client must update"
+    assert_equal [ANNA, LIAM], lo[:badge_battles], "fought alone from shadow on: a win then is seeded"
+    restart({ "PEMK_WORLD" => partnered, "PEMK_BADGE_AUTHORITY" => "shadow", "PEMK_BATTLE_ENFORCE_RNG" => "off" })
+    assert_nil login("noseed@t.co")[1][:badge_battles], "no seeds: none to fight alone for"
+    refute logs.any? { |l| l.include?("fought alone") }
+    restart({ "PEMK_WORLD" => partnered, "PEMK_BADGE_AUTHORITY" => "shadow", "PEMK_TRAINER_PROOF" => "off" })
+    assert_nil login("noproof@t.co")[1][:badge_battles], "no trainer proof: a win fought alone proves nothing"
+    restart({ "PEMK_WORLD" => partnered, "PEMK_BADGE_AUTHORITY" => "off" })
+    assert_nil login("off@t.co")[1][:badge_battles]
+    restart({ "PEMK_WORLD" => partnered }, enforce: false)
+    refute @server.instance_variable_get(:@badge_sure), "'on' as shadow (trainer proof does not enforce): the partner joins"
+    wait_log(/WARNING badge authority 'on' runs as shadow: trainer proof does not enforce, money authority does not enforce\z/)
+    refute logs.any? { |l| l.include?("cannot own") }
+    restart({}, enforce: false)
+    assert @server.instance_variable_get(:@badge_sure), "no partner listed: a refusal is a sign"
+    refute logs.any? { |l| l.include?("a partner may join") }
+    restart
+    _, lo = login(caps: CAPS - ["badge_alone"])
+    assert_equal [:login_err, "update_required"], lo.values_at(:type, :reason), "no partner listed: one may still join"
+  end
+
+  # PEMK_BADGE_IGNORE: a badge write the operator says is not the game's keeps nothing -
+  # its badges are refused, and flag, as any; a name that matches no write is said at boot.
+  def test_an_ignored_badge_write_keeps_nothing
+    debug = world_with do |doc|
+      doc["badge_sources"]["unknown"] = [{ "map" => 3, "event" => 7, "page" => 0, "script" => "$player.badges[i] = true" }]
+    end
+    start_server({ "PEMK_WORLD" => debug, "PEMK_BADGE_IGNORE" => "3:7, 9:9" })
+    assert @server.send(:badge_enforce?)
+    wait_log(/badge authority: no badge from 3:7 \(PEMK_BADGE_IGNORE/)
+    wait_log(/WARNING PEMK_BADGE_IGNORE names 9:9: no badge write it ignores there/)
+    refute logs.any? { |l| l.include?("cannot own") }, logs.grep(/badge/).join("\n")
+    s, lo = login
+    assert_equal [:econ_rej, 0], badges(s, 0b11, 1).values_at(:type, :value)
+    assert_equal 0, owned(lo)
+    assert wait_flag(lo, "badge_unexplained"), "a badge no battle earned flags, ignored write or not"
+    restart({ "PEMK_WORLD" => debug, "PEMK_BADGE_IGNORE" => "3:8" })
+    refute @server.send(:badge_enforce?), "another event: the write still keeps it from owning"
   end
 
   # badge_cutover row 2: the server enforces - the replay daemon told nothing follows it.

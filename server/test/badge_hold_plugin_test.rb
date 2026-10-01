@@ -101,6 +101,15 @@ class BadgeHoldPluginTest < Minitest::Test
     end
     class GameTemp; attr_accessor :battle_rules; end
     class PokemonGlobalMetadata; attr_accessor :partner, :pemk_battle_records; end
+    class NPCTrainer; end
+    # the engine's: generate_foes fires :on_trainer_load ($on_load), then the partner joins
+    # or not by the rules -> the rules as the battle reads them
+    class TrainerBattle
+      def self.start_core(*_args)
+        $on_load&.call
+        $game_temp.battle_rules.dup
+      end
+    end
     load ARGV[0]
     $game_temp = GameTemp.new
     $game_temp.battle_rules = {}
@@ -147,6 +156,34 @@ class BadgeHoldPluginTest < Minitest::Test
     rng.on_record_ack({ rec_nonce: 5 })
     rng.on_record_ack({ rec_nonce: 5 })        # an answer again: nothing new
     out[:acked] = [rng.records_unacked?, $remarks]
+    $PokemonGlobal.partner = ["POKEMONTRAINER_May", "May", 0, []]   # a partner at the player's side
+    fight = lambda do |trainer, *args, rules: {}|   # -> [the battle's noPartner rule, seeds asked]
+      n = asks.().size
+      $game_temp.battle_rules = rules.dup
+      $on_load = -> { rng.ask_trainer_seed(trainer) }
+      rules = TrainerBattle.start_core(*args)
+      $on_load = nil
+      [rules["noPartner"], asks.().size - n]
+    end
+    out[:alone] = fight.(brock, :LEADER_Brock, "Brock")                 # a badge's battle: alone, seeded
+    n = asks.().size
+    $game_temp.battle_rules = {}
+    rng.ask_trainer_seed(brock)                # loaded outside a battle (a partner registered, the debug menu)
+    out[:outside] = [$game_temp.battle_rules["noPartner"], asks.().size - n]
+    out[:partner] = fight.(liam, :CAMPER, "Liam")                      # another: the partner joins, no seed
+    out[:paired] = fight.(brock, :LEADER_Brock, "Brock", NPCTrainer.new)   # Brock and a trainer who waited
+    out[:sized] = fight.(brock, :LEADER_Brock, "Brock", rules: { "size" => "double" })   # a tag battle
+    $up = false
+    out[:offline_rules] = fight.(brock, :LEADER_Brock, "Brock")
+    $up = true
+    rng.adopt_mode("off")
+    out[:rng_off] = fight.(brock, :LEADER_Brock, "Brock")
+    rng.adopt_mode("on")
+    rng.adopt_badge_battles(nil)               # a server that does not judge the badges
+    out[:not_judged] = fight.(brock, :LEADER_Brock, "Brock")
+    out[:foes] = [[:A, "a"], [:A, "a", 2], [:A, "a", :B, "b"], [:A, "a", 1, :B, "b", 0], [["A", "a", 0]],
+                  [NPCTrainer.new], [:A, "a", NPCTrainer.new], [:A, "a", ["B", "b", 0]], [],
+                  [Object.new, "a", 0]].map { |a| rng.foe_count(a) }   # a type object reads as a type
     print out.inspect
   RUBY
 
@@ -162,6 +199,15 @@ class BadgeHoldPluginTest < Minitest::Test
     assert_equal false, got[:unacked]
     assert_equal true, got[:kept]
     assert_equal [false, 1], got[:acked], "the badges go out again with the record in - once"
+    assert_equal [true, 1], got[:alone], "a badge's battle: fought with no partner, its seed asked"
+    assert_equal [nil, 0], got[:partner], "another battle: the partner joins it, no seed"
+    assert_equal [nil, 0], got[:paired], "two trainers at once: the partner joins as the game says"
+    assert_equal [nil, 0], got[:sized], "a tag battle stays one: no badge's battle a replay proves"
+    assert_equal [nil, 0], got[:outside], "a trainer loaded outside a battle sets no rule"
+    assert_equal [nil, 0], got[:offline_rules], "offline: the rules as the game set them"
+    assert_equal [nil, 0], got[:rng_off], "no seeds: the rules as the game set them"
+    assert_equal [nil, 0], got[:not_judged], "the server does not judge the badges: the partner joins"
+    assert_equal [1, 1, 2, 2, 1, 1, 2, 2, 0, 1], got[:foes], "the trainers generate_foes reads"
   end
 
   PRIZE_RUNNER = <<~'RUBY'
