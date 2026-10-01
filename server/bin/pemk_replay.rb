@@ -24,6 +24,8 @@ require "pemk_prng"
 require "pemk/proof_checks"
 require "pemk/battle_data"
 require "pemk/team_audit"
+require "pemk/world_data"
+require "pemk/badge_audit"
 require_relative "../harness/harness"
 
 game_root = ENV["PEMK_GAME_ROOT"] || File.expand_path("..", server_root)
@@ -40,6 +42,32 @@ bd_path = ENV["PEMK_BATTLE_DATA"] || File.join(server_root, "data", "battle_data
 battle_data = (PEMK::BattleData.new(bd_path) rescue nil)
 $audit = battle_data&.loaded? ? PEMK::TeamAudit.new(battle_data) : nil
 puts "replay: no battle data at #{bd_path} - trainer teams checked without it" unless $audit
+# Badge authority B2 - PEMK_BADGE_AUTHORITY=on as the server's, or (unset) the server says
+# it enforces (badge_cutover row 2, read at every pass): the badges a record may say the
+# player had are the owned ones, and past them its earlier wins no replay could prove or
+# still waiting for their replay (the badge sources). Otherwise: no more than owned (P4).
+$world_path = ENV["PEMK_WORLD"] || File.join(server_root, "data", "world.json")
+$badges = nil
+$badges_said = nil
+def follow_badge_mode(db)
+  mode = ENV["PEMK_BADGE_AUTHORITY"].to_s.strip.downcase
+  owns = mode.empty? ? (db.table_exists?(:badge_cutover) && !db[:badge_cutover].where(id: 2).empty?) : mode == "on"
+  if !owns
+    $badges = nil
+  elsif !$badges.is_a?(PEMK::BadgeAudit)
+    world = (PEMK::WorldData.new($world_path) rescue nil)
+    $badges = world&.badge_marks? ? PEMK::BadgeAudit.new(db, world) : :unknown
+  end
+  said = case $badges
+         when nil      then "no more than the server owns"
+         when :unknown then "WARNING the server owns them, but the world export has no badge sources: any past the owned unprovable"
+         else               "the owned, then earlier wins unprovable or waiting for their replay (badge authority)"
+         end
+  puts "replay: a record's badges - #{said}" unless said == $badges_said
+  $badges_said = said
+end
+follow_badge_mode(db)
+$waiting = {}   # record id => when it began waiting, this run (said once)
 
 # Replayable statuses only. walk_mismatch / no_log / mode_mismatch are TRIAGE
 # evidence — never silently overwritten; REPLAY_ID alone still respects that
@@ -87,6 +115,7 @@ end
 
 # One pass over the queue. -> tally hash (also the loop's liveness signal).
 def replay_pass(db, dry:, limit:)
+  follow_badge_mode(db)   # the server may have cut over (or back) since the last pass
   ds =
     if ENV["REPLAY_ID"]
       one = db[:battle_records].where(id: ENV["REPLAY_ID"].to_i)
@@ -146,6 +175,19 @@ def replay_row(db, row, dry:)
     why ||= PEMK::ProofChecks.team_shape(rec)
     result = { verdict: :mismatch, detail: why } if why
   end
+  # Badge authority B2: a record saying the player had badges that earlier wins, still
+  # waiting for their replay, will give waits for them - judged on a count that is decided,
+  # at most ten minutes from when it began waiting.
+  badge_facts = { badges: $badges, record_id: row[:id], record_at: $waiting[row[:id]] || Time.now }
+  if !result && rec.is_a?(Hash) && rec[:kind] == "trainer" && rec[:init].is_a?(Hash)
+    excess = PEMK::ProofChecks.badge_excess(db, row[:account_id], rec[:init][:badges], **badge_facts)
+    if excess&.first == :defer
+      puts "  ##{row[:id]}: waits - #{excess[1]}" unless $waiting[row[:id]]
+      $waiting[row[:id]] ||= badge_facts[:record_at]
+      return :deferred
+    end
+  end
+  $waiting.delete(row[:id])
   mark!(row[:id]) unless dry || result
   fault!(row)   # tests only (REPLAY_FAULT_ID)
   result ||=
@@ -156,7 +198,7 @@ def replay_row(db, row, dry:)
     end
   # Trainer proof P3: a trainer battle's player team must be the server's own (owned,
   # locked, no more EXP than seen) - the replay alone takes the record's word for it.
-  team, team_why = rec.is_a?(Hash) && rec[:kind] == "trainer" ? PEMK::ProofChecks.player_team(db, row[:account_id], rec, audit: $audit) : nil
+  team, team_why = rec.is_a?(Hash) && rec[:kind] == "trainer" ? PEMK::ProofChecks.player_team(db, row[:account_id], rec, audit: $audit, **badge_facts) : nil
   result[:detail] ||= team_why if team && team != :ok
   detail = safe_text(result[:detail])
   # verdict_at stamps EVERY pass (the live server's harness-liveness detector
@@ -196,7 +238,8 @@ if loop_secs.match?(/\A[1-9]\d*\z/)
     # Trainer proof P3: the server NOTIFYs each record it ingests - a trainer's prize
     # waits on this replay, so it runs within a second, not at the next poll.
     begin
-      db.listen("pemk_replay", timeout: interval)
+      # a record waiting for earlier wins: soon again (a proof's grant sends no NOTIFY)
+      db.listen("pemk_replay", timeout: $waiting.empty? ? interval : [interval, 5].min)
     rescue StandardError
       sleep interval
     end

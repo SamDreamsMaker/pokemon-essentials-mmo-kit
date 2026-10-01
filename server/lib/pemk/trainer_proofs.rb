@@ -25,6 +25,9 @@ module PEMK
     # (server/harness/replay.rb).
     NOT_THE_DATA = "the trainer is not the game's data"
 
+    # ->(claim) called inside a proven claim's settle transaction (badge authority B2)
+    attr_accessor :on_proven
+
     def initialize(db, logger: nil)
       @db  = db
       @log = logger || ->(_m) {}
@@ -135,6 +138,9 @@ module PEMK
         if proof == :proven   # the seed is spent: the next battle at this placement gets another
           @db[:trainer_battles].where(id: claim[:trainer_battle_id], state: "open")
                                .update(state: "proven", record_id: record[:id], closed_at: now)
+          # badge authority B2: the win's badges, owned in this same transaction - never a
+          # moment where the claim no longer shows them and the ledger does not hold them
+          @on_proven&.call(claim)
         else
           # Judged without a win: the claim lets its battle go, and the record its seed's
           # one win - the seed stays, the next battle there runs on it again (a claim no

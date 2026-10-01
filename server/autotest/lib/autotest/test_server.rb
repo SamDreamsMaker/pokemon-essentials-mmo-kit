@@ -41,6 +41,11 @@ module Autotest
       @mutex.synchronize { @lines.grep(pattern) }
     end
 
+    # Badge authority B2: the badges the server shows this account - owned and pending.
+    def badges_shown(account_id)
+      @server.send(:badge_shown, account_id)
+    end
+
     # Money authority: money a scenario hands out itself is a source the server knows, so
     # the shadow balance explains it (the harness's grant; nothing a client can send).
     # Enforced (M3), the grant is the ledger's own: the balance becomes +total+ on the

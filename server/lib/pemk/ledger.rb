@@ -34,7 +34,9 @@ module PEMK
     # makes itself, so a fresh value above the balance is refused - recorded under its seq
     # with the balance unchanged, the ledger showing the refusal and the client's next
     # frame never taken for a replay of it.
-    def apply_econ(account_id, field, value, seq, now: Time.now, reason: "unattributed", no_increase: false)
+    # +hold+ (badge authority B2): the frame moves nothing - only the server's grants do; it
+    # is recorded under its seq, the balance untouched. -> [:held, balance]
+    def apply_econ(account_id, field, value, seq, now: Time.now, reason: "unattributed", no_increase: false, hold: false)
       key = field.to_s.to_sym
       cap = @caps[key]
       return [:rej, current(account_id, field), :bad_field] unless cap && value.is_a?(Integer) && seq.is_a?(Integer)
@@ -60,6 +62,13 @@ module PEMK
           value |= cur if monotonic?(key)
           if value.negative? || value > cap
             result = [:rej, cur, :cap]
+          elsif hold
+            @db[:economy_balances]
+              .insert_conflict(target: %i[account_id field], update: { last_seq: seq })
+              .insert(account_id: account_id, field: field.to_s, balance: cur, last_seq: seq)
+            @db[:economy_ledger].insert(account_id: account_id, field: field.to_s, delta: 0,
+                                        reason: "held", seq: seq, balance_after: cur, created_at: now)
+            result = [:held, cur]
           elsif no_increase && value > cur
             @db[:economy_balances]
               .insert_conflict(target: %i[account_id field], update: { last_seq: seq })
@@ -116,6 +125,38 @@ module PEMK
       @db[:economy_balances].where(account_id: account_id, field: field.to_s).get(:balance) || 0
     end
 
+    # Badge authority B2: the server sets badge bits itself - a proven win, the cutover, the
+    # operator - bitwise, under the badges row's lock (an adjust's delta from a stale read
+    # would carry: two grants of one bit, a badge nobody earned), with +grants+ (the
+    # badge_grants rows) in the same transaction. -> the mask after
+    def grant_bits(account_id, mask, reason:, grants: [], now: Time.now)
+      set_badges(account_id, reason: reason, grants: grants, now: now) { |cur| cur | mask }
+    end
+
+    # The boot pass: +add+ set and +remove+ cleared, under the lock - a bit granted since
+    # the plan was made (its row there) stays. -> the mask after
+    def rebase_badge_bits(account_id, add:, remove:, reason:, grants: [], now: Time.now)
+      set_badges(account_id, reason: reason, grants: grants, now: now) do |cur|
+        granted = @db[:badge_grants].where(account_id: account_id).exclude(evidence: "revoked")
+                                    .select_map(:badge).sum { |b| 1 << b }
+        (cur | add) & ~(remove & ~granted)
+      end
+    end
+
+    # The operator takes badges back: their bits, their grants kept as revoked - a win
+    # proven before grants them no more (a restart's boot pass with it), one proven after
+    # does. -> the mask after
+    def revoke_bits(account_id, mask, reason:, source: nil, now: Time.now)
+      set_badges(account_id, reason: reason, now: now) do |cur|
+        (0...mask.bit_length).select { |b| mask[b] == 1 }.each do |b|
+          @db[:badge_grants].insert_conflict(target: %i[account_id badge],
+                                             update: { evidence: "revoked", source: source, claim_nonce: nil, granted_at: now })
+                            .insert(account_id: account_id, badge: b, evidence: "revoked", source: source, granted_at: now)
+        end
+        cur & ~mask
+      end
+    end
+
     # Was this (account, field, seq) already applied? (D4: attribute/consume budget only
     # for a genuinely new frame, never a reconnect replay.)
     def recorded?(account_id, field, seq)
@@ -139,6 +180,39 @@ module PEMK
         last_seq = row[:last_seq] if row[:last_seq] > last_seq
       end
       { balances: balances, last_seq: last_seq }
+    end
+
+    private
+
+    # The badges row, locked: yields its mask, writes what the block returns (a server row
+    # under a negative seq, like adjust; the client's last_seq untouched) and +grants+.
+    def set_badges(account_id, reason:, now:, grants: [])
+      @db.transaction do
+        @db[:economy_balances].insert_conflict(target: %i[account_id field])
+                              .insert(account_id: account_id, field: "badges", balance: 0, last_seq: 0)
+        rows = @db[:economy_balances].where(account_id: account_id, field: "badges")
+        cur = rows.for_update.get(:balance).to_i
+        value = yield(cur)
+        grants.each do |g|
+          since = g[:since]   # when its evidence came (a proof, the operator): after a revocation, it wins
+          row = { evidence: nil, source: nil, claim_nonce: nil }.merge(g.except(:since))
+                                                                .merge(account_id: account_id, granted_at: g[:granted_at] || now)
+          conflict = { target: %i[account_id badge] }
+          if since   # a grant stands; a revocation gives way to evidence that came after it (never to legacy)
+            conflict[:update] = row.slice(:evidence, :source, :claim_nonce, :granted_at)
+            conflict[:update_where] = Sequel.&({ Sequel[:badge_grants][:evidence] => "revoked" },
+                                               Sequel[:badge_grants][:granted_at] < since)
+          end
+          @db[:badge_grants].insert_conflict(**conflict).insert(row)
+        end
+        if value != cur
+          low = @db[:economy_ledger].where(account_id: account_id, field: "badges").min(:seq) || 0
+          rows.update(balance: value)
+          @db[:economy_ledger].insert(account_id: account_id, field: "badges", delta: value - cur, reason: reason.to_s,
+                                      seq: [low, 0].min - 1, balance_after: value, created_at: now)
+        end
+        value
+      end
     end
   end
 end

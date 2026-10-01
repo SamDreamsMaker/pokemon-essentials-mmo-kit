@@ -115,6 +115,7 @@ class ServerBadgeAuthorityTest < Minitest::Test
     start_server
     assert(logs.any? { |l| l.include?("badge authority = shadow (each new badge judged") })
     refute(logs.any? { |l| l.include?("badge authority cannot own") }, "nothing keeps the server from owning them")
+    refute(logs.any? { |l| l.include?("boot pass") }, "a shadow boot runs no pass over the accounts")
     s, lo = login("b1@t.co")
     id = lo[:account_id]
     badges(s, 0b11, 1)
@@ -267,7 +268,7 @@ class ServerBadgeAuthorityTest < Minitest::Test
                   trainers: [BROCK], seed: seed })
     recv_type(s, :money_claim_ack)
     badges(s, 0b1, 1)
-    wait_log(/account #{id} badge 0 WOULD-REFUSE: the win over LEADER_Brock Brock has no record/)
+    wait_log(/account #{id} badge 0 WAITING: the win over LEADER_Brock Brock has no record yet/)
     send_env(s, *walk_body(seed))   # its record comes: the badge it holds is not judged again
     sleep 0.3
     badges(s, 0b11, 2)

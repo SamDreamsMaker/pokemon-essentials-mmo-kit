@@ -45,6 +45,8 @@ module PEMK
     RECORDS_KEPT     = 4            # trainer battle records kept until acknowledged (P4)
     RECORDS_KEPT_MAX = 128 * 1024   # ... and their bytes at most: they ride in the save
     RECORD_RESEND    = 30.0         # seconds before an unacknowledged record goes out again
+    BADGE_SEED_WAIT  = 30.0         # B2: seconds a battle whose win gives a badge waits for its seed
+                                    # (a win with no seed proves no badge); while online only
 
     @mode      = :off   # server-advertised mode (adopted at login/relogin)
     @pending   = nil    # {seed:, pid:} from the last :encounter_grant build
@@ -56,6 +58,7 @@ module PEMK
     @proof_on    = false   # a trainer prize is paid on its battle's replay (login flag, P4)
     @record_sent = {}      # rec_nonce => when this connection last sent it
     @rec_rng     = nil
+    @badge_battles = []    # B2: [type, name, version, map, event] whose win gives a badge (login)
 
     module_function
 
@@ -64,9 +67,20 @@ module PEMK
       @pending = nil
       @trainer_seed_ok = false
       @trainer_asks    = {}
+      @badge_battles = []
       @record_ack  = false
       @proof_on    = false
       @record_sent = {}   # every kept record goes out again on the new connection
+    end
+
+    def adopt_badge_battles(list)
+      @badge_battles = Array(list).select { |t| t.is_a?(Array) && t.length == 5 }
+    end
+
+    # B2: a trainer battle's record the server has not acknowledged yet - the badges wait
+    # for it.
+    def records_unacked?
+      @record_ack && !kept_records.empty?
     end
 
     def adopt_trainer_seed(v)
@@ -96,6 +110,8 @@ module PEMK
       nonce = (@trainer_nonce += 1)
       @trainer_asks[nonce] = nil
       trainer.instance_variable_set(:@pemk_seed_nonce, nonce)
+      # B2: a battle whose win gives a badge waits for its seed longer
+      trainer.instance_variable_set(:@pemk_seed_badge, @badge_battles.include?(key + ev))
       (PEMK::Presence.emit_now(:pos) rescue nil)   # asked where the server last saw the player
       PEMK.send_message(:type => :trainer_battle_req, :nonce => nonce, :trainers => [key + ev])
     rescue StandardError => e
@@ -128,7 +144,8 @@ module PEMK
       n = trainer.instance_variable_get(:@pemk_seed_nonce)
       return nil unless n && @trainer_asks.key?(n)
 
-      deadline = mono + (@proof_on ? TRAINER_SEED_WAIT_PROOF : TRAINER_SEED_WAIT)
+      badge = trainer.instance_variable_get(:@pemk_seed_badge)
+      deadline = mono + (badge ? BADGE_SEED_WAIT : (@proof_on ? TRAINER_SEED_WAIT_PROOF : TRAINER_SEED_WAIT))
       while @trainer_asks[n].nil? && mono < deadline && online?
         Graphics.update
         Input.update
@@ -175,7 +192,10 @@ module PEMK
       n = msg[:rec_nonce]
       return unless n.is_a?(Integer)
 
-      PEMK.log("battlerng: record #{n} acknowledged") if kept_records.reject! { |e| e[0] == n }
+      if kept_records.reject! { |e| e[0] == n }
+        PEMK.log("battlerng: record #{n} acknowledged")
+        (PEMK::Sync.remark_badges rescue nil)   # B2: the badges again, the record in
+      end
       @record_sent.delete(n)
     end
 
