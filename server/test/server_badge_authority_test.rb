@@ -115,6 +115,7 @@ class ServerBadgeAuthorityTest < Minitest::Test
     start_server
     assert(logs.any? { |l| l.include?("badge authority = shadow (each new badge judged") })
     refute(logs.any? { |l| l.include?("badge authority cannot own") }, "nothing keeps the server from owning them")
+    refute(logs.any? { |l| l.include?("boot pass") }, "a shadow boot runs no pass over the accounts")
     s, lo = login("b1@t.co")
     id = lo[:account_id]
     badges(s, 0b11, 1)

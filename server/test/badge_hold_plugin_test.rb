@@ -61,6 +61,9 @@ class BadgeHoldPluginTest < Minitest::Test
     s.reset
     s.remark_badges; s.flush_primitives
     out[:reset] = badges.()            # a new connection: until the login says so again
+    s.adopt_badge_hold(true)
+    s.remark_badges; s.flush_primitives
+    out[:none_sent] = badges.()        # no badge frame out on this connection: nothing to correct
     print out.inspect
   RUBY
 
@@ -76,6 +79,7 @@ class BadgeHoldPluginTest < Minitest::Test
     assert_equal [1, 3, 7], got[:bound]
     assert_equal [1, 3, 7, 3], got[:remark]
     assert_equal [1, 3, 7, 3], got[:reset]
+    assert_equal [1, 3, 7, 3], got[:none_sent], "an answer before any badge frame: the badge's own frame comes"
   end
 
   RNG_RUNNER = <<~'RUBY'

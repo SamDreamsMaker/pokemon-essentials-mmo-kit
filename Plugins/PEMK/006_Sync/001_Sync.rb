@@ -193,9 +193,11 @@ module PEMK
     end
 
     # B2: after a claim's or a record's answer the badges go out again - the server answers
-    # with what the client shows, the win just in included. No checkpoint.
+    # with what the client shows, the win just in included - when a badge frame went out on
+    # this connection (one answered before the win was in may have taken a badge back). No
+    # checkpoint.
     def remark_badges
-      return unless @badge_hold && $player
+      return unless @badge_hold && $player && @econ_sent.key?(:badges)
 
       mask = ($player.pokemmo_badges_mask rescue nil)
       return unless mask.is_a?(Integer)

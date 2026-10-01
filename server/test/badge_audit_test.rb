@@ -173,6 +173,7 @@ class BadgeAuditTest < Minitest::Test
     assert_equal :refuted, excess.(3), "a win claimed with no seed covers nothing"
     claim(3, trainers: [liam], proof: "unprovable", record: true)   # Liam's, shown, then not replayable
     assert_equal :unprovable, excess.(3)
+    assert_equal :refuted, excess.(3, id: @db[:battle_records].max(:id)), "a win recorded after it covers nothing"
     assert_equal :refuted, excess.(4)
     assert_equal :unprovable, excess.(2, :unknown), "no badge sources to tell"
     assert_equal :refuted, excess.(2, nil)

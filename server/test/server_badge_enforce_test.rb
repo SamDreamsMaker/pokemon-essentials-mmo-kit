@@ -220,6 +220,19 @@ class ServerBadgeEnforceTest < Minitest::Test
     assert_empty @db[:badge_grants].all
   end
 
+  # A win no replay could prove (the server's side) drops the badge it showed - no flag for
+  # it: its next frame says UNPROVABLE, the one sign that counts.
+  def test_an_unreplayable_win_drops_its_badge_unflagged
+    start_server
+    s, lo = login
+    sd = won(s, ANNA, 1, 400)
+    assert_equal 0b1, badges(s, 0b1, 1)[:value]
+    replayed(sd, status: "error")
+    wait_log(/account #{lo[:account_id]} DROPPED badge 0 \(claim 1's win is unprovable/)
+    sleep 0.3
+    assert_empty @db[:player_flags].where(account_id: lo[:account_id]).all
+  end
+
   # No badge frame raises the ledger, whatever it says.
   def test_a_frame_never_raises_the_badges
     start_server
@@ -286,16 +299,29 @@ class ServerBadgeEnforceTest < Minitest::Test
 
     d = account("d@t.co")   # a badge gained while the authority was off, after the cutover
     put_badges(d, 0b1)
+    audit = @server.instance_variable_get(:@badge_audit)
+    real = audit.method(:plan)
+    planned = []
+    audit.define_singleton_method(:plan) { |id, held, cutover:| planned << id; real.(id, held, cutover: cutover) }
     @server.send(:badge_boot_pass)
+    assert_equal [d], planned, "after the cutover: only an account whose ledger is not its grants"
     assert_equal 0, held.(d), "after the cutover, nothing is legacy"
     assert(logs.any? { |l| l.include?("boot pass: 1 account(s)") }, "the others own what they hold already")
     assert_nil @db[:player_flags].where(account_id: d).get(:count), "a period off trusted the clients: no sign"
 
+    g = account("g@t.co")   # an operator's grant lands between the pass's plan and its write: it stays
+    put_badges(g, 0b11)
+    audit.define_singleton_method(:plan) do |id, held, cutover:|   # (self: the audit - @db, its database)
+      out = real.(id, held, cutover: cutover)
+      PEMK::Ledger.new(@db, {}).grant_bits(id, 0b10, reason: "operator", grants: [{ badge: 1, evidence: "operator" }]) if id == g
+      out
+    end
+    @server.send(:badge_boot_pass)
+    assert_equal 0b10, held.(g), "badge 0 removed, badge 1 granted meanwhile kept"
+
     e = account("e@t.co")   # an account the pass fails on keeps what it holds; the pass is done again
     put_badges(e, 0b11)
     put_badges(account("f@t.co"), 0b1)
-    audit = @server.instance_variable_get(:@badge_audit)
-    real = audit.method(:plan)
     audit.define_singleton_method(:plan) { |id, held, cutover:| id == e ? raise("a fault") : real.(id, held, cutover: cutover) }
     pass_at = @db[:badge_cutover].get(:pass_at)
     @server.send(:badge_boot_pass)

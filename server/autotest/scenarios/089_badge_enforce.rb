@@ -47,11 +47,10 @@ Autotest.scenario "the server owns the badges",
   a.fight_battle
   a.converse
 
-  s.wait_for("Brock's badge reaches the server, pending", seconds: 40) do
-    s.server.grep(/badge: account #{id} badge 0 PENDING/).first
+  s.check("the game shows the badge at once") { s.wait_for("the badge", seconds: 40) { shown.call == 1 } }
+  s.check("the server shows it, pending - and does not own it yet") do
+    s.server.badges_shown(id) == 0b1 && owned.call.zero?
   end
-  s.check("the game shows the badge at once") { s.wait_for("the badge", seconds: 10) { shown.call == 1 } }
-  s.check("the server does not own it yet") { owned.call.zero? }
   claim = s.db[:money_claims].where(account_id: id, kind: "trainer").exclude(trainer_battle_id: nil).first
   record = s.db[:battle_records].where(trainer_battle_id: claim[:trainer_battle_id], outcome: 1).first
   out, = Open3.capture2e({ "DATABASE_URL" => ENV.fetch("DATABASE_URL"), "REPLAY_ID" => record[:id].to_s,

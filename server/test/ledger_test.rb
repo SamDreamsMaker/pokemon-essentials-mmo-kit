@@ -81,6 +81,15 @@ class LedgerTest < Minitest::Test
     assert_equal 0b111, @led.current(@acct, :badges)
   end
 
+  # The boot pass's write: what it adds and removes, under the lock - a bit granted since
+  # its plan was made stays.
+  def test_rebase_keeps_a_grant_made_since
+    @led.set_badge_bits(@acct, 0b0110, reason: "before")
+    @db[:badge_grants].insert(account_id: @acct, badge: 2, evidence: "operator", granted_at: Time.now)
+    assert_equal 0b1101, @led.rebase_badge_bits(@acct, add: 0b1001, remove: 0b0110, reason: "badge:boot"),
+                 "badge 1 removed, 0 and 3 added - badge 2 granted meanwhile stays"
+  end
+
   def test_a_held_frame_moves_nothing
     @led.grant_bits(@acct, 0b1, reason: "proof")
     assert_equal [:held, 0b1], @led.apply_econ(@acct, :badges, 0b111, 3, hold: true)
