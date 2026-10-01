@@ -338,7 +338,8 @@ item balls:
   **new account** whose pickup rows are empty (FK cascade on account delete). So
   enforcement is safe to default on — real players never hit a stale-dup wall. The
   only wipe path is a **dev/QA F9 tool** (`PEMK: Reset my pickups`), honored **only**
-  when the server was booted with `PEMK_ALLOW_PICKUP_RESET=on` (off in production);
+  when the server was booted with `PEMK_ALLOW_PICKUP_RESET=on` (off in production) -
+  and reachable only where debug mode is allowed (`PEMK_CLIENT_DEBUG=allow`);
   a client-obeyed reset is deliberately *not* offered — it would be an infinite
   item re-farm.
 
@@ -413,6 +414,34 @@ All of the above assumes the bytes on the wire are the client's. They're sent ov
 - **A public deployment needs TLS** at a reverse proxy — not just for privacy: the
   client `Marshal.load`s its own save and a peer's battle team, so a MITM that can
   rewrite those bytes is a client-side remote-code-execution risk. TLS closes that.
+
+### Debug mode on the clients (`PEMK_CLIENT_DEBUG`)
+
+Essentials' debug mode (`$DEBUG`) walks through walls (Ctrl), skips a battle and decides
+a trainer battle's outcome, runs from any battle, makes a catch sure, uses field moves
+with no badge or move, and opens the debug menus (F9, party, storage, bag). It needs no
+modified client: a `debug` launch argument turns it on, and so does an event running
+`$DEBUG = true` - the stock demo's house helper (map 3 event 7) offers it to anyone. A
+debug launch also runs the autopilot (`PEMK_AUTOPILOT`, docs/AUTOTEST.md), whose verbs
+set items, money, Pokemon and switches.
+
+`PEMK_CLIENT_DEBUG` (login_ok / auth_ok's `client_debug`):
+
+- `deny` (the default - a cheat path closed ships on): the client turns debug mode off
+  at login and keeps it off for the rest of the process - every write of `$DEBUG` (or
+  `$-d`) is undone as it happens (`trace_var`: no event command after the write sees it
+  on), and each frame checks again; a logout or a lost link does not give it back. The
+  autopilot then only reads. The player is told once ("Debug mode is off on this
+  server.").
+- `autopilot`: the same, but the autopilot is obeyed and the player is not told - the
+  autotest's level, never a public server (a WARNING at boot).
+- `allow`: nothing changes - a dev server (`server/bin/dev-server.sh` sets it, so F9 works
+  while you test; a WARNING at boot).
+
+A client from before the lock ignores the field (it advertises no `debug_lock`: the
+server names it at login, it is not refused). This closes the in-session flag; a debug
+launch still recompiles PBS, compiles any `Plugins/` folder and imports maps at boot -
+that is a modified client, and the server's own checks (replays, ledgers) stay the truth.
 
 ### A Pokemon another player built (`PEMK_PEER_CHECK`)
 

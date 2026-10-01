@@ -254,6 +254,7 @@ module PEMK
       @log.call("server: moderation - #{@bans.in_force_list.size} account(s) banned (bin/pemk_admin.rb)")
       @log.call("server: pickup enforcement = #{@config.pickup_enforce ? 'on' : 'off'} (M4 Layer C server-mint)")
       @log.call("server: WARNING pickup reset ALLOWED (PEMK_ALLOW_PICKUP_RESET=on) — DEV ONLY, disable in production") if @config.pickup_reset_allowed
+      log_client_debug
       @pool.start
       @reactor.start
       @thread = Thread.new { @reactor.run_loop }
@@ -3529,6 +3530,7 @@ module PEMK
         mon_evict: @monsters.evictions(account_id),
         pickup_enforce: @config.pickup_enforce,     # M4 Layer C: client gates pickups only when on
         pickup_reset_allowed: @config.pickup_reset_allowed,    # dev-only F9 reset offered only when on
+        client_debug: @config.client_debug.to_s,               # debug mode stays off (deny/autopilot) or not
         battle_enforce_teams: @config.battle_enforce_teams.to_s,   # M4 Layer D D1 team-legality mode
         battle_enforce_encounters: @config.battle_enforce_encounters.to_s,   # M4 Layer D D2 encounter mode
         battle_enforce_catches: @config.battle_enforce_catches.to_s,         # M4 Layer D D3 catch mode
@@ -3783,6 +3785,27 @@ module PEMK
       conn.data[:account_id] = account_id
       @online[account_id] = conn
       @log.call("server: authed #{conn.addr} as account #{account_id}")
+      return if @config.client_debug == :allow || Array(conn.data[:caps]).include?("debug_lock")
+
+      @log.call("server: account #{account_id}'s client keeps debug mode (no debug_lock: an older client)")
+    end
+
+    # At boot: whether debug mode stays off on the clients.
+    def log_client_debug
+      case @config.client_debug
+      when :deny
+        @log.call("server: client debug = deny (debug mode stays off on the clients while they play here, " \
+                  "their autopilot only reads; PEMK_CLIENT_DEBUG=allow for a dev server)")
+      when :autopilot
+        @log.call("server: WARNING client debug = autopilot - debug mode stays off, but a debug launch's " \
+                  "autopilot is obeyed (the autotest's level: never a public server)")
+      else
+        @log.call("server: WARNING client debug = allow - a client in debug mode keeps it here " \
+                  "(walls, trainer battles, debug menus): a dev server only")
+      end
+      return unless @config.pickup_reset_allowed && @config.client_debug != :allow
+
+      @log.call("server: PEMK_ALLOW_PICKUP_RESET does nothing - its tool is in the debug menu, off here")
     end
 
     def reply(conn, **env)

@@ -9,7 +9,9 @@
 ROUTE8     = 69
 UNDERWATER = 70
 
-Autotest.scenario "a surfer crosses water, and only water", flags: { PEMK_POS_ENFORCE: "shadow" }, budget: 420 do |s|
+# It surfs and dives with no badge and no Pokemon: through debug mode (PEMK_CLIENT_DEBUG allow).
+Autotest.scenario "a surfer crosses water, and only water",
+                  flags: { PEMK_POS_ENFORCE: "shadow", PEMK_CLIENT_DEBUG: "allow" }, budget: 420 do |s|
   a = s.player(:a)
   a.new_game("Swimmer")                    # no Pokemon yet: no wild battle on the water
   id = s.account_id(a)

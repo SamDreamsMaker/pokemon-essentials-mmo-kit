@@ -547,4 +547,49 @@ check(results, "wait_accepts_seconds") do
   r && r["ok"] && Graphics.ticks - start >= 60
 end
 
+# Where the server denies debug mode (PEMK::DebugLock, 003_Game): disarmed at login, the
+# autopilot leaves the battles, the keys and the messages to the player.
+module PEMK
+  module DebugLock
+    @allowed = true
+    def self.autopilot_allowed?; @allowed; end
+    def self.allowed=(value); @allowed = value; end
+  end
+end
+
+check(results, "a_disarmed_autopilot_leaves_the_game_alone") do
+  ap = PEMK::Autopilot
+  options = Struct.new(:textspeed, :battlescene, :battlestyle, :givenicknames, :sendtoboxes)
+  $PokemonSystem = options.new(1, 0, 0, 0, 0)          # the player's own options
+  ap::Actions.cmd_fast("76", "")                        # `fast` changes them
+  fast = $PokemonSystem.to_a != [1, 0, 0, 0, 0]
+  ap::BattleControl.mode = :auto
+  ap::Actions.advance = true
+  ap::VInput.hold(ap::VInput.key("USE"), nil)
+  driving = ap.driving? && ap::Actions.advance? && !ap::VInput.held_names.empty? && !ap::BattleControl.at_keys?
+  PEMK::DebugLock.allowed = false
+  # denied: no auto-advance and the player's keys in battle, even before the disarm
+  gated = !ap::Actions.advance? && ap::BattleControl.at_keys?
+  # a command still running, and a channel that cannot be written to: everything is reset
+  ap.instance_variable_set(:@job, -> { false })
+  ap.instance_variable_set(:@job_id, "77")
+  respond = ap.method(:respond)
+  answered = nil
+  ap.define_singleton_method(:respond) do |id, _payload|
+    answered = id
+    raise Errno::ENOENT, "the channel is gone"
+  end
+  begin
+    ap.disarm
+  ensure
+    ap.define_singleton_method(:respond, respond)
+  end
+  gated &&= ap.instance_variable_get(:@job).nil? && answered == "77"
+  after = [ap.driving?, ap::Actions.advance?, ap::BattleControl.mode, ap::VInput.held_names, $PokemonSystem.to_a]
+  PEMK::DebugLock.allowed = true
+  after[1] = ap::Actions.advance?   # its own setting is off too, not only the gate
+  $PokemonSystem = nil
+  fast && driving && gated && after == [false, false, :keys, [], [1, 0, 0, 0, 0]]
+end
+
 puts JSON.generate(results)

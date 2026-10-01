@@ -89,6 +89,9 @@ Compile-time defaults live in `001_Net/001_NetConfig.rb` (`HOST`, `PORT`);
 A debug window can be driven by a script or an AI agent instead of a player, for
 automated in-game tests. It is off unless the game is a **debug launch** and
 `PEMK_AUTOPILOT=<directory>` is set, so a player build is never remote-controlled.
+Once logged in, the server decides (`PEMK_CLIENT_DEBUG`): at its default (`deny`) the
+autopilot only reads - its running command ends, its keys come up, its settings go -
+and only `autopilot` (the autotest's level) or `allow` (a dev server) let it play.
 The window does not need focus and keeps running minimized.
 
 ```powershell
