@@ -3855,18 +3855,25 @@ module PEMK
     end
 
     # The swim's start (or a dive from a surf, a surfacing: the game judges again): the
-    # party last reported, awake Pokemon only. No report yet (swim_moves nil) is trusted -
-    # never a denial on nothing; so is a swim this session did not see start (no land left:
-    # a save made on the water, resumed), judged by the game as it started. Held until the
-    # mode is left: a party losing its surfer mid-swim is legal (a level-up's forgotten
-    # move, a trade).
+    # party last reported, awake Pokemon only - a client that announced the cap and reported
+    # nothing knows none (an honest one reports before its first frame). The session's
+    # first frame already on the water resumes a swim the game judged as it started (a save
+    # made while surfing): trusted, and said. Held until the mode is left: a party losing
+    # its surfer mid-swim is legal (a level-up's forgotten move, a trade).
     def mode_episode(conn, mode)
       ep = conn.data[:mode_ep]
       return ep if ep && ep[:mode] == mode
 
-      moves = conn.data[:swim_moves]
-      ok = !move_checked?(conn, mode) || conn.data[:mode_from].nil? || moves.nil? ||
-           MODE_MOVES.fetch(mode).any? { |m| moves.include?(m) }
+      knows = Array(conn.data[:swim_moves]).any? { |m| MODE_MOVES.fetch(mode).include?(m) }
+      ok = if !move_checked?(conn, mode) || knows
+             true
+           elsif conn.data[:presence_seen].nil? && conn.data[:mode_from].nil?
+             @log.call("posaudit: account #{conn.data[:account_id]} resumes a #{mode} begun before this session " \
+                       "with no Pokemon knowing #{MODE_MOVES.fetch(mode).join(' or ')} (trusted)")
+             true
+           else
+             false
+           end
       conn.data[:mode_ep] = { mode: mode, move_ok: ok }
     end
 

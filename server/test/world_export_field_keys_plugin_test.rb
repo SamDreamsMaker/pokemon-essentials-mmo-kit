@@ -90,14 +90,17 @@ class WorldExportFieldKeysPluginTest < Minitest::Test
     surfboard = PEMK::WorldExport.field_keys([]).values_at(:surf_move, :dive_move)
     File.delete("Plugins/MyGame/surfboard.rb")
     File.write("Plugins/MyGame/anywater.rb", "class Trainer\n  def get_pokemon_with_move(move)\n    pokemon_party.find { |p| p.types.include?(:WATER) }\n  end\nend\n")
-    print [before, surfboard, PEMK::WorldExport.field_keys([]).values_at(:surf_move, :dive_move)].inspect
+    anywater = PEMK::WorldExport.field_keys([]).values_at(:surf_move, :dive_move)
+    File.delete("Plugins/MyGame/anywater.rb")
+    File.write("Plugins/MyGame/001_Trainer.rb", "class Trainer\n  def get_pokemon_with_move(move)\n    nil\n  end\nend\n")   # the engine file's namesake
+    print [before, surfboard, anywater, PEMK::WorldExport.field_keys([]).values_at(:surf_move, :dive_move)].inspect
   RUBY
 
   def test_a_redefined_rule_is_unknown
     out = Dir.mktmpdir("pemk_keys") { |dir| IO.popen([RbConfig.ruby, "-W0", "-e", REDEFINED, EXPORT, dir], err: %i[child out], &:read) }
     assert $?.success?, "runner crashed:\n#{out}"
-    assert_equal [[nil, nil], [nil, true], [nil, nil]], eval(out), # rubocop:disable Security/Eval
-                 "no engine file: unknown; a surfboard's pbSurf: Surf unknown, Dive as the engine; any Water type surfs: both unknown"
+    assert_equal [[nil, nil], [nil, true], [nil, nil], [nil, nil]], eval(out), # rubocop:disable Security/Eval
+                 "no engine file: unknown; a surfboard's pbSurf: Surf unknown, Dive as the engine; any Water type surfs: both unknown; a plugin named like the engine's file: unknown"
   end
 
   # This repository's own engine and plugins: the stock rule, PEMK's aliases unseen.

@@ -323,8 +323,9 @@ starts - as the game does - and holds that verdict until the player leaves the w
 Pokemon that forgets Surf mid-swim (a level-up, a trade) is the game's own case. Only
 clients that announce `swim_report` at login are judged so (older ones: the badge), only
 awake Pokemon count (an egg's moves are none to the game, and so are moves a report does
-not list the way the client's own code does), a swim the session did not see start (a save
-made on the water) is trusted, and the export says whether the game still asks for the
+not list the way the client's own code does; a client that announced the cap and reported
+nothing knows none), a swim the session's first frame finds under way (a save made on the
+water) is trusted and logged, and the export says whether the game still asks for the
 move (`surf_move`, `dive_move`: false where it dropped the rule, unknown where a script
 redefines `pbSurf`, `get_pokemon_with_move`, `pokemon_party` or `hasMove?`) - the badge
 alone then, said at boot. The report is the client's word, but a move a species

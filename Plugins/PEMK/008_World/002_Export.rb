@@ -947,9 +947,11 @@ module PEMK
     end
 
     # The readers the rule leans on - which Pokemon count, what knowing a move is - defined
-    # again outside the engine's own files: the rule is then whatever that script says.
-    RULE_SEATS = { "get_pokemon_with_move" => "001_Trainer.rb", "pokemon_party" => "001_Trainer.rb",
-                   "hasMove?" => "001_Pokemon.rb" }.freeze
+    # again outside the engine's own files (their own paths): the rule is then whatever that
+    # script says.
+    RULE_SEATS = { "get_pokemon_with_move" => "015_Trainers and player/001_Trainer.rb",
+                   "pokemon_party" => "015_Trainers and player/001_Trainer.rb",
+                   "hasMove?" => "014_Pokemon/001_Pokemon.rb" }.freeze
 
     def rule_redefined?(lines)
       lines.any? do |f, _, text|
@@ -970,7 +972,7 @@ module PEMK
     # A script line that puts the player on the water with no field move: the game's own
     # Surf and Dive (FieldMoves.rb) and PEMK's snap-back aside.
     MODE_SET   = /\$PokemonGlobal\.(surfing|diving)\s*(\|\|)?=\s*true\b|\bpbStartSurfing\b/.freeze
-    MODE_OWN   = %w[004_Overworld_FieldMoves.rb].freeze   # the engine's gated paths
+    MODE_OWN   = %w[012_Overworld/004_Overworld_FieldMoves.rb].freeze   # the engine's gated paths (its own path: a plugin's namesake is not it)
 
     def mode_sources(all_events)
       out = []
