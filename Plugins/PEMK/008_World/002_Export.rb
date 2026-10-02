@@ -950,7 +950,9 @@ module PEMK
         mode_scripts(ce.list) { |text| out << { :common_event => ce.id, :script => text.strip[0, 80] } }
       end
       (code_lines rescue []).each do |f, n, text|
-        next if MODE_OWN.any? { |own| f.end_with?(own) } || !badge_code(text).match?(MODE_SET)
+        code = badge_code(text)
+        next if MODE_OWN.any? { |own| f.end_with?(own) } || !code.match?(MODE_SET)
+        next if code.match?(/\b(def|alias|alias_method)\b/)   # a definition starts no swim
 
         out << { :file => f, :line => n, :script => text.strip[0, 80] }
       end

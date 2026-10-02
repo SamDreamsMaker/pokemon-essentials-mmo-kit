@@ -41,6 +41,7 @@ class WorldExportFieldKeysPluginTest < Minitest::Test
     Dir.mkdir("Plugins"); Dir.mkdir("Plugins/MyGame"); Dir.mkdir("Plugins/PEMK")
     Dir.mkdir("Data"); Dir.mkdir("Data/Scripts"); Dir.mkdir("Data/Scripts/012_Overworld")
     File.write("Plugins/MyGame/ferry.rb", "def ferry\n  $PokemonGlobal.surfing = true\nend\n# $PokemonGlobal.surfing = true\n")
+    File.write("Plugins/MyGame/override.rb", "alias ferry_surf pbStartSurfing\ndef pbStartSurfing\n  ferry_surf\nend\n")   # definitions start no swim
     File.write("Plugins/PEMK/own.rb", "$PokemonGlobal.surfing = true\n")   # PEMK's own (the snap-back): not a source
     File.write("Data/Scripts/012_Overworld/004_Overworld_FieldMoves.rb", "def pbStartSurfing\n  $PokemonGlobal.surfing = true\nend\n")
     File.write("Data/Scripts/012_Overworld/009_Custom.rb", "pbStartSurfing if $game_switches[9]\n")

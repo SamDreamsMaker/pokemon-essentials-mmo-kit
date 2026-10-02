@@ -259,7 +259,7 @@ module PEMK
       @log.call("server: WARNING pickup reset ALLOWED (PEMK_ALLOW_PICKUP_RESET=on) — DEV ONLY, disable in production") if @config.pickup_reset_allowed
       log_client_debug
       log_mode_keys
-      @log.call("server: presence dedup =#{@config.presence_dedup ? 'on' : 'off'} " \
+      @log.call("server: presence dedup = #{@config.presence_dedup ? 'on' : 'off'} " \
                 "(#{@config.presence_dedup ? "an idle player's repeats reach only older clients; " \
                                              "a member silent #{PRESENCE_SILENCE.to_i}s leaves its map" : 'every frame to everyone'})")
       @pool.start
@@ -320,8 +320,9 @@ module PEMK
         return
       end
 
-      conn.data.delete(:mode_keys) if conn.data[:mode_keys] && %i[econ money_claim].include?(type)   # its keys may change
       dispatch_frame(conn, env, type, authed, dec[:body])
+      # its keys may change: read again, queued after the frame's own mailbox work
+      mode_keys_stale(conn, authed) if type == :money_claim || (type == :econ && env[:field].to_s == "badges")
     rescue StandardError => e
       # A raise used to unwind to the reactor's blanket rescue, aborting the whole tick
       # (and the rest of this socket's already-parsed frames) with an unattributable log.
@@ -475,10 +476,12 @@ module PEMK
               blob = @characters.load_blob(acct[:id])   # opaque; never loaded here
               rec  = reconcile_block(acct[:id], fresh: true)
               pos  = (@characters.load_position(acct[:id]) rescue nil)   # M4-B: seed last_pos (never brick login)
+              held = (mode_keys_checked? ? badges_allowed(acct[:id]) : nil) rescue nil   # mode keys: the first swim judged at once
               @reactor.post do
                 if @reactor.alive?(conn) && conn.data[:account_id].nil?   # never bind a dead conn, or one bound meanwhile
                   bind(conn, acct[:id])
                   conn.data[:last_pos] = pos if pos
+                  seed_mode_keys(conn, held) if held
                   reply_body(conn, { type: :login_ok, account_id: acct[:id], token: token }.merge(rec, presence_v2: conn.data[:presence_v2] ? true : false), blob)
                 elsif @reactor.alive?(conn)
                   reply(conn, type: :login_err, reason: "already_authed")   # two logins in one write
@@ -516,10 +519,12 @@ module PEMK
               blob = @characters.load_blob(account_id)
               rec  = reconcile_block(account_id, fresh: fresh)
               pos  = (@characters.load_position(account_id) rescue nil)   # M4-B: seed last_pos (never brick login)
+              held = (mode_keys_checked? ? badges_allowed(account_id) : nil) rescue nil   # mode keys: the first swim judged at once
               @reactor.post do
                 if @reactor.alive?(conn) && conn.data[:account_id].nil?   # never bind a dead conn, or one bound meanwhile
                   bind(conn, account_id)
                   conn.data[:last_pos] = pos if pos
+                  seed_mode_keys(conn, held) if held
                   reply_body(conn, { type: :auth_ok, account_id: account_id }.merge(rec, presence_v2: conn.data[:presence_v2] ? true : false), blob)
                 elsif @reactor.alive?(conn)
                   reply(conn, type: :auth_err, reason: "already_authed")   # two auths in one write
@@ -3739,82 +3744,111 @@ module PEMK
       !@mode_keys.nil? && @config.client_debug != :allow
     end
 
-    # -> true when the frame is refused
+    # -> true when the frame is refused. A verdict known - the login's, a read's - stays in
+    # force until a fresh one replaces it: a frame that cleared it would be a free swim.
     def mode_refused?(conn, env, account_id)
       mode = env[:mode]
       conn.data[:mode_cur] = mode
       unless mode_keys_checked? && KEYED_MODES.include?(mode)
-        conn.data.delete(:mode_denied)   # moving another way ends a denied episode
-        conn.data.delete(:mode_from)
+        conn.data.delete(:mode_from)      # the land it leaves next is captured anew
+        conn.data.delete(:mode_flagged)   # an episode of keyless swimming ended
         return false
       end
       conn.data[:mode_from] ||= land_tile(conn.data[:last_pos])   # the land it left: before the audit moves on
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       cached = conn.data.dig(:mode_keys, mode)
-      if cached.nil? || now - cached[:at] >= MODE_TTL
-        mode_read(conn, account_id, mode) unless conn.data[:mode_job]   # the frame flows meanwhile
-      elsif !cached[:ok]
-        deny_mode(conn, mode, cached[:held], now)
+      if (cached.nil? || cached[:stale] || now - cached[:at] >= MODE_TTL) && !conn.data[:mode_job]
+        mode_read(conn, account_id)   # the verdict known, if any, holds meanwhile
       end
-      conn.data[:mode_denied] == mode && refuse_mode(conn)
+      return false if cached.nil? || cached[:ok]
+
+      deny_mode(conn, mode, cached[:held], now)
+      mode_enforced? && refuse_mode(conn, env[:map])
     end
 
-    def mode_read(conn, account_id, mode)
+    # Under `on`, with no script of the game starting swims, a keyless swim is refused.
+    def mode_enforced?
+      @config.position_enforcement == :on && @mode_keys[:sources].empty?
+    end
+
+    # The login's own badge read seeds the verdicts: the first swim is judged at once.
+    def seed_mode_keys(conn, held)
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      conn.data[:mode_keys] = KEYED_MODES.to_h { |m| [m, { ok: key_ok?(m, held), held: held, at: now }] }
+    end
+
+    # The account's badges may have moved (its badge frame, a prize claim): read again at
+    # once - fresh before its next swim - the verdicts known holding until then.
+    def mode_keys_stale(conn, account_id)
+      return unless conn.data[:mode_keys]
+
+      conn.data[:mode_keys].each_value { |e| e[:stale] = true }
+      mode_read(conn, account_id) unless conn.data[:mode_job]
+    end
+
+    # One read for both modes, after the claims before it (a win's badge counts).
+    def mode_read(conn, account_id)
       token = conn.data[:mode_job] = conn.data[:mode_token].to_i + 1
       conn.data[:mode_token] = token
-      @mailbox.submit(account_id) do   # after the claims before it: a win's badge counts
-        verdict = begin
-          held = badges_allowed(account_id)
-          [key_ok?(mode, held), held]
+      queued = @mailbox.submit(account_id) do
+        held = begin
+          badges_allowed(account_id)
         rescue StandardError => e
           @log.call("posaudit: account #{account_id} mode key read failed #{e.class}: #{e.message}")
           nil
         end
-        @reactor.post { mode_verdict(conn, token, mode, verdict) }
+        @reactor.post { mode_verdict(conn, token, held) }
       end
+      conn.data.delete(:mode_job) unless queued   # a full queue: asked again at the next frame
     end
 
-    # On the reactor: the read's verdict - cached; a stale one (it moves another way) only
-    # fills the cache; a read that failed leaves nothing (the next transition reads again).
-    def mode_verdict(conn, token, mode, verdict)
+    # On the reactor: the read's badges fill the verdicts; a swim going on with no key is
+    # denied now; a read that failed leaves them as they were (read again at the next swim).
+    def mode_verdict(conn, token, held)
       conn.data.delete(:mode_job) if conn.data[:mode_job] == token
-      return unless verdict && @reactor.alive?(conn)
+      return unless held && @reactor.alive?(conn)
 
-      ok, held = verdict
-      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      (conn.data[:mode_keys] ||= {})[mode] = { ok: ok, held: held, at: now }
-      deny_mode(conn, mode, held, now) if !ok && conn.data[:mode_cur] == mode
+      seed_mode_keys(conn, held)
+      mode = conn.data[:mode_cur]
+      return unless KEYED_MODES.include?(mode) && !key_ok?(mode, held)
+
+      deny_mode(conn, mode, held, Process.clock_gettime(Process::CLOCK_MONOTONIC))
     end
 
-    # Said once per MODE_TTL (a denied mode is a steady state), flagged with it; under
-    # `on` the mode is denied - unless a script of the game starts swims by itself.
+    # A keyless swim: said once per MODE_TTL (it is a steady state), flagged once per
+    # episode - never where a script of the game starts swims (a player may then swim
+    # with no key: logged only).
     def deny_mode(conn, mode, held, now)
       id = conn.data[:account_id]
       said = conn.data[:mode_said]
       unless said && said[0] == mode && now - said[1] < MODE_TTL
         conn.data[:mode_said] = [mode, now]
         what = "account #{id} #{mode} with no key (#{key_text(mode)} needed, has #{badge_count(held)}: #{held.to_s(2)})"
-        case @config.position_enforcement
-        when :on     then @log.call("posaudit: #{what} -> #{mode_correctable?(conn) ? 'sent back to the shore' : 'refused'}")
-        when :shadow then @log.call("posenforce[shadow]: #{what} WOULD-CORRECT")
-        else              @log.call("posaudit: #{what}")
+        if @config.position_enforcement != :on
+          @log.call(@config.position_enforcement == :shadow ? "posenforce[shadow]: #{what} WOULD-CORRECT" : "posaudit: #{what}")
+        elsif !@mode_keys[:sources].empty?
+          @log.call("posaudit: #{what} (logged only: a script of the game starts swims)")
+        elsif conn.data[:mode_from]
+          @log.call("posaudit: #{what} -> sent back to the shore")
+        else
+          @log.call("posaudit: #{what} -> dropped (no land known)")
         end
-        flag_anomaly(id, :mode_illegal)
       end
-      return unless @config.position_enforcement == :on && @mode_keys[:sources].empty?
+      return if conn.data[:mode_flagged] == mode || !@mode_keys[:sources].empty?
 
-      conn.data[:mode_denied] = mode
-    end
-
-    def mode_correctable?(conn)
-      @mode_keys[:sources].empty? && !conn.data[:mode_from].nil?
+      conn.data[:mode_flagged] = mode
+      flag_anomaly(id, :mode_illegal)
     end
 
     # A refused frame: no audit, no fan-out, and the way back to the land it left (none
-    # known - a session begun on the water: the frame is only dropped).
-    def refuse_mode(conn)
+    # known - a session begun on the water: the frame is only dropped). A way back to
+    # another map clears the client's remotes: its next ask for them is honoured.
+    def refuse_mode(conn, map)
       land = conn.data[:mode_from]
-      reply(conn, type: :pos_correct, map: land[0], x: land[1], y: land[2]) if land
+      if land
+        conn.data.delete(:sync_at) if land[0] != map
+        reply(conn, type: :pos_correct, map: land[0], x: land[1], y: land[2])
+      end
       true
     end
 
@@ -3832,7 +3866,8 @@ module PEMK
     # A negative setting is no requirement; counting games need that many badges, the
     # others that one; the Dive key surfs too (surfacing from a dive).
     def key_ok?(mode, held)
-      keys = mode == :dive ? [@mode_keys[:dive]] : [@mode_keys[:surf], @mode_keys[:dive]]
+      keys = [@mode_keys[mode]]
+      keys << @mode_keys[:dive] if mode == :surf && @mode_keys[:dive] >= 0   # a Dive key surfs; "no Dive key" frees nothing
       keys.any? { |n| n.negative? || (@mode_keys[:count_badges] ? badge_count(held) >= n : held[n] == 1) }
     end
 
@@ -3852,7 +3887,10 @@ module PEMK
         @log.call("server: mode keys: the export predates them (one debug launch regenerates it) - a swim's key is not checked")
         return
       end
-      what = @config.position_enforcement == :on ? "a swim with no key is sent back to the shore" : "a swim with no key is logged"
+      what = if @config.position_enforcement != :on then "a swim with no key is logged"
+             elsif @mode_keys[:sources].empty? then "a swim with no key is sent back to the shore"
+             else "a swim with no key is logged only: a script of the game starts swims"
+             end
       @log.call("server: mode keys: surf needs #{key_text(:surf)}, dive #{key_text(:dive)} (#{what})")
       @log.call("server: WARNING mode keys: client debug is allowed - the game waives the keys there, none is checked") if @config.client_debug == :allow
       @log.call("server: mode keys: the badges are the client's word (badge authority does not enforce)") unless badge_enforce?

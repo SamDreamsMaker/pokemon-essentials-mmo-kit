@@ -12,18 +12,17 @@ Autotest.scenario "a swim with no key is sent back to the shore",
   rogue = s.rogue(:r, caps: caps)
   rogue.send_env({ type: :pos, map: ROUTE8_094, x: 26, y: 12, dir: 4, mode: :walk })    # the grass above the pier
   rogue.send_env({ type: :pos, map: ROUTE8_094, x: 25, y: 12, dir: 4, mode: :surf })    # onto the water, no badge
-  s.wait_for("the keys read", seconds: 10) { s.server.grep(/posaudit: account #{rogue.account_id} surf with no key/).any? }
-  rogue.send_env({ type: :pos, map: ROUTE8_094, x: 24, y: 12, dir: 4, mode: :surf })
   back = rogue.wait_for(:pos_correct)[:env]
   s.check("sent back to the shore") { back.values_at(:map, :x, :y) == [ROUTE8_094, 26, 12] }
+  s.check("said") { s.server.grep(/posaudit: account #{rogue.account_id} surf with no key .* -> sent back to the shore/).any? }
   s.check("flagged") { s.wait_for("the flag", seconds: 10) { s.db[:player_flags].where(account_id: rogue.account_id, kind: "mode_illegal").any? } }
 
   honest = s.rogue(:h, caps: caps)
   honest.send_env({ type: :econ, field: :badges, value: 0b1111, seq: 1 })               # four badges (the client's word here)
   honest.wait_for(:econ_ack, :econ_rej)
+  sleep 1   # the keys are read again at once, off the reactor (a few ms)
   honest.send_env({ type: :pos, map: ROUTE8_094, x: 26, y: 12, dir: 4, mode: :walk })
   honest.send_env({ type: :pos, map: ROUTE8_094, x: 25, y: 12, dir: 4, mode: :surf })
-  sleep 1   # the keys are read off the reactor (a few ms); a key found logs nothing
   honest.send_env({ type: :pos, map: ROUTE8_094, x: 24, y: 12, dir: 4, mode: :surf })
   corrected = begin
     honest.wait_for(:pos_correct, seconds: 3)
