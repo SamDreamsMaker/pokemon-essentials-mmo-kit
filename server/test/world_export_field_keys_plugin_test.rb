@@ -117,6 +117,7 @@ class WorldExportFieldKeysPluginTest < Minitest::Test
 
   def test_this_repository_still_asks_for_the_move
     root = File.expand_path("../..", __dir__)
+    skip "no engine scripts here (a copy of server/ and Plugins/ alone)" unless Dir.exist?(File.join(root, "Data", "Scripts"))
     out = IO.popen([RbConfig.ruby, "-W0", "-e", REAL, EXPORT, root], err: %i[child out], &:read)
     assert $?.success?, "runner crashed:\n#{out}"
     assert_equal "[true, true]", out.strip
