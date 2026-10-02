@@ -104,6 +104,7 @@ module PEMK
       when "invalid_email" then _INTL("that email looks invalid")
       when "weak_password" then _INTL("password needs at least 8 characters")
       when "update_required" then _INTL("this server needs an updated game")
+      when "forgotten"     then _INTL("this account was deleted")
       when "banned"
         ends, note = PEMK::NetStatus.ban_terms(reply)
         text = ends ? _INTL("this account is suspended until {1}", ends) : _INTL("this account is suspended")

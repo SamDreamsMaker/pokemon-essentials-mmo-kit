@@ -355,6 +355,22 @@ class WorldDataTest < Minitest::Test
     assert_equal [], load(gym_sample).badge_ignorable, "an export before the badges"
   end
 
+  # Mode keys: what Surf and Dive need, and what starts a swim by itself.
+  def test_field_keys
+    doc = sample
+    assert_nil load(doc).field_keys, "an export before the keys"
+    doc["field_keys"] = { "count_badges" => true, "surf" => 4, "dive" => 7,
+                          "mode_sources" => [{ "map" => 3, "event" => 9, "page" => 0, "script" => "pbStartSurfing" }, "junk"] }
+    keys = load(doc).field_keys
+    assert_equal({ count_badges: true, surf: 4, dive: 7,
+                   sources: [{ "map" => 3, "event" => 9, "page" => 0, "script" => "pbStartSurfing" }] }, keys)
+    assert keys.frozen? && keys[:sources].frozen?
+    doc["field_keys"] = { "count_badges" => "yes", "surf" => -1, "dive" => 7 }
+    assert_equal({ count_badges: false, surf: -1, dive: 7, sources: [] }, load(doc).field_keys, "no requirement, no source")
+    doc["field_keys"] = { "surf" => "4", "dive" => 7 }
+    assert_nil load(doc).field_keys, "malformed: as if absent"
+  end
+
   def test_prize_events
     doc = sample
     doc["maps"]["7"]["objects"] = [{ "kind" => "prize", "item" => "MASTERBALL", "items" => %w[MASTERBALL PPUP],

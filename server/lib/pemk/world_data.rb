@@ -330,6 +330,11 @@ module PEMK
     # [{ where..., script: }].
     attr_reader :badge_unknown
 
+    # Mode keys: the badge Surf and Dive need (an index, or a count when :count_badges),
+    # and what starts a swim with no key (:sources - the server then only logs). nil when
+    # the export predates it.
+    attr_reader :field_keys
+
     # Badge authority: the maps of the battles whose win gives a badge.
     def badge_maps
       return [] unless @badge_sources
@@ -518,6 +523,7 @@ module PEMK
       @water_marks = doc["water_marks"] == true
       @partners = load_partners(doc["partners"])
       @badge_sources, @badge_unknown = load_badge_sources(doc["badge_sources"])
+      @field_keys = load_field_keys(doc["field_keys"])
       @connections = freeze_connections(doc["connections"])
       @home  = coord_array(doc["home"], 4) || coord_array(doc["home"], 3)
       @start = coord_array(doc["start"], 3)
@@ -678,6 +684,13 @@ module PEMK
       end
       unknown = Array(doc["unknown"]).select { |u| u.is_a?(Hash) }.map { |u| deep_freeze(u) }
       [by_badge.transform_values(&:freeze).to_h.freeze, unknown.freeze]
+    end
+
+    def load_field_keys(doc)
+      return nil unless doc.is_a?(Hash) && doc["surf"].is_a?(Integer) && doc["dive"].is_a?(Integer)
+
+      sources = Array(doc["mode_sources"]).select { |s| s.is_a?(Hash) }.map { |s| deep_freeze(s) }
+      { count_badges: doc["count_badges"] == true, surf: doc["surf"], dive: doc["dive"], sources: sources.freeze }.freeze
     end
 
     def load_partners(doc)
