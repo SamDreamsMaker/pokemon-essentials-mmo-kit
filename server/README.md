@@ -36,6 +36,7 @@ a socket that never drains stay.
 | **Bag inventory** | server-persistent `jsonb` snapshot, restored at login | `004` |
 | **Pokémon identity** | server-issued **monster UIDs** (idempotent minting, party shadow) — dupe-proof | `005` |
 | **Trading** | atomic ownership swap (CAS + row locks, whole-trade rollback) with an append-only `monster_transfers` audit/idempotency log | `006` |
+| **Position & swims** | every step audited against the world export (walls, warps, water, the badge and the party Pokemon a swim needs, the pace of the steps); the last good tile re-seeded at login; enforcement opt-in (`PEMK_POS_ENFORCE`) | `007` |
 
 Auth retires the old client-claimed `account_id`, killing impersonation.
 Per-IP rate-limit + per-account lockout are evaluated before any password
