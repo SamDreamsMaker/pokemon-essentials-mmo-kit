@@ -29,11 +29,20 @@ module PEMK
     # holding the arrow through a door, or a move route the arrival event starts (the
     # Pokemon Lab's). Only the arrival gets this slack; a wall next to it is still a wall.
     ARRIVAL_REACH = 1
+    # The pace of a player's own steps, over a window of single-tile moves on one map: the
+    # bike does 10 tiles a second (0.1 s a tile; running 8, walking 4). Frames arrive in
+    # bursts (one read, one tick), so the window is long and the bar above the bike; a
+    # cutscene's move route at speed 6 (20 tiles/s) over that many tiles is said too.
+    # Detection only: said once per PACE_SAID, nothing corrected, nothing flagged.
+    PACE_STEPS = 24
+    PACE_MAX   = 15.0
+    PACE_SAID  = 30.0
 
-    def initialize(world, logger: nil, mode: :off)
+    def initialize(world, logger: nil, mode: :off, clock: nil)
       @world = world
       @log   = logger || ->(_m) {}
       @mode  = mode
+      @clock = clock || -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
     end
 
     def check(account_id, env, conn_data)
@@ -48,10 +57,12 @@ module PEMK
 
       verdict = classify(env, map, x, y, prev)
       if silent?(verdict)
+        note_pace(account_id, conn_data, prev, map, x, y)
         conn_data[:last_pos] = [map, x, y]   # advance for the next frame
         return verdict
       end
 
+      conn_data.delete(:pace)   # a violation: the window starts anew
       log_violation(account_id, env, map, x, y, prev, verdict)
       enforceable = prev && ENFORCEABLE.include?(verdict)
 
@@ -75,6 +86,33 @@ module PEMK
 
     def silent?(verdict)
       verdict == :match || verdict == :unchecked
+    end
+
+    # A single-tile step on the same map adds its time to the window; a repeat or a turn
+    # adds nothing; a hop, a warp pad, a map change or the session's first frame starts a
+    # new window. A full window faster than PACE_MAX is said - a modified client moving one
+    # legal tile at a time, too fast - at most once per PACE_SAID.
+    def note_pace(account_id, conn_data, prev, map, x, y)
+      return conn_data.delete(:pace) unless prev && prev[0] == map
+
+      px, py = prev[1], prev[2]
+      return if x == px && y == py
+      return conn_data.delete(:pace) if [(x - px).abs, (y - py).abs].max != 1
+
+      times = (conn_data[:pace] ||= [])
+      times << @clock.call
+      times.shift while times.size > PACE_STEPS
+      return if times.size < PACE_STEPS
+
+      span = times.last - times.first
+      pace = span.positive? ? (PACE_STEPS - 1) / span : Float::INFINITY
+      return if pace <= PACE_MAX
+
+      said = conn_data[:pace_said]
+      return if said && times.last - said < PACE_SAID
+
+      conn_data[:pace_said] = times.last
+      @log.call(format("posaudit: account %s paces %.1f tiles/s over %d steps (the bike does 10)", account_id, pace, PACE_STEPS))
     end
 
     def classify(env, map, x, y, prev)

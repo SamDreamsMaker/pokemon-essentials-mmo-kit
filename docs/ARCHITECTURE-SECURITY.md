@@ -286,6 +286,15 @@ surface false-positive classes (surf, bridges, ledges) before anything is
 blocked. **Spawn/respawn is server-owned:** the last-good position is persisted
 (migration 007) and re-seeded at login, so a client can't spawn anywhere.
 
+**Pace** (2026-10-02, detection only): the time between a player's own steps is
+measured too - the last 24 single-tile moves on one map; a window faster than 15 tiles a
+second (the bike does 10, running 8, walking 4) is said once per 30 s (`posaudit: account
+N paces 23.0 tiles/s over 24 steps`). A modified client moving one legal tile at a time,
+too fast, was a legal walker before. Frames arrive in bursts (one read, one tick), hence
+the long window and the bar above the bike; a cutscene's move route at speed 6 (20 tiles
+a second) over that many tiles is said too, so nothing is corrected or flagged yet - the
+lines say what a later bar would act on. The client's own `:speed` is never used.
+
 **Water.** The passability grid counts every water tile as a wall. The world export
 also marks, per map, where a surfer may be (`water` rows: `w`, the engine's rule for
 a surfer, waterfalls included), where Dive also goes down or comes up (`d`), and deep
