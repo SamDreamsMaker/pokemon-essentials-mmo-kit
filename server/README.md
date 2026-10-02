@@ -97,6 +97,9 @@ runs a `pg_dump`. Point clients at the host via `mmo_config.txt`
   Docker).
 - `PEMK_BIND` / `PEMK_PORT` — listen address/port (default `127.0.0.1:9998` in
   dev, `0.0.0.0:9998` in Docker/`dev-server.sh`).
+- Every other setting, with its default and what it needs:
+  [`../docs/SERVER-SETTINGS.md`](../docs/SERVER-SETTINGS.md). All of them are off unless
+  you set them.
 
 ## Forgetting an account (the right to be forgotten)
 
