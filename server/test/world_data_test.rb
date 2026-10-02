@@ -363,10 +363,15 @@ class WorldDataTest < Minitest::Test
                           "mode_sources" => [{ "map" => 3, "event" => 9, "page" => 0, "script" => "pbStartSurfing" }, "junk"] }
     keys = load(doc).field_keys
     assert_equal({ count_badges: true, surf: 4, dive: 7,
-                   sources: [{ "map" => 3, "event" => 9, "page" => 0, "script" => "pbStartSurfing" }] }, keys)
-    assert keys.frozen? && keys[:sources].frozen?
-    doc["field_keys"] = { "count_badges" => "yes", "surf" => -1, "dive" => 7 }
-    assert_equal({ count_badges: false, surf: -1, dive: 7, sources: [] }, load(doc).field_keys, "no requirement, no source")
+                   sources: [{ "map" => 3, "event" => 9, "page" => 0, "script" => "pbStartSurfing" }],
+                   moves: { surf: nil, dive: nil }, moves_exported: false }, keys, "an export before the move keys says nothing of them")
+    assert keys.frozen? && keys[:sources].frozen? && keys[:moves].frozen?
+    doc["field_keys"] = { "count_badges" => "yes", "surf" => -1, "dive" => 7, "surf_move" => true, "dive_move" => false }
+    assert_equal({ count_badges: false, surf: -1, dive: 7, sources: [], moves: { surf: true, dive: false }, moves_exported: true },
+                 load(doc).field_keys, "no requirement, no source; the game's Dive asks for no Pokemon")
+    doc["field_keys"] = { "surf" => 4, "dive" => 7, "surf_move" => nil, "dive_move" => "yes" }
+    assert_equal({ moves: { surf: nil, dive: nil }, moves_exported: true }, load(doc).field_keys.slice(:moves, :moves_exported),
+                 "redefined (null) and junk are unknown")
     doc["field_keys"] = { "surf" => "4", "dive" => 7 }
     assert_nil load(doc).field_keys, "malformed: as if absent"
   end

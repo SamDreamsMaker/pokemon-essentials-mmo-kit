@@ -1252,6 +1252,13 @@ module PEMK
       conn.data[:team_imposter] = mons.any? { |m| (m["ability"] || m[:ability]).to_s == "IMPOSTER" }
       # M1c: each Pokemon's level and moves, which bound Pay Day.
       conn.data[:team] = mons.map { |m| [(m["level"] || m[:level]).to_i, Array(m["moves"] || m[:moves]).map(&:to_s).first(4)] }
+      # Mode keys, the move half: the moves of the party's awake Pokemon (an egg knows none
+      # to the game), as many as a party holds. A Pokemon whose moves are not listed as the
+      # client's own code lists them (an Array) knows none here: an honest client never
+      # sends that, and an unreadable report must not be a free swim.
+      awake = team.select { |m| m.is_a?(Hash) }.first(@config.monster_caps[:party_max] || 6)
+                  .reject { |m| (m["egg"] || m[:egg]) == true }
+      conn.data[:swim_moves] = awake.flat_map { |m| (mv = m["moves"] || m[:moves]).is_a?(Array) ? mv.map(&:to_s) : [] }.uniq.first(64)
     end
 
     # Audit item 5: lock each owned mon's identity traits on first sight and flag a
@@ -3807,18 +3814,20 @@ module PEMK
       conn.data[:mode_cur] = mode
       unless mode_keys_checked? && KEYED_MODES.include?(mode)
         conn.data.delete(:mode_from)      # the land it leaves next is captured anew
+        conn.data.delete(:mode_ep)        # the swim is over: the next is judged anew
         return false
       end
       conn.data[:mode_from] ||= land_tile(conn.data[:last_pos])   # the land it left: before the audit moves on
+      ep  = mode_episode(conn, mode)
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       cached = conn.data.dig(:mode_keys, mode)
       if (cached.nil? || cached[:stale] || now - cached[:at] >= MODE_TTL) && !conn.data[:mode_job] &&
          now >= conn.data[:mode_retry_at].to_f
         mode_read(conn, account_id)   # the verdict known, if any, holds meanwhile
       end
-      return false if cached.nil? || cached[:ok]
+      return false if (cached.nil? || cached[:ok]) && ep[:move_ok]
 
-      deny_mode(conn, mode, cached[:held], now)
+      deny_mode(conn, mode, cached && cached[:held], now)
       mode_enforced? && refuse_mode(conn, env[:map])
     end
 
@@ -3831,6 +3840,43 @@ module PEMK
     def seed_mode_keys(conn, held)
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       conn.data[:mode_keys] = KEYED_MODES.to_h { |m| [m, { ok: key_ok?(m, held), held: held, at: now }] }
+    end
+
+    # The key's other half, the move: a surfer needs a party Pokemon knowing Surf (or Dive:
+    # surfacing asks for none), a diver one knowing Dive - the game's own rule (pbSurf,
+    # pbDive, pbSurfacing), judged as the game does: once, as the swim starts.
+    MODE_MOVES = { surf: %w[SURF DIVE], dive: %w[DIVE] }.freeze
+
+    # Whether the move half applies to +mode+ on +conn+: the setting, the export's word
+    # (the game may have dropped the rule, or redefined the function: unknown then) and a
+    # client that reports its party before a swim (swim_report) - older ones: the badge.
+    def move_checked?(conn, mode)
+      @config.mode_moves && @mode_keys[:moves][mode] == true && conn.data[:swim_report] == true
+    end
+
+    # The swim's start (or a dive from a surf, a surfacing: the game judges again): the
+    # party last reported, awake Pokemon only. No report yet (swim_moves nil) is trusted -
+    # never a denial on nothing; so is a swim this session did not see start (no land left:
+    # a save made on the water, resumed), judged by the game as it started. Held until the
+    # mode is left: a party losing its surfer mid-swim is legal (a level-up's forgotten
+    # move, a trade).
+    def mode_episode(conn, mode)
+      ep = conn.data[:mode_ep]
+      return ep if ep && ep[:mode] == mode
+
+      moves = conn.data[:swim_moves]
+      ok = !move_checked?(conn, mode) || conn.data[:mode_from].nil? || moves.nil? ||
+           MODE_MOVES.fetch(mode).any? { |m| moves.include?(m) }
+      conn.data[:mode_ep] = { mode: mode, move_ok: ok }
+    end
+
+    # What the swim lacks: the badge, a Pokemon knowing the move, or both.
+    def missing_text(conn, mode, held)
+      out = []
+      out << "#{key_text(mode)} needed, has #{badge_count(held)}: #{held.to_i.to_s(2)}" if held && !key_ok?(mode, held)
+      ep = conn.data[:mode_ep]
+      out << "a Pokemon knowing #{MODE_MOVES.fetch(mode).join(' or ')} needed, the party knew none" if ep && ep[:mode] == mode && !ep[:move_ok]
+      out.join("; ")
     end
 
     # The account's badges may have moved (its badge frame, a prize claim): read again at
@@ -3894,7 +3940,7 @@ module PEMK
       return if said && now - said < MODE_TTL
 
       conn.data[:mode_said] = now
-      what = "account #{id} #{mode} with no key (#{key_text(mode)} needed, has #{badge_count(held)}: #{held.to_s(2)})"
+      what = "account #{id} #{mode} with no key (#{missing_text(conn, mode, held)})"
       if @config.position_enforcement != :on
         @log.call(@config.position_enforcement == :shadow ? "posenforce[shadow]: #{what} WOULD-CORRECT" : "posaudit: #{what}")
       elsif !@mode_keys[:sources].empty?
@@ -3959,6 +4005,7 @@ module PEMK
              else "a swim with no key is logged only: a script of the game starts swims"
              end
       @log.call("server: mode keys: surf needs #{key_text(:surf)}, dive #{key_text(:dive)} (#{what})")
+      @log.call("server: mode keys: #{move_half_text}")
       @log.call("server: WARNING mode keys: client debug is allowed - the game waives the keys there, none is checked") if @config.client_debug == :allow
       @log.call("server: mode keys: the badges are the client's word (badge authority does not enforce)") unless badge_enforce?
       return if @mode_keys[:sources].empty?
@@ -3966,6 +4013,23 @@ module PEMK
       where = @mode_keys[:sources].first(5).map { |s| @world.badge_where(s) }.join("; ")
       @log.call("server: WARNING mode keys: #{@mode_keys[:sources].size} script(s) start a swim by themselves (#{where}) - " \
                 "a swim with no key is logged, never sent back")
+    end
+
+    # The move half of the keys, at boot: on, off by the setting, or off by the export's
+    # word, per mode.
+    def move_half_text
+      return "the badge alone - the move half is off (PEMK_MODE_MOVES)" unless @config.mode_moves
+      return "the badge alone - the export predates the move keys (one debug launch regenerates it)" unless @mode_keys[:moves_exported]
+
+      what = KEYED_MODES.map do |m|
+        who, move, fn = m == :surf ? %w[surfer Surf pbSurf] : ["diver", "Dive", "pbDive or pbSurfacing"]
+        case @mode_keys[:moves][m]
+        when true  then "a #{who} needs a Pokemon knowing #{MODE_MOVES[m].map(&:capitalize).join(' or ')}"
+        when false then "the game's #{move} asks for no Pokemon: its badge alone"
+        else "a script of the game redefines #{fn}: its badge alone"
+        end
+      end
+      "#{what.join(', ')} (the party a client reports before a swim; older clients: the badge)"
     end
 
     # Presence zones (reactor thread). A client without presence_v2 is also in its
@@ -4166,6 +4230,7 @@ module PEMK
       end
       conn.data[:account_id] = account_id
       conn.data[:presence_v2] = @config.presence_dedup && Array(conn.data[:caps]).include?("presence_v2")
+      conn.data[:swim_report] = Array(conn.data[:caps]).include?("swim_report")   # mode keys: it reports its party before a swim
       @online[account_id] = conn
       @log.call("server: authed #{conn.addr} as account #{account_id}")
       return if @config.client_debug == :allow || Array(conn.data[:caps]).include?("debug_lock")

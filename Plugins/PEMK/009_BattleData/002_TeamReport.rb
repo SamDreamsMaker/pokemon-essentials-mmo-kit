@@ -45,7 +45,9 @@ module PEMK
         "item"    => sym_or_nil(p.item_id),
         # locked-for-life traits (derived from personalID at creation)
         "shiny"   => (p.shiny? ? true : false rescue false),
-        "gender"  => (p.gender rescue nil)
+        "gender"  => (p.gender rescue nil),
+        # an egg knows no move to the game (pokemon_party leaves it out): mode keys
+        "egg"     => (p.egg? ? true : false rescue false)
       }
     end
 

@@ -314,11 +314,25 @@ tile it left, every frame, until it moves another way. The export also lists the
 that start a swim by themselves (a boat ride): with any, the server only logs, and
 flags nothing - a player may then surf with no key. A server that allows debug clients
 (`PEMK_CLIENT_DEBUG=allow`) checks nothing: the game waives the keys there. The Dive
-key surfs too (surfacing). A bike
+key surfs too (surfacing). The key's other half is the move: a surfer needs a party
+Pokemon knowing Surf (or Dive), a diver one knowing Dive. The client reports its party
+(`:team_check`) when a party Pokemon learns or forgets a move and again as a swim starts
+(`pbStartSurfing`, `pbDive`, `pbSurfacing` flush it first, so the report precedes the first
+frame on the water on the same socket); the server judges the move half once, as the swim
+starts - as the game does - and holds that verdict until the player leaves the water: a
+Pokemon that forgets Surf mid-swim (a level-up, a trade) is the game's own case. Only
+clients that announce `swim_report` at login are judged so (older ones: the badge), only
+awake Pokemon count (an egg's moves are none to the game, and so are moves a report does
+not list the way the client's own code does), a swim the session did not see start (a save
+made on the water) is trusted, and the export says whether the game still asks for the
+move (`surf_move`, `dive_move`: false where it dropped the rule, unknown where a script
+redefines `pbSurf`, `get_pokemon_with_move`, `pokemon_party` or `hasMove?`) - the badge
+alone then, said at boot. The report is the client's word, but a move a species
+cannot learn is an illegal move to the team audit, and the party's Pokemon are the
+registry's. `PEMK_MODE_MOVES=off` leaves the badge alone. A bike
 with no bicycle is not checked yet: the game mounts one by itself on `always_bicycle`
 maps. Still open: a two-tile hop over a rock between two water tiles is only a (logged)
-teleport, and a party Pokemon knowing Surf is not required (the server's view of party
-moves is the team frame at battle start).
+teleport.
 
 The end state for Layer B:
 

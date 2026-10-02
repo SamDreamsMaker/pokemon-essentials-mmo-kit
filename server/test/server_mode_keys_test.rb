@@ -23,9 +23,9 @@ class ServerModeKeysTest < Minitest::Test
   W = PEMK::Wire
   LAND  = [31, 2, 2].freeze
   WATER = [31, 3, 2].freeze
-  CAPS  = %w[presence_v2].freeze
+  CAPS  = %w[presence_v2 swim_report].freeze
 
-  def self.world(keys: { "count_badges" => true, "surf" => 4, "dive" => 7, "mode_sources" => [] })
+  def self.world(keys: { "count_badges" => true, "surf" => 4, "dive" => 7, "mode_sources" => [], "surf_move" => true, "dive_move" => true })
     water = Array.new(20) { "." * 20 }
     water[2] = "..." + "w" * 4 + "." * 13
     doc = { "schema_version" => 3, "water_marks" => true,
@@ -43,6 +43,9 @@ class ServerModeKeysTest < Minitest::Test
   BY_INDEX   = world(keys: { "count_badges" => false, "surf" => 4, "dive" => 7, "mode_sources" => [] })
   WITH_BOATS = world(keys: { "count_badges" => true, "surf" => 4, "dive" => 7,
                              "mode_sources" => [{ "map" => 3, "event" => 9, "page" => 0, "script" => "pbStartSurfing" }] })
+  OLD_MOVES    = world(keys: { "count_badges" => true, "surf" => 4, "dive" => 7, "mode_sources" => [] })   # before the move keys
+  NO_SURF_MOVE = world(keys: { "count_badges" => true, "surf" => 4, "dive" => 7, "mode_sources" => [], "surf_move" => false, "dive_move" => true })
+  SURF_REDONE  = world(keys: { "count_badges" => true, "surf" => 4, "dive" => 7, "mode_sources" => [], "surf_move" => nil, "dive_move" => true })
 
   def setup
     @db = PEMK::DB.connect(ENV.fetch("DATABASE_URL"))
@@ -431,9 +434,174 @@ class ServerModeKeysTest < Minitest::Test
     assert verdict(id, :surf)[:ok], "the ledger holds none; what it is shown counts"
   end
 
+  # The party the client reports (:team_check): one Pokemon knowing +moves+. Call it on a
+  # drained socket (its ack is read back).
+  def team(s, moves, seq: 1)
+    send_env(s, { type: :team_check, seq: seq, team: [{ "species" => "LAPRAS", "level" => 30, "moves" => moves }] })
+    assert_equal :team_ack, recv_env(s)[:type]
+  end
+
+  # The move half: with the badges but no Pokemon knowing Surf, the swim is refused as it
+  # starts - said with the move, flagged. Judged once, as the game does: a report adding
+  # Surf mid-episode changes nothing; on land, then a new swim with a surfer flows (no read).
+  def test_a_surfer_needs_a_pokemon_knowing_surf
+    start_server
+    s, id = login("nosurfer@t.co", badges: 0b1111)
+    team(s, %w[TACKLE])
+    pos(s, LAND, :walk)
+    drain(s)
+    pos(s, WATER, :surf)
+    assert_equal [[:pos_correct, 31, 2, 2]], drain(s).map { |e| e.values_at(:type, :map, :x, :y) }, "back to the shore"
+    assert logs.any? { |l| l.match?(/posaudit: account #{id} surf with no key \(a Pokemon knowing SURF or DIVE needed, the party knew none\) -> sent back to the shore/) },
+           logs.grep(/posaudit/).join("\n")
+    assert_equal 1, flags(id, 1)
+    team(s, %w[TACKLE SURF], seq: 2)   # mid-episode: the swim already begun stays judged
+    pos(s, WATER, :surf)
+    assert_equal [:pos_correct], drain(s).map { |e| e[:type] }, "the episode's verdict holds"
+    pos(s, LAND, :walk)
+    drain(s)
+    pos(s, WATER, :surf)
+    pos(s, [31, 4, 2], :surf)
+    assert_empty nothing(s), "a new swim, a surfer in the party: it flows"
+    s.close
+  end
+
+  # A session that begins on the water (a save made while surfing) resumes a swim the game
+  # judged as it started: trusted, whatever the party; its next swim from the shore is judged.
+  def test_a_swim_begun_before_the_session_is_trusted
+    start_server
+    s, id = login("resume@t.co", badges: 0b1111)
+    team(s, %w[TACKLE])
+    pos(s, WATER, :surf)                 # the session's first frame, on the water
+    pos(s, [31, 4, 2], :surf)
+    assert_empty nothing(s), "the swim goes on"
+    assert_equal 0, flags(id)
+    pos(s, LAND, :walk)
+    drain(s)
+    pos(s, WATER, :surf)
+    assert_equal [:pos_correct], drain(s).map { |e| e[:type] }, "from the shore, judged"
+    s.close
+  end
+
+  # Losing the surfer mid-swim is the game's own case (a move forgotten at a level-up, a
+  # trade): the swim goes on; the next one is judged anew.
+  def test_losing_the_surfer_mid_swim_is_legal
+    start_server
+    s, id = login("lost@t.co", badges: 0b1111)
+    team(s, %w[SURF])
+    pos(s, LAND, :walk)
+    pos(s, WATER, :surf)
+    drain(s)
+    team(s, %w[TACKLE], seq: 2)
+    pos(s, [31, 4, 2], :surf)
+    pos(s, [31, 5, 2], :surf)
+    assert_empty nothing(s), "the swim goes on"
+    assert_equal 0, flags(id)
+    pos(s, LAND, :walk)
+    drain(s)
+    pos(s, WATER, :surf)
+    assert_equal [:pos_correct], drain(s).map { |e| e[:type] }, "the next swim is judged anew"
+    s.close
+  end
+
+  # An older client (no swim_report cap) is the badge's alone. A report not shaped as the
+  # client's own code shapes it, an egg knowing Surf (none to the game), a Pokemon past the
+  # party's size: none of them knows the move.
+  def test_what_the_move_half_trusts_and_what_it_counts
+    start_server
+    old, = login("old2@t.co", badges: 0b1111, caps: %w[presence_v2])
+    team(old, %w[TACKLE])
+    pos(old, LAND, :walk)
+    drain(old)
+    pos(old, WATER, :surf)
+    assert_empty nothing(old), "no cap: the badge alone"
+    s, id = login("odd@t.co", badges: 0b1111)
+    send_env(s, { type: :team_check, seq: 1, team: [{ "species" => "LAPRAS", "level" => 30, "moves" => "SURF" }] })   # not an Array: no client of ours
+    assert_equal :team_ack, recv_env(s)[:type]
+    pos(s, LAND, :walk)
+    drain(s)
+    pos(s, WATER, :surf)
+    assert_equal [:pos_correct], drain(s).map { |e| e[:type] }, "a report not shaped as the client's: it knows none"
+    assert_equal [], conn_data(id)[:swim_moves]
+    egg, = login("egg@t.co", badges: 0b1111)
+    send_env(egg, { type: :team_check, seq: 1, team: [{ "species" => "LAPRAS", "level" => 1, "moves" => %w[SURF], "egg" => true },
+                                                       { "species" => "RATTATA", "level" => 5, "moves" => %w[TACKLE] }] })
+    assert_equal :team_ack, recv_env(egg)[:type]
+    pos(egg, LAND, :walk)
+    drain(egg)
+    pos(egg, WATER, :surf)
+    assert_equal [:pos_correct], drain(egg).map { |e| e[:type] }, "an egg's Surf counts for nothing"
+    seventh, = login("seven@t.co", badges: 0b1111)
+    mons = Array.new(6) { |i| { "species" => "RATTATA", "level" => 5 + i, "moves" => %w[TACKLE] } } <<
+           { "species" => "LAPRAS", "level" => 30, "moves" => %w[SURF] }
+    send_env(seventh, { type: :team_check, seq: 1, team: mons })
+    assert_equal :team_ack, recv_env(seventh)[:type]
+    pos(seventh, LAND, :walk)
+    drain(seventh)
+    pos(seventh, WATER, :surf)
+    assert_equal [:pos_correct], drain(seventh).map { |e| e[:type] }, "a seventh Pokemon is none of the party's"
+    [old, s, egg, seventh].each(&:close)
+  end
+
+  # The Dive move surfs (surfacing asks for none); a dive from a surf is judged again, as
+  # pbDive does.
+  def test_the_dive_move_surfs_and_a_diver_needs_dive
+    start_server
+    s, id = login("diver2@t.co", badges: 0b1111111)
+    team(s, %w[DIVE])
+    pos(s, LAND, :walk)
+    pos(s, WATER, :surf)
+    pos(s, [31, 4, 2], :dive)
+    assert_empty nothing(s), "Dive surfs and dives"
+    pos(s, LAND, :walk)
+    team(s, %w[SURF], seq: 2)
+    pos(s, WATER, :surf)
+    assert_empty nothing(s), "Surf surfs"
+    pos(s, [31, 4, 2], :dive)
+    assert_equal [:pos_correct], drain(s).map { |e| e[:type] }, "a dive is judged as it starts"
+    assert logs.any? { |l| l.match?(/account #{id} dive with no key \(a Pokemon knowing DIVE needed, the party knew none\)/) }, logs.grep(/no key/).join("\n")
+    s.close
+  end
+
+  # Both halves missing: the line names both.
+  def test_both_halves_missing_are_named
+    start_server
+    s, id = login("none@t.co", badges: 0b1)
+    team(s, %w[TACKLE])
+    pos(s, LAND, :walk)
+    pos(s, WATER, :surf)
+    drain(s)
+    assert logs.any? { |l| l.include?("account #{id} surf with no key (4 badges needed, has 1: 1; a Pokemon knowing SURF or DIVE needed, the party knew none)") },
+           logs.grep(/no key/).join("\n")
+    s.close
+  end
+
+  # The badge alone - by the setting, by an export before the move keys, where the game's
+  # Surf asks for no Pokemon, where a script redefines pbSurf - said at boot each time.
+  def test_when_the_move_half_is_off
+    [[{ "PEMK_MODE_MOVES" => "off" }, "mode keys: the badge alone - the move half is off (PEMK_MODE_MOVES)"],
+     [{ "PEMK_WORLD" => OLD_MOVES.path }, "mode keys: the badge alone - the export predates the move keys (one debug launch regenerates it)"],
+     [{ "PEMK_WORLD" => NO_SURF_MOVE.path }, "mode keys: the game's Surf asks for no Pokemon: its badge alone, a diver needs a Pokemon knowing Dive ("],
+     [{ "PEMK_WORLD" => SURF_REDONE.path }, "mode keys: a script of the game redefines pbSurf: its badge alone, a diver needs a Pokemon knowing Dive ("]]
+      .each_with_index do |(env, line), i|
+      start_server(env)
+      assert logs.any? { |l| l.include?(line) }, logs.grep(/mode keys/).join("\n")
+      s, = login("badgeonly#{i}@t.co", badges: 0b1111)
+      team(s, %w[TACKLE])
+      pos(s, LAND, :walk)
+      pos(s, WATER, :surf)
+      assert_empty nothing(s), "#{line}: the badge alone"
+      s.close
+      @server.stop
+      @seen = nil
+      @logs.clear
+    end
+  end
+
   def test_the_boot_log
     start_server
     assert logs.any? { |l| l.include?("mode keys: surf needs 4 badges, dive 7 badges (a swim with no key is sent back to the shore)") }
+    assert logs.any? { |l| l.include?("mode keys: a surfer needs a Pokemon knowing Surf or Dive, a diver needs a Pokemon knowing Dive (the party a client reports before a swim; older clients: the badge)") }
     assert logs.any? { |l| l.include?("mode keys: the badges are the client's word (badge authority does not enforce)") }
   end
 end
