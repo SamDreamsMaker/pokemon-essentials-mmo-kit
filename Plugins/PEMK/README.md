@@ -181,6 +181,16 @@ players until a leave (no timeout), sends a frame every 5 s even during a forced
 asks the server who is on the map after it cleared them, and clears them when the link
 drops. Told nothing (an older server), it keeps the 3 s timeout.
 
+**Swims.** The server may ask a surfer for the badge the game requires and for a party
+Pokemon knowing Surf (a diver: Dive), judged once as the swim starts, as the game does.
+For that the client reports its party (`:team_check`) when a party Pokemon learns or
+forgets a move and again right before a swim begins (`pbStartSurfing`, `pbDive`,
+`pbSurfacing` flush it first), and says so with the `swim_report` cap at login; a client
+without the cap is judged on the badge alone. The export tells the server whether your
+game still asks for the move (`surf_move`, `dive_move`): a game that lets players surf
+with no Pokemon, or redefines `pbSurf`, is judged on the badge alone too. Nothing of this
+runs unless the server enforces positions (`PEMK_POS_ENFORCE=on`): below that it logs.
+
 **How PvP battles stay in sync.** Each instance runs its *own* battle with its own
 team as party 1, so the untouched scene shows each player their own perspective.
 The two are made byte-identical by making one side **authoritative**: the

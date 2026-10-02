@@ -42,7 +42,7 @@ no row here fails the suite, and so does a row no code reads.
 
 | Setting | Default | Values | What it does |
 |---|---|---|---|
-| `PEMK_POS_ENFORCE` | `off` | `off` / `shadow` / `on` | where a player may stand, judged on the presence frames the server already receives: a wall stepped onto, a warp that exists nowhere, water crossed on foot, and a surfer or a diver without the badge the game requires (a player is sent back to the shore - never where your own scripts start swims). `off` still logs each verdict; `on` sends the player back to its last good tile |
+| `PEMK_POS_ENFORCE` | `off` | `off` / `shadow` / `on` | where a player may stand, judged on the presence frames the server already receives: a wall stepped onto, a warp that exists nowhere, water crossed on foot, and a surfer or a diver without the badge the game requires (a player is sent back to the shore - never where your own scripts start swims). `off` still logs each verdict; `on` sends the player back to its last good tile. The pace of a player's steps is logged in every mode, never corrected |
 | `PEMK_MODE_MOVES` | `on` | `on` / `off` | the move half of the swim keys: a surfer needs a party Pokemon knowing Surf (or Dive), a diver one knowing Dive, judged from the party the client reports. `off`: the badge alone, for a game whose swims need no Pokemon |
 | `PEMK_PICKUP_ENFORCE` | `off` | `off` / `on` | an item ball is granted by the server (it exists, the player stands by it, once per account) before the client adds it |
 | `PEMK_ALLOW_PICKUP_RESET` | `off` | `off` / `on` | **dev and QA only**: a client may forget its own taken item balls to test them again. On a public server any client could farm every item ball forever |
