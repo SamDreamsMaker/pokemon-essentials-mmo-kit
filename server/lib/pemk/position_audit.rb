@@ -31,14 +31,16 @@ module PEMK
     ARRIVAL_REACH = 1
     # The pace of a player's own steps: each single-tile move on one map spends a step from
     # a bucket that refills at PACE_MAX tiles a second and holds PACE_BURST at most. The bike
-    # does 10 (0.1 s a tile; running 8, walking 4), so an honest player never empties it,
-    # however its frames arrive - a stall delivers them in one read, one tick, and the
-    # presence budget lets 40 through at once. A client twice as fast as the bike spends it
-    # in 8 s, three times as fast in under 3 s. A cutscene's move route announces no steps
-    # (one jump, a teleport: the window starts anew). Detection only: said once per
-    # PACE_SAID per connection, nothing corrected, nothing flagged.
-    PACE_MAX   = 15.0
-    PACE_BURST = 40.0
+    # does 10 (0.1 s a tile; running 8, walking 4 - the engine moves on time, no input goes
+    # faster), so an honest player never empties it, however its frames arrive: a stall
+    # delivers them in one read, one tick, the presence budget lets 40 through at once, and
+    # the bucket holds one more. A client half again as fast as the bike spends it in 13 s,
+    # twice as fast in 5 s, three times as fast in 2 s. A cutscene's move route announces no
+    # steps (one jump, a teleport). Nothing refills the bucket but time: a hop, a map
+    # change, a violation leave it as it is. Detection only: said once per PACE_SAID per
+    # connection, nothing corrected, nothing flagged.
+    PACE_MAX   = 12.0
+    PACE_BURST = 41.0
     PACE_SAID  = 30.0
 
     def initialize(world, logger: nil, mode: :off, clock: nil)
@@ -65,7 +67,6 @@ module PEMK
         return verdict
       end
 
-      conn_data.delete(:pace)   # a violation: the window starts anew
       log_violation(account_id, env, map, x, y, prev, verdict)
       enforceable = prev && ENFORCEABLE.include?(verdict)
 
@@ -92,16 +93,17 @@ module PEMK
     end
 
     # A single-tile step on the same map spends one from the bucket (refilled for the time
-    # since the last); a repeat or a turn spends nothing; a hop, a warp pad, a map change
-    # or the session's first frame starts with a full bucket. An empty bucket is said - a
-    # modified client moving one legal tile at a time, too fast - at most once per
-    # PACE_SAID; the bucket then stays at empty, so the pace is said again after it.
+    # since the last step); a repeat, a turn, a hop, a warp pad or a map change spends
+    # nothing and refills nothing - the bucket is the time's alone, so no legal move resets
+    # it. An empty bucket is said - a modified client moving one legal tile at a time, too
+    # fast - at most once per PACE_SAID; it then stays empty (no debt either), so a pace
+    # kept up is said again after that, and one given up is not.
     def note_pace(account_id, conn_data, prev, map, x, y)
-      return conn_data.delete(:pace) unless prev && prev[0] == map
+      return unless prev && prev[0] == map
 
       px, py = prev[1], prev[2]
       return if x == px && y == py
-      return conn_data.delete(:pace) if [(x - px).abs, (y - py).abs].max != 1
+      return if [(x - px).abs, (y - py).abs].max != 1
 
       now = @clock.call
       held, at = conn_data[:pace]
