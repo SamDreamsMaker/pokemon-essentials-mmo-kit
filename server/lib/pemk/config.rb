@@ -16,7 +16,8 @@ module PEMK
                 :gift_enforce, :peer_check, :peer_classes, :trade_redelivery, :item_record,
                 :shop_enforce, :item_authority, :item_local, :item_grace, :money_authority,
                 :money_payday_daily, :money_local_daily, :money_repeat_daily, :trainer_proof,
-                :money_unproven_daily, :badge_authority, :badge_ignore, :client_debug, :presence_dedup
+                :money_unproven_daily, :badge_authority, :badge_ignore, :client_debug, :presence_dedup,
+                :mode_moves
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -70,6 +71,12 @@ module PEMK
       # get every frame, as before. On by default (an idle town cost 2N(N-1) sends a
       # second); off = every frame to everyone, no snapshot, no silence sweep.
       @presence_dedup = env.fetch("PEMK_PRESENCE_DEDUP", "on").to_s.strip.downcase != "off"
+
+      # Mode keys, the move half: a surfer needs a party Pokemon knowing Surf (or Dive), a
+      # diver one knowing Dive - the game's own rule (pbSurf, pbDive), judged from the
+      # party the client reports. On by default (a closed cheat path); off = the badge
+      # alone, for a game whose swims need no Pokemon.
+      @mode_moves = env.fetch("PEMK_MODE_MOVES", "on").to_s.strip.downcase != "off"
 
       # M4 Layer D: team/set legality enforcement mode, same off/shadow/on tri-state as
       # PEMK_POS_ENFORCE. Default off. D1 is detection-only (there is no battle-entry

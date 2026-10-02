@@ -925,13 +925,54 @@ module PEMK
       return nil unless surf.is_a?(Integer) && dive.is_a?(Integer)
 
       { :count_badges => (Settings::FIELD_MOVES_COUNT_BADGES rescue false) == true,
-        :surf => surf, :dive => dive, :mode_sources => mode_sources(all_events) }
+        :surf => surf, :dive => dive, :mode_sources => mode_sources(all_events),
+        :surf_move => move_required?(%w[pbSurf]), :dive_move => move_required?(%w[pbDive pbSurfacing]) }
+    end
+
+    # Whether the game still asks for a Pokemon knowing the move before a swim: true when
+    # each of +names+ (the engine's) still calls get_pokemon_with_move, false when the game
+    # dropped it there, nil when a script of the game redefines one (its rule is unknown).
+    def move_required?(names)
+      engine = Dir.glob("Data/Scripts/**/#{MODE_OWN.first}").first
+      return nil unless engine
+
+      bodies = names.map { |n| def_body(File.read(engine), n) }
+      return nil if bodies.any?(&:nil?)
+
+      lines = (code_lines rescue [])
+      return nil if lines.any? { |f, _, text| !f.end_with?(MODE_OWN.first) && text.match?(/^\s*def\s+(#{names.join('|')})\b/) }
+      return nil if rule_redefined?(lines)
+
+      bodies.all? { |b| b.include?("get_pokemon_with_move") }
+    end
+
+    # The readers the rule leans on - which Pokemon count, what knowing a move is - defined
+    # again outside the engine's own files (their own paths): the rule is then whatever that
+    # script says.
+    RULE_SEATS = { "get_pokemon_with_move" => "015_Trainers and player/001_Trainer.rb",
+                   "pokemon_party" => "015_Trainers and player/001_Trainer.rb",
+                   "hasMove?" => "014_Pokemon/001_Pokemon.rb" }.freeze
+
+    def rule_redefined?(lines)
+      lines.any? do |f, _, text|
+        RULE_SEATS.any? { |name, seat| !f.end_with?(seat) && text.match?(/^\s*def\s+#{Regexp.escape(name)}(\s|\(|$)/) }
+      end
+    end
+
+    # The lines of `def name` down to its `end`, or nil.
+    def def_body(text, name)
+      lines = text.lines
+      i = lines.index { |l| l.match?(/^def\s+#{name}\b/) }
+      return nil unless i
+
+      j = lines[(i + 1)..].index { |l| l.match?(/^end\b/) }
+      j ? lines[i..(i + 1 + j)].join : nil
     end
 
     # A script line that puts the player on the water with no field move: the game's own
     # Surf and Dive (FieldMoves.rb) and PEMK's snap-back aside.
     MODE_SET   = /\$PokemonGlobal\.(surfing|diving)\s*(\|\|)?=\s*true\b|\bpbStartSurfing\b/.freeze
-    MODE_OWN   = %w[004_Overworld_FieldMoves.rb].freeze   # the engine's gated paths
+    MODE_OWN   = %w[012_Overworld/004_Overworld_FieldMoves.rb].freeze   # the engine's gated paths (its own path: a plugin's namesake is not it)
 
     def mode_sources(all_events)
       out = []

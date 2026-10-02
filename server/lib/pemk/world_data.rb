@@ -690,7 +690,15 @@ module PEMK
       return nil unless doc.is_a?(Hash) && doc["surf"].is_a?(Integer) && doc["dive"].is_a?(Integer)
 
       sources = Array(doc["mode_sources"]).select { |s| s.is_a?(Hash) }.map { |s| deep_freeze(s) }
-      { count_badges: doc["count_badges"] == true, surf: doc["surf"], dive: doc["dive"], sources: sources.freeze }.freeze
+      # the move half: whether the game asks for a Pokemon knowing Surf / Dive (true), dropped
+      # the rule (false) or redefines the function (nil); an export before this says nothing
+      moves = { surf: tristate(doc["surf_move"]), dive: tristate(doc["dive_move"]) }.freeze
+      { count_badges: doc["count_badges"] == true, surf: doc["surf"], dive: doc["dive"], sources: sources.freeze,
+        moves: moves, moves_exported: doc.key?("surf_move") && doc.key?("dive_move") }.freeze
+    end
+
+    def tristate(value)
+      value == true || value == false ? value : nil
     end
 
     def load_partners(doc)

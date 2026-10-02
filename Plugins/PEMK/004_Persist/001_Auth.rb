@@ -26,8 +26,10 @@ module PEMK
     # badge_alone: it fights a badge's battle with no partner while the server judges them.
     # debug_lock: it keeps debug mode off where the server says (client_debug).
     # presence_v2: it keeps its peers until a leave, so idle repeats need not reach it.
+    # swim_report: it reports its party before a swim starts, so the server can ask for a
+    # Pokemon knowing Surf or Dive (mode keys).
     CAPS = %w[flag_repair trade_redeliver gift_pos inv_correct money_claims save_ack trainer_proof badge_hold
-              badge_alone debug_lock presence_v2].freeze
+              badge_alone debug_lock presence_v2 swim_report].freeze
     ACCOUNT_FILE       = "mmo_account.dat"
     GUEST_ACCOUNT_FILE = "mmo_account_guest.dat"
 
