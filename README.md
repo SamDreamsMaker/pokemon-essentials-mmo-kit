@@ -39,6 +39,12 @@ truth for money, items and Pokémon (and, on the roadmap, gameplay itself).
 - **Synchronized PvP battles** — challenge another player on your map; a real,
   deterministic battle runs on both screens (the challenger's RNG stream is
   authoritative and replayed by the other side), each seeing their own team.
+- **Position checks** (opt-in) — every step is judged against the exported maps:
+  walls, warps, water, the badge and the party Pokémon a swim needs, the pace of
+  the steps; in enforcement a player is sent back to its last good tile.
+- **Moderation** — `bin/pemk_admin.rb`: bans with a notice and a live kick, and the
+  right to be forgotten (an account anonymized and purged, its records kept
+  pseudonymous).
 
 ## Quick start (two players on one PC)
 
@@ -72,6 +78,7 @@ bash bin/setup.sh        # one-time: installs Ruby+Postgres, creates the dev DB
 - **Install the server from scratch on Windows (novice-friendly):** [`docs/INSTALL-WINDOWS.md`](docs/INSTALL-WINDOWS.md)
 - **Client SDK guide, configuration & LAN/deploy:** [`Plugins/PEMK/README.md`](Plugins/PEMK/README.md)
 - **Dedicated server (ops, tests, schema):** [`server/README.md`](server/README.md)
+- **Every server setting, its default and what it needs:** [`docs/SERVER-SETTINGS.md`](docs/SERVER-SETTINGS.md)
 - **Security model & anti-cheat roadmap:** [`docs/ARCHITECTURE-SECURITY.md`](docs/ARCHITECTURE-SECURITY.md)
 - **Architecture & conversion audit:** [`docs/architecture/MMO_CONVERSION_AUDIT.md`](docs/architecture/MMO_CONVERSION_AUDIT.md)
 
