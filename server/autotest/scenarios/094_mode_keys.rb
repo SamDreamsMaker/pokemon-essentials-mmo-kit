@@ -31,5 +31,6 @@ Autotest.scenario "a swim with no key is sent back to the shore",
     false
   end
   s.check("with the badges, the swim goes on") { !corrected }
-  s.check("and nothing is flagged") { s.db[:player_flags].where(account_id: honest.account_id).empty? }
+  # the keys flag nothing here; badge authority in shadow does flag badges claimed with no win
+  s.check("and the keys flag nothing") { s.db[:player_flags].where(account_id: honest.account_id, kind: "mode_illegal").empty? }
 end
