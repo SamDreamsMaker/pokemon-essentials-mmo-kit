@@ -216,6 +216,14 @@ re-arms gym leaders, gifts and one-shot events. Ramp it like the others:
    `shadow` has shown no `UNEXPLAINED` line from honest play, and once every event the
    boot `WARNING` names as giving items it cannot tell (a Mystery Gift, a computed
    gift) has its items in `PEMK_ITEM_LOCAL`.
+8. `PEMK_POS_ENFORCE=shadow`, then `on` — where a player may stand: a wall stepped
+   onto, a warp that exists nowhere, water crossed on foot, and a swim with no key (the
+   badge the game asks for, and a party Pokemon knowing Surf or Dive, judged as the
+   swim starts). In `shadow` the log shows `WOULD-CORRECT` lines; honest play should
+   produce none - a boat ride or a cutscene that puts the player on the water is
+   listed by the export, and the server then only logs swims. `on` sends the player
+   back to the last tile it stood on. The dev server (`PlayMMO-server.bat`) runs
+   `shadow` by default.
 
 A separate setting protects players from each other: `PEMK_PEER_CHECK=shadow`, then
 `on`, checks a Pokemon another player sends (a trade, a PvP team) before it is
