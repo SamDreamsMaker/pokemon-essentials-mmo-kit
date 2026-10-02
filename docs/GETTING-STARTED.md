@@ -253,6 +253,7 @@ is your shell user). A game older than this feature just shows "Login failed: ba
 - **Project overview & what works today:** [`README.md`](../README.md)
 - **The MMO client plugin (config, how the SDK hooks in):** [`Plugins/PEMK/README.md`](../Plugins/PEMK/README.md)
 - **The dedicated server (operations, tests, database):** [`server/README.md`](../server/README.md)
+- **Every server setting, its default and what it needs:** [`docs/SERVER-SETTINGS.md`](SERVER-SETTINGS.md)
 - **Security model & anti-cheat roadmap:** [`docs/ARCHITECTURE-SECURITY.md`](ARCHITECTURE-SECURITY.md)
 - **Server-authoritative battles (design):** [`docs/LAYER-D-BATTLE-DESIGN.md`](LAYER-D-BATTLE-DESIGN.md)
 - **Automated in-game testing (autopilot + autotest scenarios):** [`docs/AUTOTEST.md`](AUTOTEST.md)
