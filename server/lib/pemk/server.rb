@@ -226,6 +226,7 @@ module PEMK
       log_badge_authority
       badge_boot_pass
       badge_mark_enforcing
+      forget_boot_pass
       @log.call("server: item authority = #{@config.item_authority} (item increases judged against server-known sources; logs only)")
       if @config.item_authority == :on
         if @item_enforce
@@ -3289,6 +3290,7 @@ module PEMK
       sweep_trades
       maybe_presence_sweep
       maybe_ban_sweep
+      maybe_forget_sweep
       maybe_proof_sweep
       maybe_anomaly_sweep
       maybe_resim_sweep
@@ -3389,7 +3391,41 @@ module PEMK
       rescue StandardError => e
         @log.call("server: account #{account_id} - is it forgotten? #{e.class}: #{e.message}")
       end
-      @log.call("server: account #{account_id} mailbox full - a forgotten account's purge waits for its next close") unless queued
+      @log.call("server: account #{account_id} mailbox full - a forgotten account's purge waits for the sweep") unless queued
+    end
+
+    FORGET_SWEEP_SEC = 30
+
+    # A forgotten account's rows written late - behind a mailbox too full to take the
+    # close's purge, a trade's delivery or a login's session landing as its socket closed -
+    # go within a sweep: every account forgotten in the last Forget::RECENT seconds is
+    # purged again, on a worker. Nobody need be online: the rows are the point.
+    def maybe_forget_sweep
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      return if @forget_sweeping || (@last_forget_sweep && (now - @last_forget_sweep) < FORGET_SWEEP_SEC)
+
+      @last_forget_sweep = now
+      @forget_sweeping   = true
+      @pool.submit do
+        begin
+          Forget.new(@db).purge_recent.each do |id, n|
+            @log.call("server: account #{id} forgotten - #{n} row(s) written late purged by the sweep")
+          end
+        rescue StandardError => e
+          @log.call("server: forget sweep failed #{e.class}: #{e.message}")
+        end
+        @reactor.post { @forget_sweeping = false }
+      end
+    end
+
+    # At boot: the same for the accounts forgotten in the last month (a row the last run's
+    # sweeps never got to).
+    def forget_boot_pass
+      Forget.new(@db).purge_recent(within: 30 * 86_400).each do |id, n|
+        @log.call("server: account #{id} forgotten - #{n} row(s) written late purged at boot")
+      end
+    rescue StandardError => e
+      @log.call("server: forget boot pass failed #{e.class}: #{e.message}")
     end
 
     def purge_forgotten(account_id)
@@ -3848,15 +3884,16 @@ module PEMK
       deny_mode(conn, mode, held, now)
     end
 
-    # A keyless swim: said and flagged once per MODE_TTL (it is a steady state, and a
-    # flag is a row the client would otherwise write at will) - never flagged where a
-    # script of the game starts swims (a player may then swim with no key: logged only).
+    # A keyless swim: said and flagged once per MODE_TTL whatever mode each frame says (it
+    # is a steady state, and a flag is a row the client would otherwise write at its frame
+    # budget - a surf/dive flip-flop included) - never flagged where a script of the game
+    # starts swims (a player may then swim with no key: logged only).
     def deny_mode(conn, mode, held, now)
       id = conn.data[:account_id]
       said = conn.data[:mode_said]
-      return if said && said[0] == mode && now - said[1] < MODE_TTL
+      return if said && now - said < MODE_TTL
 
-      conn.data[:mode_said] = [mode, now]
+      conn.data[:mode_said] = now
       what = "account #{id} #{mode} with no key (#{key_text(mode)} needed, has #{badge_count(held)}: #{held.to_s(2)})"
       if @config.position_enforcement != :on
         @log.call(@config.position_enforcement == :shadow ? "posenforce[shadow]: #{what} WOULD-CORRECT" : "posaudit: #{what}")

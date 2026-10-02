@@ -24,6 +24,7 @@ module PEMK
               trainer_battles encounter_rolls monsters monster_transfers enforcement_events
               player_flags anomaly_reports account_bans].freeze
     REASON = "account deleted at your request"
+    RECENT = 600   # seconds after a forget during which the server's sweep purges again
 
     def initialize(db)
       @db = db
@@ -53,6 +54,15 @@ module PEMK
     # done. -> { table => rows removed }
     def purge(account_id)
       GONE.to_h { |t| [t, @db[t].where(account_id: account_id).delete] }
+    end
+
+    # The accounts forgotten within +within+ seconds of +now+, purged again: a row of theirs
+    # written late (a save behind a mailbox too full to take the close's purge, a trade's
+    # delivery landing as the socket closed) goes within the server's next sweep.
+    # -> { account_id => rows removed }, the accounts with none left out
+    def purge_recent(now: Time.now, within: RECENT)
+      ids = @db[:accounts].where(Sequel.expr(:forgotten_at) > now - within).select_map(:id)
+      ids.to_h { |id| [id, purge(id).values.sum] }.reject { |_, n| n.zero? }
     end
 
     def forgotten?(account_id)

@@ -57,6 +57,22 @@ class ForgetTest < Minitest::Test
     @db[:accounts].insert(email: "gone@t.co", password_hash: "y", status: "active", created_at: Time.now)   # the address is free again
   end
 
+  # A row written late for an account forgotten minutes ago goes at the server's sweep;
+  # one forgotten long ago is the boot pass's (a month), not the sweep's.
+  def test_a_row_written_late_goes_at_the_next_sweep
+    old = @db[:accounts].insert(email: "old@t.co", password_hash: "x", status: "active", created_at: Time.now)
+    @forget.forget(old, by: "op", now: Time.now - (2 * 86_400))
+    @forget.forget(@id, by: "op")
+    @db[:characters].insert(account_id: @id, save_blob: Sequel.blob("a save pushed late"), updated_at: Time.now)
+    PEMK::Sessions.new(@db).issue(@id)   # a login racing the console
+    @db[:characters].insert(account_id: old, save_blob: Sequel.blob("a save pushed late"), updated_at: Time.now)
+    assert_equal({ @id => 2 }, @forget.purge_recent, "the recent one's rows, counted")
+    assert_equal 0, @db[:characters].where(account_id: @id).count
+    assert_equal 1, @db[:characters].where(account_id: old).count, "an old forget is not the sweep's"
+    assert_empty @forget.purge_recent, "nothing left: nothing said"
+    assert_equal({ old => 1 }, @forget.purge_recent(within: 30 * 86_400), "the boot pass reaches a month back")
+  end
+
   def test_forgetting_again_only_purges
     assert_equal :forgotten, @forget.forget(@id, by: "op")
     at = @db[:accounts].where(id: @id).get(:forgotten_at)

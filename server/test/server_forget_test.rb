@@ -137,6 +137,29 @@ class ServerForgetTest < Minitest::Test
     refute logs.any? { |l| l.include?("purged") }
   end
 
+  # Nobody online, a row written late (a delivery landing as the socket closed, a save
+  # behind a full mailbox): the sweep purges it within FORGET_SWEEP_SEC; one the sweeps
+  # never got to goes at the next boot.
+  def test_a_row_written_late_goes_at_the_sweep_or_at_boot
+    s, lo = login("late@t.co")
+    id = lo[:account_id]
+    s.close
+    sleep 0.5
+    PEMK::Forget.new(@db).forget(id, by: "op")
+    @db[:characters].insert(account_id: id, save_blob: Sequel.blob("landed late"), updated_at: Time.now)
+    @server.instance_variable_set(:@last_forget_sweep, nil)
+    wait_until("the sweep's purge", PEMK::Server::FORGET_SWEEP_SEC + 5) do
+      logs.any? { |l| l.include?("account #{id} forgotten - 1 row(s) written late purged by the sweep") }
+    end
+    assert_equal 0, @db[:characters].where(account_id: id).count
+    @server.stop
+    @db[:trade_deliveries].insert(account_id: id, uid: 9, trade_id: "t9", body: Sequel.blob("a Pokemon"), created_at: Time.now)
+    @server = PEMK::Server.new(logger: ->(m) { @logs << m })
+    @server.start
+    assert logs.any? { |l| l.include?("account #{id} forgotten - 1 row(s) written late purged at boot") }, logs.grep(/forgotten/).join("\n")
+    assert_equal 0, @db[:trade_deliveries].where(account_id: id).count
+  end
+
   # The badge boot pass plans every account holding a badge: a forgotten one plays no more.
   def test_a_forgotten_account_is_not_planned_at_boot
     _, lo = login("held@t.co")

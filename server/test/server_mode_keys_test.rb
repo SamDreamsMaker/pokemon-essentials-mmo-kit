@@ -29,7 +29,8 @@ class ServerModeKeysTest < Minitest::Test
     water = Array.new(20) { "." * 20 }
     water[2] = "..." + "w" * 4 + "." * 13
     doc = { "schema_version" => 3, "water_marks" => true,
-            "maps" => { "31" => { "name" => "Lake", "width" => 20, "height" => 20, "objects" => [], "water" => water } } }
+            "maps" => { "31" => { "name" => "Lake", "width" => 20, "height" => 20, "objects" => [], "water" => water },
+                        "32" => { "name" => "Sea", "width" => 20, "height" => 20, "objects" => [], "water" => water } } }
     doc["field_keys"] = keys if keys
     f = Tempfile.new(["pemk_world", ".json"])
     f.write(JSON.generate(doc))
@@ -179,6 +180,36 @@ class ServerModeKeysTest < Minitest::Test
     assert_nil conn_data(id)[:mode_token], "the login's read was enough"
     assert_equal 1, logs.count { |l| l.include?("surf with no key") }, "said once"
     [s, peer].each(&:close)
+  end
+
+  # Keyless and flipping the mode at every frame: still one line and one flag per 30 s - a
+  # row and a line the client could otherwise write at its frame budget.
+  def test_a_surf_dive_flip_flop_is_said_and_flagged_once
+    start_server
+    s, id = login("flip@t.co", badges: 0b11)
+    pos(s, LAND, :walk)
+    drain(s)
+    6.times { |i| pos(s, WATER, i.even? ? :surf : :dive) }
+    assert_equal [:pos_correct] * 6, drain(s).map { |e| e[:type] }, "each refused"
+    assert_equal 1, flags(id, 1)
+    sleep 0.5
+    assert_equal 1, flags(id), "flagged once"
+    assert_equal 1, logs.count { |l| l.match?(/account #{id} (surf|dive) with no key/) }, "said once"
+    s.close
+  end
+
+  # The shore left on another map (a swim begun through a warp): the way back names it,
+  # and the client's remotes are asked for again there.
+  def test_the_way_back_to_a_shore_on_another_map
+    start_server
+    s, id = login("warp@t.co", badges: 0b11)
+    pos(s, LAND, :walk)
+    drain(s)
+    on_reactor { @server.instance_variable_get(:@online)[id].data[:sync_at] = 1.0 }
+    pos(s, [32, 3, 2], :surf)
+    assert_equal [[:pos_correct, 31, 2, 2]], drain(s).map { |e| e.values_at(:type, :map, :x, :y) }, "back to the shore, on its map"
+    assert_nil conn_data(id)[:sync_at], "its next ask for the map's peers is honoured"
+    s.close
   end
 
   def test_a_swim_with_the_key_flows

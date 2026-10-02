@@ -108,7 +108,8 @@ Pokemon they issued (another player may hold one) and their trades, their flags 
 bans - a hard delete would break other players' records and let a cheater launder a
 history by asking. A live connection is closed within seconds (a ban row goes with the
 forget) and its rows purged again once its last work is done, so a save pushed before
-the kick brings nothing back. The server's logs (addresses, account numbers) and the
+the kick brings nothing back; a sweep purges again for ten minutes after the forget, and
+the next boot a month back, for a row that landed as it left. The server's logs (addresses, account numbers) and the
 database's backups are yours to rotate; write ban reasons and badge grant notes about
 behaviour, not people (they stay).
 
