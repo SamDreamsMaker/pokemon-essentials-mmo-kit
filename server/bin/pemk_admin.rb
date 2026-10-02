@@ -10,12 +10,22 @@
 #   DATABASE_URL=... bundle exec ruby bin/pemk_admin.rb unban <account>
 #   DATABASE_URL=... bundle exec ruby bin/pemk_admin.rb bans              # the bans in force
 #   DATABASE_URL=... bundle exec ruby bin/pemk_admin.rb show <account>    # the account, its bans, its flags
+#   DATABASE_URL=... bundle exec ruby bin/pemk_admin.rb forget <account> --yes   # the right to be forgotten
 # PEMK_OPERATOR names who acts in the record (default: the shell user).
+#
+# forget: on a player's request. Their email, name, password and sessions (with their
+# addresses) go, and so does their own game state - the save, the bag, the party, the
+# story flags, what they were owed. What stays, keyed by the account's number and naming
+# nobody: the ledger and badges, their battles' records and proofs, the Pokemon they
+# issued (another player may hold one), their trades, their flags and bans. A live
+# connection is closed within seconds and purged again once its last work is done. The
+# server's logs and the database's backups are the operator's to rotate.
 
 require "sequel"
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 require "pemk/bans"
 require "pemk/sessions"
+require "pemk/forget"
 
 db       = Sequel.connect(ENV.fetch("DATABASE_URL"))
 bans     = PEMK::Bans.new(db)
@@ -29,7 +39,7 @@ account = lambda do |key|
   row
 end
 
-label = ->(a) { "account #{a[:id]} (#{a[:email]}#{a[:username] ? ", #{a[:username]}" : ''})" }
+label = ->(a) { "account #{a[:id]} (#{a[:email] || 'forgotten'}#{a[:username] ? ", #{a[:username]}" : ''})" }
 span  = ->(b) { b[:ends_at] ? "until #{b[:ends_at]}" : "until lifted" }
 
 case cmd
@@ -65,9 +75,18 @@ when "bans"
     puts "  #{label.(a)} since #{b[:created_at]} #{span.(b)} by #{b[:banned_by]}: #{b[:reason]}"
   end
 
+when "forget"
+  acct = account.(ARGV.shift)
+  abort "forget is for good: name the account and add --yes" unless ARGV.delete("--yes")
+  case PEMK::Forget.new(db).forget(acct[:id], by: operator)
+  when :forgotten then puts "forgotten #{label.(acct)}: its personal data and its own state are gone; its records stay, naming nobody"
+  when :already   then puts "account #{acct[:id]} was forgotten already (#{acct[:forgotten_at]}): purged again, nothing else"
+  end
+
 when "show"
   acct = account.(ARGV.shift)
-  puts "#{label.(acct)} created #{acct[:created_at]}, last login #{acct[:last_login_at] || '-'}"
+  puts "#{label.(acct)} created #{acct[:created_at]}, last login #{acct[:last_login_at] || '-'}" \
+       "#{acct[:forgotten_at] ? ", forgotten #{acct[:forgotten_at]}" : ''}"
   ban = bans.active(acct[:id])
   puts ban ? "BANNED #{span.(ban)}: #{ban[:reason]}" : "not banned"
   bans.history(acct[:id]).each do |b|

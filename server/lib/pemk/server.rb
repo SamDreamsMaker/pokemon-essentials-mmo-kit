@@ -2458,7 +2458,7 @@ module PEMK
              else
                (held.keys | granted.keys).select { |id| held[id].to_i != granted[id] }
              end
-      ids.uniq.sort
+      ids.uniq.sort - Forget.new(@db).forgotten_among(ids.uniq)   # a forgotten account plays no more
     end
 
     def badge_plan_words(plan)
@@ -3373,11 +3373,22 @@ module PEMK
           @log.call("server: ban sweep failed #{e.class}: #{e.message}")
           {}
         end
+        forgotten = banned.empty? ? [] : (Forget.new(@db).forgotten_among(banned.keys) rescue [])
         @reactor.post do
           @ban_sweeping = false
           banned.each { |id, ban| let_go_banned(id, ban) }
+          # a forgotten account's own rows go again once its queued work is done: a last
+          # save, pushed before the kick, would bring its character back
+          forgotten.each { |id| @mailbox.submit(id) { purge_forgotten(id) } }
         end
       end
+    end
+
+    def purge_forgotten(account_id)
+      gone = Forget.new(@db).purge(account_id).select { |_, n| n.positive? }
+      @log.call("server: account #{account_id} forgotten - #{gone.map { |t, n| "#{n} #{t}" }.join(', ')} purged after its last work") unless gone.empty?
+    rescue StandardError => e
+      @log.call("server: account #{account_id} forgotten - purge failed #{e.class}: #{e.message}")
     end
 
     def let_go_banned(account_id, ban)
