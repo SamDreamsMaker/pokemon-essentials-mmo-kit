@@ -1,6 +1,6 @@
 {
   "schema_version": 3,
-  "generated_at": "2026-10-02T02:02:14",
+  "generated_at": "2026-10-02T04:15:46",
   "maps": {
     "1": {
       "name": "Intro",
@@ -4567,6 +4567,8 @@
     "count_badges": true,
     "surf": 4,
     "dive": 7,
-    "mode_sources": []
+    "mode_sources": [],
+    "surf_move": true,
+    "dive_move": true
   }
 }

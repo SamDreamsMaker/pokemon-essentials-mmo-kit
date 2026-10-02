@@ -43,7 +43,11 @@ class WorldExportFieldKeysPluginTest < Minitest::Test
     File.write("Plugins/MyGame/ferry.rb", "def ferry\n  $PokemonGlobal.surfing = true\nend\n# $PokemonGlobal.surfing = true\n")
     File.write("Plugins/MyGame/override.rb", "alias ferry_surf pbStartSurfing\ndef pbStartSurfing\n  ferry_surf\nend\n")   # definitions start no swim
     File.write("Plugins/PEMK/own.rb", "$PokemonGlobal.surfing = true\n")   # PEMK's own (the snap-back): not a source
-    File.write("Data/Scripts/012_Overworld/004_Overworld_FieldMoves.rb", "def pbStartSurfing\n  $PokemonGlobal.surfing = true\nend\n")
+    File.write("Data/Scripts/012_Overworld/004_Overworld_FieldMoves.rb",
+               "def pbSurf\n  movefinder = $player.get_pokemon_with_move(:SURF)\n  pbStartSurfing\nend\n" \
+               "def pbStartSurfing\n  $PokemonGlobal.surfing = true\nend\n" \
+               "def pbDive\n  pbMessage('deep')\nend\n" \
+               "def pbSurfacing\n  movefinder = $player.get_pokemon_with_move(:DIVE)\nend\n")   # a game that dropped Dive's Pokemon
     File.write("Data/Scripts/012_Overworld/009_Custom.rb", "pbStartSurfing if $game_switches[9]\n")
     keys = PEMK::WorldExport.field_keys([[3, boat], [5, talk]])
     print keys.inspect
@@ -61,6 +65,65 @@ class WorldExportFieldKeysPluginTest < Minitest::Test
                   { file: "Data/Scripts/012_Overworld/009_Custom.rb", line: 1, script: "pbStartSurfing if $game_switches[9]" },
                   { file: "Plugins/MyGame/ferry.rb", line: 2, script: "$PokemonGlobal.surfing = true" }],
                  keys[:mode_sources], "a message, a read, an end of a swim, a comment, the engine's own and PEMK's are none"
+    assert_equal [true, false], keys.values_at(:surf_move, :dive_move), "Surf still asks for a Pokemon, Dive no longer"
+  end
+
+  # A script of the game redefining pbSurf: its rule is unknown (nil); no engine file: nil.
+  REDEFINED = <<~'RUBY'
+    module PEMK; def self.log(_m); end; end
+    module Settings
+      PHONE_REMATCHES_POSSIBLE_FROM_BEGINNING = false
+      BADGE_FOR_SURF = 4
+      BADGE_FOR_DIVE = 7
+    end
+    module GameData; module Trainer; def self.each; end; end; end
+    def load_data(_path); []; end
+    load ARGV[0]
+    Dir.chdir(ARGV[1])
+    Dir.mkdir("Plugins"); Dir.mkdir("Plugins/MyGame"); Dir.mkdir("Data"); Dir.mkdir("Data/Scripts")
+    before = PEMK::WorldExport.field_keys([]).values_at(:surf_move, :dive_move)
+    Dir.mkdir("Data/Scripts/012_Overworld")
+    File.write("Data/Scripts/012_Overworld/004_Overworld_FieldMoves.rb",
+               "def pbSurf\n  $player.get_pokemon_with_move(:SURF)\nend\ndef pbDive\n  $player.get_pokemon_with_move(:DIVE)\nend\n" \
+               "def pbSurfacing\n  $player.get_pokemon_with_move(:DIVE)\nend\n")
+    File.write("Plugins/MyGame/surfboard.rb", "def pbSurf\n  pbStartSurfing if $bag.has?(:SURFBOARD)\nend\n")
+    surfboard = PEMK::WorldExport.field_keys([]).values_at(:surf_move, :dive_move)
+    File.delete("Plugins/MyGame/surfboard.rb")
+    File.write("Plugins/MyGame/anywater.rb", "class Trainer\n  def get_pokemon_with_move(move)\n    pokemon_party.find { |p| p.types.include?(:WATER) }\n  end\nend\n")
+    anywater = PEMK::WorldExport.field_keys([]).values_at(:surf_move, :dive_move)
+    File.delete("Plugins/MyGame/anywater.rb")
+    File.write("Plugins/MyGame/001_Trainer.rb", "class Trainer\n  def get_pokemon_with_move(move)\n    nil\n  end\nend\n")   # the engine file's namesake
+    print [before, surfboard, anywater, PEMK::WorldExport.field_keys([]).values_at(:surf_move, :dive_move)].inspect
+  RUBY
+
+  def test_a_redefined_rule_is_unknown
+    out = Dir.mktmpdir("pemk_keys") { |dir| IO.popen([RbConfig.ruby, "-W0", "-e", REDEFINED, EXPORT, dir], err: %i[child out], &:read) }
+    assert $?.success?, "runner crashed:\n#{out}"
+    assert_equal [[nil, nil], [nil, true], [nil, nil], [nil, nil]], eval(out), # rubocop:disable Security/Eval
+                 "no engine file: unknown; a surfboard's pbSurf: Surf unknown, Dive as the engine; any Water type surfs: both unknown; a plugin named like the engine's file: unknown"
+  end
+
+  # This repository's own engine and plugins: the stock rule, PEMK's aliases unseen.
+  REAL = <<~'RUBY'
+    module PEMK; def self.log(_m); end; end
+    module Settings
+      PHONE_REMATCHES_POSSIBLE_FROM_BEGINNING = false
+      BADGE_FOR_SURF = 4
+      BADGE_FOR_DIVE = 7
+    end
+    module GameData; module Trainer; def self.each; end; end; end
+    def load_data(_path); []; end
+    load ARGV[0]
+    Dir.chdir(ARGV[1])
+    print PEMK::WorldExport.field_keys([]).values_at(:surf_move, :dive_move).inspect
+  RUBY
+
+  def test_this_repository_still_asks_for_the_move
+    root = File.expand_path("../..", __dir__)
+    skip "no engine scripts here (a copy of server/ and Plugins/ alone)" unless Dir.exist?(File.join(root, "Data", "Scripts"))
+    out = IO.popen([RbConfig.ruby, "-W0", "-e", REAL, EXPORT, root], err: %i[child out], &:read)
+    assert $?.success?, "runner crashed:\n#{out}"
+    assert_equal "[true, true]", out.strip
   end
 
   NO_KEYS = <<~'RUBY'

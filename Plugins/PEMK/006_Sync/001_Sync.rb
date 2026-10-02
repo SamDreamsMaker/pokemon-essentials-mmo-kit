@@ -265,6 +265,13 @@ module PEMK
       flush_primitives
     end
 
+    # A swim starts (mode keys): the party's report goes before the first frame on the
+    # water - the party channel alone, hash-gated (nothing leaves if it did not change).
+    def flush_party
+      @mon_dirty = true
+      flush_primitives
+    end
+
     # --- per-frame tick (from Pump): debounce + staleness cap ------------------
     def tick
       watch_save_ack
