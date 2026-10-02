@@ -102,8 +102,7 @@ module PEMK
       return unless prev && prev[0] == map
 
       px, py = prev[1], prev[2]
-      return if x == px && y == py
-      return if [(x - px).abs, (y - py).abs].max != 1
+      return if [(x - px).abs, (y - py).abs].max != 1   # a repeat, a turn, a hop, a warp pad: no step
 
       now = @clock.call
       held, at = conn_data[:pace]
