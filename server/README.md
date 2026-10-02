@@ -97,6 +97,24 @@ runs a `pg_dump`. Point clients at the host via `mmo_config.txt`
   Docker).
 - `PEMK_BIND` / `PEMK_PORT` — listen address/port (default `127.0.0.1:9998` in
   dev, `0.0.0.0:9998` in Docker/`dev-server.sh`).
+- Every other setting, with its default and what it needs:
+  [`../docs/SERVER-SETTINGS.md`](../docs/SERVER-SETTINGS.md). All of them are off unless
+  you set them.
+
+## Forgetting an account (the right to be forgotten)
+
+`bin/pemk_admin.rb forget <id|email> --yes`, on a player's request. Gone: their email,
+name, password and sessions (with their addresses), and their own game state - the save,
+the bag, the party, the story flags, what they were owed. Kept, under the account's
+number and naming nobody: the ledger and badges, their battles' records and proofs, the
+Pokemon they issued (another player may hold one) and their trades, their flags and
+bans - a hard delete would break other players' records and let a cheater launder a
+history by asking. A live connection is closed within seconds (a ban row goes with the
+forget) and its rows purged again once its last work is done, so a save pushed before
+the kick brings nothing back; a sweep purges again for ten minutes after the forget, and
+the next boot a month back, for a row that landed as it left. The server's logs (addresses, account numbers) and the
+database's backups are yours to rotate; write ban reasons and badge grant notes about
+behaviour, not people (they stay).
 
 ## Roadmap (authority ladder)
 

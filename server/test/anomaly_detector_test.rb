@@ -95,6 +95,16 @@ class AnomalyDetectorTest < Minitest::Test
     refute_nil report(@a, "flags:badge_unprovable")
   end
 
+  # Mode keys: a swim with no key is a sign; two open a review (one tolerates a swim an
+  # event the export missed started).
+  def test_two_illegal_swims_are_reported
+    @det.record_flag(@a, :mode_illegal)
+    assert_equal 0, @det.sweep
+    @det.record_flag(@a, :mode_illegal)
+    assert_equal 1, @det.sweep
+    refute_nil report(@a, "flags:mode_illegal")
+  end
+
   # --- sweep: provenance mix (fabricated wild-table mons) ----------------------------
   def test_sweep_reports_fabricated_wild_provenance
     5.times { mon(@a, "PIDGEY", "client") }             # 5 client-origin wild-table mons

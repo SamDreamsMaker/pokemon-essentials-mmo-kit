@@ -59,6 +59,30 @@ class AdminCliTest < Minitest::Test
     assert_nil @db[:account_bans].where(account_id: @id).get(:ends_at)
   end
 
+  # The right to be forgotten: for good, by id or by email, once.
+  def test_forget
+    out, ok = admin("forget", @id)
+    refute ok, "without --yes nothing happens"
+    assert_includes out, "for good"
+    assert_equal 1, @db[:sessions].where(account_id: @id).count
+    out, ok = admin("forget", "cheat@t.co", "--yes")
+    assert ok, out
+    assert_includes out, "forgotten account #{@id} (cheat@t.co)"
+    acct = @db[:accounts].where(id: @id).first
+    assert_nil acct[:email]
+    assert_equal "forgotten", acct[:status]
+    assert_equal 0, @db[:sessions].where(account_id: @id).count
+    refute_nil @db[:account_bans].where(account_id: @id).first
+    out, = admin("show", @id)
+    assert_includes out, "account #{@id} (forgotten, forgotten-#{@id})"
+    assert_includes out, ", forgotten 20"
+    out, ok = admin("forget", "--yes", @id)   # the flag first, as some type it
+    assert ok
+    assert_includes out, "was forgotten already"
+    _, ok = admin("forget", "cheat@t.co", "--yes")
+    refute ok, "its email names nobody now"
+  end
+
   def test_what_it_refuses
     out, ok = admin("ban", "nobody@t.co")
     refute ok

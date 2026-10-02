@@ -43,6 +43,7 @@ module PEMK
     def authenticate(email, password, now: Time.now)
       acct = @db[:accounts].where(email: email.to_s.strip).first
       return [nil, :not_found] unless acct
+      return [nil, :forgotten] if acct[:status] == "forgotten"   # no secret left to protect (its email is gone too)
       return [nil, :locked] if acct[:locked_until] && acct[:locked_until] > now
 
       if Password.verify(password, acct[:password_hash])

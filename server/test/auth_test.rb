@@ -62,6 +62,16 @@ class AuthTest < Minitest::Test
     assert_equal :locked, @accounts.authenticate("brock@x.co", "onixrock1").last
   end
 
+  # A forgotten account has its email taken away; one whose email an operator restored
+  # by hand is still refused, its counters untouched.
+  def test_a_forgotten_account_is_refused
+    @accounts.create(email: "gone@x.co", password: "forgotten1")
+    @db[:accounts].where(email: "gone@x.co").update(status: "forgotten")
+    assert_equal :forgotten, @accounts.authenticate("gone@x.co", "forgotten1").last
+    assert_equal :forgotten, @accounts.authenticate("gone@x.co", "wrong").last
+    assert_equal 0, @db[:accounts].where(email: "gone@x.co").get(:failed_count)
+  end
+
   def test_unknown_email
     assert_equal :not_found, @accounts.authenticate("ghost@x.co", "whatever").last
   end
