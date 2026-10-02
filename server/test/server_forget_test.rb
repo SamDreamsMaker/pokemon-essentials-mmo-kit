@@ -71,11 +71,21 @@ class ServerForgetTest < Minitest::Test
     end
   end
 
+  # The account's mailbox busy for +seconds+ (queued from the reactor, as the server does).
+  def hold(id, seconds)
+    done = Queue.new
+    @server.instance_variable_get(:@reactor).post do
+      @server.instance_variable_get(:@mailbox).submit(id) { sleep seconds }
+      done << true
+    end
+    Timeout.timeout(3) { done.pop }
+  end
+
   def test_a_forgotten_player_is_let_go_and_a_late_save_purged
     s, lo = login("gone@t.co")
     id = lo[:account_id]
     token = lo[:token]
-    @server.instance_variable_get(:@mailbox).submit(id) { sleep 2 }    # work ahead of its save
+    hold(id, 2)                                                            # work ahead of its save
     send_env(s, { type: :save, trainer_id: 7 }, "the player's name is in here")   # queued behind it
     sleep 0.3
     assert_equal :forgotten, PEMK::Forget.new(@db).forget(id, by: "op")   # the console, meanwhile
@@ -96,6 +106,35 @@ class ServerForgetTest < Minitest::Test
     send_env(s3, { type: :login, email: "gone@t.co", password: "password1" })
     assert_equal "not_found", recv_type(s3, :login_ok, :login_err)[:reason], "its email names nobody"
     s3.close
+  end
+
+  # A player who quits before the sweep lets it go: its save queued before it left lands
+  # after the console's purge - and is purged again as its socket closes.
+  def test_a_player_who_quits_first_is_purged_as_it_leaves
+    s, lo = login("quit@t.co")
+    id = lo[:account_id]
+    hold(id, 2)
+    send_env(s, { type: :save, trainer_id: 7 }, "the player's name is in here")
+    sleep 0.3
+    assert_equal :forgotten, PEMK::Forget.new(@db).forget(id, by: "op")
+    s.close                                                               # gone before any sweep
+    wait_until("the late save purged", 10) do
+      logs.any? { |l| l.match?(/account #{id} forgotten - 1 characters purged after its last work/) }
+    end
+    assert_equal 0, @db[:characters].where(account_id: id).count
+    refute logs.any? { |l| l.include?("is banned - connection closed") }, "no sweep let it go: it left"
+  end
+
+  # Any other player's save stays when it quits: the close purges forgotten accounts only.
+  def test_a_player_who_quits_keeps_its_save
+    s, lo = login("stays@t.co")
+    id = lo[:account_id]
+    send_env(s, { type: :save, trainer_id: 7 }, "its save")
+    wait_until("the save stored", 5) { @db[:characters].where(account_id: id).count == 1 }
+    s.close
+    sleep 1
+    assert_equal 1, @db[:characters].where(account_id: id).count
+    refute logs.any? { |l| l.include?("purged") }
   end
 
   # The badge boot pass plans every account holding a badge: a forgotten one plays no more.

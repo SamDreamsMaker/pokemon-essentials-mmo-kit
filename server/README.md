@@ -109,7 +109,8 @@ bans - a hard delete would break other players' records and let a cheater launde
 history by asking. A live connection is closed within seconds (a ban row goes with the
 forget) and its rows purged again once its last work is done, so a save pushed before
 the kick brings nothing back. The server's logs (addresses, account numbers) and the
-database's backups are yours to rotate; write ban reasons about behaviour, not people.
+database's backups are yours to rotate; write ban reasons and badge grant notes about
+behaviour, not people (they stay).
 
 ## Roadmap (authority ladder)
 

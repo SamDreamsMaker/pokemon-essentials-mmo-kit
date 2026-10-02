@@ -3373,15 +3373,23 @@ module PEMK
           @log.call("server: ban sweep failed #{e.class}: #{e.message}")
           {}
         end
-        forgotten = banned.empty? ? [] : (Forget.new(@db).forgotten_among(banned.keys) rescue [])
         @reactor.post do
           @ban_sweeping = false
-          banned.each { |id, ban| let_go_banned(id, ban) }
-          # a forgotten account's own rows go again once its queued work is done: a last
-          # save, pushed before the kick, would bring its character back
-          forgotten.each { |id| @mailbox.submit(id) { purge_forgotten(id) } }
+          banned.each { |id, ban| let_go_banned(id, ban) }   # a forgotten one is purged again as its socket closes
         end
       end
+    end
+
+    # On the reactor, as a connection closes: a forgotten account's own rows go again once
+    # its queued work is done (a save pushed before it was let go, or before it quit,
+    # would bring its character back). One read per close, after that work.
+    def purge_if_forgotten(account_id)
+      queued = @mailbox.submit(account_id) do
+        purge_forgotten(account_id) if Forget.new(@db).forgotten?(account_id)
+      rescue StandardError => e
+        @log.call("server: account #{account_id} - is it forgotten? #{e.class}: #{e.message}")
+      end
+      @log.call("server: account #{account_id} mailbox full - a forgotten account's purge waits for its next close") unless queued
     end
 
     def purge_forgotten(account_id)
@@ -4150,6 +4158,9 @@ module PEMK
         cancel_pending_trades(aid, conn)
         clear_peer_session(aid)   # a dropped account's peer session dies with it
         @flag_state&.forget(aid) unless @online.key?(aid)   # step 5 mirrors of a gone account
+        # a forgotten account's own rows go again after its last queued work (a save
+        # pushed just before it quit) - whether the ban sweep let it go or it left first
+        purge_if_forgotten(aid)
       end
 
       map = conn.data[:map_id]

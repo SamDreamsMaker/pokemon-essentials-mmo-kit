@@ -76,7 +76,7 @@ class AdminCliTest < Minitest::Test
     out, = admin("show", @id)
     assert_includes out, "account #{@id} (forgotten, forgotten-#{@id})"
     assert_includes out, ", forgotten 20"
-    out, ok = admin("forget", @id, "--yes")
+    out, ok = admin("forget", "--yes", @id)   # the flag first, as some type it
     assert ok
     assert_includes out, "was forgotten already"
     _, ok = admin("forget", "cheat@t.co", "--yes")

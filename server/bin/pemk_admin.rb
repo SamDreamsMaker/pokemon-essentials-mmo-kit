@@ -76,8 +76,9 @@ when "bans"
   end
 
 when "forget"
+  yes  = ARGV.delete("--yes")
   acct = account.(ARGV.shift)
-  abort "forget is for good: name the account and add --yes" unless ARGV.delete("--yes")
+  abort "forget is for good: name the account and add --yes" unless yes
   case PEMK::Forget.new(db).forget(acct[:id], by: operator)
   when :forgotten then puts "forgotten #{label.(acct)}: its personal data and its own state are gone; its records stay, naming nobody"
   when :already   then puts "account #{acct[:id]} was forgotten already (#{acct[:forgotten_at]}): purged again, nothing else"

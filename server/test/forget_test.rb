@@ -35,8 +35,14 @@ class ForgetTest < Minitest::Test
     PEMK::Sessions.new(@db).issue(@id)
     @db[:characters].insert(account_id: @id, save_blob: Sequel.blob("the player's name is in here"), updated_at: Time.now)
     @db[:economy_balances].insert(account_id: @id, field: "money", balance: 3000, last_seq: 1)
-    @db[:badge_baselines].insert(account_id: @id, mask: 1, taken_at: Time.now) rescue nil
+    @db[:badge_baselines].insert(account_id: @id, mask: 1, taken_at: Time.now)
+    @db[:inventory_snapshots].insert(account_id: @id)
+    @db[:trade_deliveries].insert(account_id: @id, uid: 5, trade_id: "t1", body: Sequel.blob("a Pokemon, its trainer's name in it"),
+                                  created_at: Time.now)
     assert_equal :forgotten, @forget.forget(@id, by: "op")
+    %i[badge_baselines inventory_snapshots trade_deliveries].each do |t|
+      assert_equal 0, @db[t].where(account_id: @id).count, "#{t}: gone"
+    end
     acct = @db[:accounts].where(id: @id).first
     assert_nil acct[:email]
     assert_equal ["forgotten-#{@id}", "forgotten", "forgotten"], acct.values_at(:username, :password_hash, :status)
