@@ -29,13 +29,16 @@ module PEMK
     # holding the arrow through a door, or a move route the arrival event starts (the
     # Pokemon Lab's). Only the arrival gets this slack; a wall next to it is still a wall.
     ARRIVAL_REACH = 1
-    # The pace of a player's own steps, over a window of single-tile moves on one map: the
-    # bike does 10 tiles a second (0.1 s a tile; running 8, walking 4). Frames arrive in
-    # bursts (one read, one tick), so the window is long and the bar above the bike; a
-    # cutscene's move route at speed 6 (20 tiles/s) over that many tiles is said too.
-    # Detection only: said once per PACE_SAID, nothing corrected, nothing flagged.
-    PACE_STEPS = 24
+    # The pace of a player's own steps: each single-tile move on one map spends a step from
+    # a bucket that refills at PACE_MAX tiles a second and holds PACE_BURST at most. The bike
+    # does 10 (0.1 s a tile; running 8, walking 4), so an honest player never empties it,
+    # however its frames arrive - a stall delivers them in one read, one tick, and the
+    # presence budget lets 40 through at once. A client twice as fast as the bike spends it
+    # in 8 s, three times as fast in under 3 s. A cutscene's move route announces no steps
+    # (one jump, a teleport: the window starts anew). Detection only: said once per
+    # PACE_SAID per connection, nothing corrected, nothing flagged.
     PACE_MAX   = 15.0
+    PACE_BURST = 40.0
     PACE_SAID  = 30.0
 
     def initialize(world, logger: nil, mode: :off, clock: nil)
@@ -88,10 +91,11 @@ module PEMK
       verdict == :match || verdict == :unchecked
     end
 
-    # A single-tile step on the same map adds its time to the window; a repeat or a turn
-    # adds nothing; a hop, a warp pad, a map change or the session's first frame starts a
-    # new window. A full window faster than PACE_MAX is said - a modified client moving one
-    # legal tile at a time, too fast - at most once per PACE_SAID.
+    # A single-tile step on the same map spends one from the bucket (refilled for the time
+    # since the last); a repeat or a turn spends nothing; a hop, a warp pad, a map change
+    # or the session's first frame starts with a full bucket. An empty bucket is said - a
+    # modified client moving one legal tile at a time, too fast - at most once per
+    # PACE_SAID; the bucket then stays at empty, so the pace is said again after it.
     def note_pace(account_id, conn_data, prev, map, x, y)
       return conn_data.delete(:pace) unless prev && prev[0] == map
 
@@ -99,20 +103,17 @@ module PEMK
       return if x == px && y == py
       return conn_data.delete(:pace) if [(x - px).abs, (y - py).abs].max != 1
 
-      times = (conn_data[:pace] ||= [])
-      times << @clock.call
-      times.shift while times.size > PACE_STEPS
-      return if times.size < PACE_STEPS
-
-      span = times.last - times.first
-      pace = span.positive? ? (PACE_STEPS - 1) / span : Float::INFINITY
-      return if pace <= PACE_MAX
+      now = @clock.call
+      held, at = conn_data[:pace]
+      level = (held ? [PACE_BURST, held + (now - at) * PACE_MAX].min : PACE_BURST) - 1
+      conn_data[:pace] = [[level, 0.0].max, now]
+      return if level >= -1e-6   # the bar itself (a float's dust aside) is not over it
 
       said = conn_data[:pace_said]
-      return if said && times.last - said < PACE_SAID
+      return if said && now - said < PACE_SAID
 
-      conn_data[:pace_said] = times.last
-      @log.call(format("posaudit: account %s paces %.1f tiles/s over %d steps (the bike does 10)", account_id, pace, PACE_STEPS))
+      conn_data[:pace_said] = now
+      @log.call("posaudit: account #{account_id} paces above #{PACE_MAX.to_i} tiles/s: its #{PACE_BURST.to_i} steps in hand are spent (the bike does 10)")
     end
 
     def classify(env, map, x, y, prev)

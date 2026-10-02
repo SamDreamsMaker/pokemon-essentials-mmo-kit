@@ -98,58 +98,82 @@ class PositionAuditTest < Minitest::Test
 
   def pace_lines = @logs.grep(/paces/)
 
-  def test_a_bike_a_run_and_a_slow_cutscene_are_silent
-    [0.1, 0.125, 0.25, 0.08].each do |dt|   # the bike, running, walking, a bike with jitter
+  SAID = "posaudit: account 1 paces above 15 tiles/s: its 40 steps in hand are spent (the bike does 10)"
+
+  # The bike, running, walking, a bike with jitter: the bucket refills faster than they
+  # spend it, for as long as they go.
+  def test_a_bike_a_run_and_a_walk_are_silent
+    [0.1, 0.125, 0.25, 0.08].each do |dt|
       cd = { last_pos: [5, 0, 0] }
-      pace_walk(pacer, cd, PEMK::PositionAudit::PACE_STEPS + 4, dt)
+      pace_walk(pacer, cd, 400, dt)
       assert_empty pace_lines, "#{dt} s a tile"
     end
   end
 
-  def test_a_speedhack_is_said_once_a_window_at_a_time
+  # A stall delivers a cyclist's frames in one read: the whole presence burst at one
+  # instant, then the bike's pace again - the bucket takes it.
+  def test_a_delivery_stall_is_no_speedhack
     cd = { last_pos: [5, 0, 0] }
     a = pacer
-    pace_walk(a, cd, PEMK::PositionAudit::PACE_STEPS - 1, 0.04)   # 25 tiles/s, the window one short
-    assert_empty pace_lines, "a window not yet full says nothing"
-    x = pace_walk(a, cd, 1, 0.04, from: [5, PEMK::PositionAudit::PACE_STEPS - 1, 0])
-    assert_equal ["posaudit: account 1 paces 25.0 tiles/s over 24 steps (the bike does 10)"], pace_lines
-    pace_walk(a, cd, 20, 0.04, from: [5, x, 0])
+    x = pace_walk(a, cd, 40, 0.0)                     # 40 steps stamped at the same time
+    pace_walk(a, cd, 200, 0.1, from: [5, x, 0])       # then cycling on
+    assert_empty pace_lines
+  end
+
+  # Twice the bike's speed spends the bucket in 8 s: each step earns 0.75 and spends 1, from
+  # the 39 a step leaves in hand - said at the 157th, once per 30 s while it goes on; a slow
+  # walk before earns no credit beyond the bucket.
+  def test_a_speedhack_is_said_once_the_steps_in_hand_are_spent
+    cd = { last_pos: [5, 0, 0] }
+    a = pacer
+    x = pace_walk(a, cd, 1000, 0.25)                  # a long walk first
+    x = pace_walk(a, cd, 156, 0.05, from: [5, x, 0])
+    assert_empty pace_lines, "the steps in hand"
+    x = pace_walk(a, cd, 1, 0.05, from: [5, x, 0])
+    assert_equal [SAID], pace_lines
+    x = pace_walk(a, cd, 100, 0.05, from: [5, x, 0])  # 5 s more of it
     assert_equal 1, pace_lines.size, "said once per 30 s while it goes on"
-    @now += 30
-    pace_walk(a, cd, 1, 0.04, from: [5, x + 20, 0])
-    assert_equal 1, pace_lines.size, "a pause slows the window: the old steps are still in it"
-    pace_walk(a, cd, PEMK::PositionAudit::PACE_STEPS, 0.04, from: [5, x + 21, 0])
-    assert_equal 2, pace_lines.size, "a window of fast steps again, 30 s later: said again"
+    pace_walk(a, cd, 600, 0.05, from: [5, x, 0])      # 30 s more
+    assert_equal 2, pace_lines.size, "said again after"
   end
 
   # A ledge hop and a step over a map's edge are legal moves the audit lets through (a
-  # match) that are no steps of the pace: each starts the window anew.
+  # match) that are no steps of the pace: each starts with a full bucket; a repeat or a
+  # turn in place spends nothing.
   def test_a_repeat_a_turn_a_hop_and_a_map_change_are_no_steps
     a = PEMK::PositionAudit.new(FakeWorld.new(ledges: [[5, 24, 0]], conns: [[5, 6]]), logger: @logger, clock: -> { @now })
     @now = 100.0
     cd = { last_pos: [5, 0, 0] }
-    x = pace_walk(a, cd, PEMK::PositionAudit::PACE_STEPS - 1, 0.04)                # to (5, 23, 0)
+    x = pace_walk(a, cd, 23, 0.04)                                                  # to (5, 23, 0)
+    held = cd[:pace][0]
     6.times { @now += 0.04; a.check(1, env(map: 5, x: x, y: 0), cd) }             # heartbeat repeats: no step
-    assert_equal PEMK::PositionAudit::PACE_STEPS - 1, cd[:pace].size, "a repeat adds nothing"
     @now += 0.04
-    assert_equal :match, a.check(1, env(map: 5, x: x + 2, y: 0), cd)              # a hop over the ledge at 24: a new window
+    a.check(1, env(map: 5, x: x, y: 0, type: :dir), cd)                            # a turn in place: no step
+    assert_equal held, cd[:pace][0], "a repeat or a turn spends nothing"
+    @now += 0.04
+    assert_equal :match, a.check(1, env(map: 5, x: x + 2, y: 0), cd)              # a hop over the ledge at 24: a full bucket
     assert_nil cd[:pace]
     x += 2
-    x = pace_walk(a, cd, PEMK::PositionAudit::PACE_STEPS - 1, 0.04, from: [5, x, 0])   # to (5, 48, 0)
+    x = pace_walk(a, cd, 23, 0.04, from: [5, x, 0])                               # to (5, 48, 0)
     @now += 0.04
-    assert_equal :match, a.check(1, env(map: 6, x: x + 1, y: 0), cd)              # one tile on, over the edge to map 6: a new window
+    assert_equal :match, a.check(1, env(map: 6, x: x + 1, y: 0), cd)              # one tile on, over the edge to map 6: a full bucket
     assert_nil cd[:pace]
     assert_empty pace_lines
   end
 
-  def test_a_violation_starts_the_window_anew
-    a = PEMK::PositionAudit.new(FakeWorld.new(walk: { [5, 9, 0] => false }), logger: @logger, clock: -> { @now })
+  def test_a_violation_starts_with_a_full_bucket_but_the_line_is_not_said_again
+    a = PEMK::PositionAudit.new(FakeWorld.new(walk: { [5, 200, 0] => false }), logger: @logger, clock: -> { @now })
     @now = 100.0
     cd = { last_pos: [5, 0, 0] }
-    pace_walk(a, cd, 8, 0.04)                 # to (5, 8, 0)
-    @now += 0.04
-    assert_equal :noclip, a.check(1, env(map: 5, x: 9, y: 0), cd)
+    x = pace_walk(a, cd, 161, 0.05)                   # said
+    assert_equal 1, pace_lines.size
+    @now += 0.05
+    assert_equal :teleport, a.check(1, env(map: 5, x: x + 3, y: 0), cd)           # a jump: a full bucket again
     assert_nil cd[:pace]
+    pace_walk(a, cd, 170, 0.05, from: [5, x + 3, 0])  # spent again within 30 s: not said again
+    assert_equal 1, pace_lines.size
+    @now += 0.05
+    assert_equal :noclip, a.check(1, env(map: 5, x: 200, y: 0), { last_pos: [5, 199, 0], pace: [3.0, @now] })
   end
 
   def test_noclip_on_fully_blocked_tile

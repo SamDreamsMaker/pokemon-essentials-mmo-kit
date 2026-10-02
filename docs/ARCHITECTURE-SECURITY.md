@@ -287,13 +287,16 @@ blocked. **Spawn/respawn is server-owned:** the last-good position is persisted
 (migration 007) and re-seeded at login, so a client can't spawn anywhere.
 
 **Pace** (2026-10-02, detection only): the time between a player's own steps is
-measured too - the last 24 single-tile moves on one map; a window faster than 15 tiles a
-second (the bike does 10, running 8, walking 4) is said once per 30 s (`posaudit: account
-N paces 23.0 tiles/s over 24 steps`). A modified client moving one legal tile at a time,
-too fast, was a legal walker before. Frames arrive in bursts (one read, one tick), hence
-the long window and the bar above the bike; a cutscene's move route at speed 6 (20 tiles
-a second) over that many tiles is said too, so nothing is corrected or flagged yet - the
-lines say what a later bar would act on. The client's own `:speed` is never used.
+measured too. Each single-tile move on one map spends a step from a bucket that refills
+at 15 tiles a second and holds 40 (the bike does 10, running 8, walking 4; 40 is the
+burst the presence budget lets through at once), so an honest player never empties it,
+however its frames arrive - a stall delivers them in one read. A client twice as fast
+as the bike spends it in 8 s, three times as fast in under 3 s: `posaudit: account N
+paces above 15 tiles/s: its 40 steps in hand are spent`, once per 30 s per connection.
+A modified client moving one legal tile at a time, too fast, was a legal walker before.
+A cutscene's move route announces no steps (one jump, a logged teleport), a hop, a warp
+pad or a map change starts with a full bucket, and the client's own `:speed` is never
+used. Nothing is corrected or flagged yet: the lines come first.
 
 **Water.** The passability grid counts every water tile as a wall. The world export
 also marks, per map, where a surfer may be (`water` rows: `w`, the engine's rule for
