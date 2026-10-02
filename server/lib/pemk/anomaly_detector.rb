@@ -57,8 +57,8 @@ module PEMK
                                      # a record the harness cannot replay): an honest client waits
                                      # for its seed, so 2 tolerates one battle begun offline
       "mode_illegal"        => 2     # surfing or diving with no key (the badge the game requires):
-                                     # once per episode; 2 tolerates a swim an event the export
-                                     # missed started
+                                     # once per 30 s of it, never where the game's own scripts
+                                     # start swims; 2 = a minute of keyless swimming
     }.freeze
 
     FABRICATED_WILD_MIN = 5   # >= this many client-origin wild-table mons to report

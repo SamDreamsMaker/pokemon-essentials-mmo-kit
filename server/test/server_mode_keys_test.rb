@@ -175,7 +175,7 @@ class ServerModeKeysTest < Minitest::Test
     assert_equal [:walk], drain(peer).map { |e| e[:mode] }, "on foot again: it flows"
     pos(s, WATER, :surf)
     assert_equal [:pos_correct], drain(s).map { |e| e[:type] }, "refused again"
-    assert_equal 2, flags(id, 2), "a new episode"
+    assert_equal 1, flags(id, 2), "flagged once per 30 s, like the log"
     assert_nil conn_data(id)[:mode_token], "the login's read was enough"
     assert_equal 1, logs.count { |l| l.include?("surf with no key") }, "said once"
     [s, peer].each(&:close)
@@ -259,8 +259,9 @@ class ServerModeKeysTest < Minitest::Test
     assert_equal [:surf], drain(peer).map { |e| e[:mode] }, "with the key now: the swim flows"
     assert_empty nothing(s)
     send_env(s, { type: :econ, field: :money, value: 100, seq: 2 })
+    send_env(s, { type: :money_claim, nonce: 1, kind: "trainer", trainers: [], amount: 100 })   # money authority off: dropped
     drain(s)
-    assert_equal 1, conn_data(id)[:mode_token], "another field: nothing to read"
+    assert_equal 1, conn_data(id)[:mode_token], "another field, a claim nobody judges: nothing to read"
     [s, peer].each(&:close)
   end
 
@@ -281,8 +282,29 @@ class ServerModeKeysTest < Minitest::Test
     assert logs.any? { |l| l.include?("mode key read failed RuntimeError: the database is away") }
     @server.singleton_class.remove_method(:badges_allowed)
     pos(s, WATER, :surf)
+    assert_equal 1, conn_data(id)[:mode_token], "not at once: a failed read waits MODE_RETRY before the next"
+    on_reactor { @server.instance_variable_get(:@online)[id].data.delete(:mode_retry_at) }   # the wait over
+    pos(s, [31, 4, 2], :surf)
     assert verdict(id, :surf, fresh: true)[:ok], "read again at the swim"
     assert_equal 2, conn_data(id)[:mode_token]
+    s.close
+  end
+
+  # The badges move again while a read is in flight (two badge frames in one write, a
+  # claim behind a save): that read predates the change - one more follows it.
+  def test_a_change_during_a_read_reads_once_more
+    start_server
+    s, id = login("twice@t.co")
+    pos(s, LAND, :walk)
+    drain(s)
+    slow_read(0.4)
+    s.write(W.encode_split({ type: :econ, field: :badges, value: 0, seq: 1 }) +
+            W.encode_split({ type: :econ, field: :badges, value: 0b1111, seq: 2 }))
+    drain(s)
+    deadline = Time.now + 5
+    sleep 0.05 while conn_data(id)[:mode_token].to_i < 2 && Time.now < deadline
+    assert_equal 2, conn_data(id)[:mode_token], "the read in flight, then one more"
+    assert verdict(id, :surf, fresh: true)[:ok], "the fresh verdict is the second frame's"
     s.close
   end
 

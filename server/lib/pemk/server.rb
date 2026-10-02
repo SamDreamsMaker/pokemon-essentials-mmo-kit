@@ -322,7 +322,7 @@ module PEMK
 
       dispatch_frame(conn, env, type, authed, dec[:body])
       # its keys may change: read again, queued after the frame's own mailbox work
-      mode_keys_stale(conn, authed) if type == :money_claim || (type == :econ && env[:field].to_s == "badges")
+      mode_keys_stale(conn, authed) if (type == :money_claim && @money_claims) || (type == :econ && env[:field].to_s == "badges")
     rescue StandardError => e
       # A raise used to unwind to the reactor's blanket rescue, aborting the whole tick
       # (and the rest of this socket's already-parsed frames) with an unattributable log.
@@ -3757,6 +3757,7 @@ module PEMK
     # another way. Never a DB read on the reactor thread, one read in flight at most.
     KEYED_MODES = %i[surf dive].freeze
     MODE_TTL    = 30.0
+    MODE_RETRY  = 5.0    # after a read that failed
 
     # A debug client is waived the keys by the game itself (pbCheckHiddenMoveBadge).
     def mode_keys_checked?
@@ -3770,13 +3771,13 @@ module PEMK
       conn.data[:mode_cur] = mode
       unless mode_keys_checked? && KEYED_MODES.include?(mode)
         conn.data.delete(:mode_from)      # the land it leaves next is captured anew
-        conn.data.delete(:mode_flagged)   # an episode of keyless swimming ended
         return false
       end
       conn.data[:mode_from] ||= land_tile(conn.data[:last_pos])   # the land it left: before the audit moves on
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       cached = conn.data.dig(:mode_keys, mode)
-      if (cached.nil? || cached[:stale] || now - cached[:at] >= MODE_TTL) && !conn.data[:mode_job]
+      if (cached.nil? || cached[:stale] || now - cached[:at] >= MODE_TTL) && !conn.data[:mode_job] &&
+         now >= conn.data[:mode_retry_at].to_f
         mode_read(conn, account_id)   # the verdict known, if any, holds meanwhile
       end
       return false if cached.nil? || cached[:ok]
@@ -3802,7 +3803,11 @@ module PEMK
       return unless conn.data[:mode_keys]
 
       conn.data[:mode_keys].each_value { |e| e[:stale] = true }
-      mode_read(conn, account_id) unless conn.data[:mode_job]
+      if conn.data[:mode_job]
+        conn.data[:mode_again] = true   # the read in flight was queued before this change: once more after it
+      else
+        mode_read(conn, account_id)
+      end
     end
 
     # One read for both modes, after the claims before it (a win's badge counts).
@@ -3825,38 +3830,44 @@ module PEMK
     # denied now; a read that failed leaves them as they were (read again at the next swim).
     def mode_verdict(conn, token, held)
       conn.data.delete(:mode_job) if conn.data[:mode_job] == token
-      return unless held && @reactor.alive?(conn)
+      return unless @reactor.alive?(conn)
 
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      unless held   # the read failed: what is held stays, read again later (no storm meanwhile)
+        conn.data[:mode_retry_at] = now + MODE_RETRY
+        return
+      end
       seed_mode_keys(conn, held)
+      if conn.data.delete(:mode_again)   # the badges moved while it read
+        conn.data[:mode_keys].each_value { |e| e[:stale] = true }
+        mode_read(conn, conn.data[:account_id])
+      end
       mode = conn.data[:mode_cur]
       return unless KEYED_MODES.include?(mode) && !key_ok?(mode, held)
 
-      deny_mode(conn, mode, held, Process.clock_gettime(Process::CLOCK_MONOTONIC))
+      deny_mode(conn, mode, held, now)
     end
 
-    # A keyless swim: said once per MODE_TTL (it is a steady state), flagged once per
-    # episode - never where a script of the game starts swims (a player may then swim
-    # with no key: logged only).
+    # A keyless swim: said and flagged once per MODE_TTL (it is a steady state, and a
+    # flag is a row the client would otherwise write at will) - never flagged where a
+    # script of the game starts swims (a player may then swim with no key: logged only).
     def deny_mode(conn, mode, held, now)
       id = conn.data[:account_id]
       said = conn.data[:mode_said]
-      unless said && said[0] == mode && now - said[1] < MODE_TTL
-        conn.data[:mode_said] = [mode, now]
-        what = "account #{id} #{mode} with no key (#{key_text(mode)} needed, has #{badge_count(held)}: #{held.to_s(2)})"
-        if @config.position_enforcement != :on
-          @log.call(@config.position_enforcement == :shadow ? "posenforce[shadow]: #{what} WOULD-CORRECT" : "posaudit: #{what}")
-        elsif !@mode_keys[:sources].empty?
-          @log.call("posaudit: #{what} (logged only: a script of the game starts swims)")
-        elsif conn.data[:mode_from]
-          @log.call("posaudit: #{what} -> sent back to the shore")
-        else
-          @log.call("posaudit: #{what} -> dropped (no land known)")
-        end
-      end
-      return if conn.data[:mode_flagged] == mode || !@mode_keys[:sources].empty?
+      return if said && said[0] == mode && now - said[1] < MODE_TTL
 
-      conn.data[:mode_flagged] = mode
-      flag_anomaly(id, :mode_illegal)
+      conn.data[:mode_said] = [mode, now]
+      what = "account #{id} #{mode} with no key (#{key_text(mode)} needed, has #{badge_count(held)}: #{held.to_s(2)})"
+      if @config.position_enforcement != :on
+        @log.call(@config.position_enforcement == :shadow ? "posenforce[shadow]: #{what} WOULD-CORRECT" : "posaudit: #{what}")
+      elsif !@mode_keys[:sources].empty?
+        @log.call("posaudit: #{what} (logged only: a script of the game starts swims)")
+      elsif conn.data[:mode_from]
+        @log.call("posaudit: #{what} -> sent back to the shore")
+      else
+        @log.call("posaudit: #{what} -> dropped (no land known)")
+      end
+      flag_anomaly(id, :mode_illegal) if @mode_keys[:sources].empty?
     end
 
     # A refused frame: no audit, no fan-out, and the way back to the land it left (none
