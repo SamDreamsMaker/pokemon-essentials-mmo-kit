@@ -486,7 +486,8 @@ first. What bounds a connection today:
   `:auth` used to be a pool job and a database read, and one read of 16 MiB held about
   280,000 of them. Logins and registers (a bcrypt each) are limited per address, an IPv6
   host counted by its /64, and run on a pool of their own: a storm of them delays other
-  logins, never a player's saves.
+  password logins, never a player's saves nor a reconnect (a token check is one indexed
+  read, on the main pool); past 32 waiting, one is answered "busy" at once.
 - **After it.** Each frame type has a budget; a frame over it is dropped and logged once
   per type per 10 s with the count (a line a frame was a log as large as the flood); a
   connection that drops 1000 in a burst is closed (the guard) - an honest client drops a

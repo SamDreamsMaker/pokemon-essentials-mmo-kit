@@ -27,9 +27,12 @@ module PEMK
                         trade_invite trade_accept trade_decline trade_offer trade_lock trade_cancel].freeze
     TRADE_TTL      = 15          # seconds a half-committed (lone) trade rendezvous lingers before timeout
     WORKERS        = 8
-    # Registers, logins and token checks run on a pool of their own: a flood of them (a
-    # bcrypt each, or a database read) delays other logins, never a player's saves.
+    # Registers and password logins (a bcrypt each, ~250 ms) run on a pool of their own: a
+    # flood of them delays other password logins, never a player's saves nor a reconnect
+    # (a token check is one indexed read: it stays on the main pool). Past AUTH_BACKLOG
+    # waiting, one is answered "busy" at once.
     AUTH_WORKERS   = 2
+    AUTH_BACKLOG   = 32
     LOGIN_MAX      = 10          # login/register attempts ...
     LOGIN_WINDOW   = 60          # ... per this many seconds, per IP
 
@@ -325,7 +328,7 @@ module PEMK
 
       # Before its session exists a socket is budgeted too: each :auth is a pool job and a
       # database read, and one read of 16 MiB held ~280k of them (a flood guard rule).
-      if !authed && @config.flood_guard && !frame_budget_ok?(conn, type, PREAUTH_BUDGETS, :pre_budgets)
+      if !authed && @config.flood_guard && !frame_budget_ok?(conn, type, PREAUTH_BUDGETS, :pre_budgets, [0, 0])
         @log.call("server: pre-auth flood (#{bounded(type)}) from #{conn.addr} -> closed")
         conn.closing = true
         return
@@ -354,6 +357,15 @@ module PEMK
     # A client's value in a log line: its inspect, cut short (an envelope holds 64 KiB).
     def bounded(value)
       value.inspect[0, 40]
+    end
+
+    # A ping's stamp, echoed: a 64-bit integer or a float - a wire integer is a decimal
+    # string of any length.
+    def ping_t(value)
+      case value
+      when Float then value
+      when Integer then value if value.bit_length < 64
+      end
     end
 
     # Token bucket per connection. Tight for the DB-touching types, generous for
@@ -398,9 +410,9 @@ module PEMK
 
     # +key+: a known frame type, :other, or a budget the server keeps across types
     # (:presence) - never a name the client chose.
-    def frame_budget_ok?(conn, key, table = FRAME_BUDGETS, store = :budgets)
+    def frame_budget_ok?(conn, key, table = FRAME_BUDGETS, store = :budgets, default = FRAME_BUDGET_DEFAULT)
       b = (conn.data[store] ||= {})
-      burst, rate = table.fetch(key, FRAME_BUDGET_DEFAULT)
+      burst, rate = table.fetch(key, default)
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       tokens, last = b[key] || [burst.to_f, now]
       tokens = [tokens + ((now - last) * rate), burst.to_f].min
@@ -424,20 +436,22 @@ module PEMK
       else
         said[key] = [last, count]
       end
-      return unless @config.flood_guard && !HANDSHAKE.include?(key)
+      conn.data[:dropped] = conn.data[:dropped].to_i + 1
+      return unless @config.flood_guard && key != :trade_decline   # the one answer a client sends by itself
 
       tokens, at = conn.data[:flood] || [FLOOD_DROPS.to_f, now]
       tokens = [tokens + ((now - at) * FLOOD_RATE), FLOOD_DROPS.to_f].min - 1
       conn.data[:flood] = [tokens, now]
       return unless tokens.negative?
 
-      @log.call("server: account #{account_id} floods (#{FLOOD_DROPS} frames over budget in a burst) -> closed")
+      @log.call("server: account #{account_id} floods (#{FLOOD_DROPS} frames over budget in a burst, " \
+                "#{conn.data[:dropped]} dropped on this connection) -> closed")
       conn.closing = true
     end
 
     def dispatch_frame(conn, env, type, authed, body)
       case type
-      when :ping     then reply(conn, type: :pong, t: (env[:t] if env[:t].is_a?(Numeric)))   # echoed: a number, not 64 KiB
+      when :ping     then reply(conn, type: :pong, t: ping_t(env[:t]))
       when :register then handle_register(conn, env)
       when :login    then handle_login(conn, env)
       when :auth     then handle_auth(conn, env)
@@ -480,6 +494,7 @@ module PEMK
     end
 
     def handle_register(conn, env)
+      return reply(conn, type: :register_err, reason: "busy") if auth_busy?   # (an attempt not spent)
       return reply(conn, type: :register_err, reason: "rate_limited") unless @limiter.allow?(limiter_key(conn.addr))
 
       email = env[:email].to_s
@@ -497,6 +512,12 @@ module PEMK
           end
         @reactor.post { reply(conn, **result) }
       end
+    end
+
+    # Under the flood guard: so many bcrypts already wait that one more would wait past the
+    # client's patience - answered "busy" now (the player tries again).
+    def auth_busy?
+      @config.flood_guard && @auth_pool.backlog >= AUTH_BACKLOG
     end
 
     # The login limiter's key for an address: an IPv6 one by its /64 (one host holds a
@@ -537,6 +558,7 @@ module PEMK
       # would leave the first account's map, relays and claims pointing at this socket.
       # (Before the limiter: a refused login spends no attempt of the address.)
       return reply(conn, type: :login_err, reason: "already_authed") if conn.data[:account_id]
+      return reply(conn, type: :login_err, reason: "busy") if auth_busy?   # (an attempt not spent)
       return reply(conn, type: :login_err, reason: "rate_limited") unless @limiter.allow?(limiter_key(conn.addr))
 
       note_caps(conn, env)
@@ -597,7 +619,7 @@ module PEMK
       # A reconnect resuming a live session must not be judged like a fresh one: the
       # client keeps its state, it does not load the stored blob.
       fresh = env[:resume] != true
-      @auth_pool.submit do
+      @pool.submit do
         account_id = @sessions.resolve(token)
         # A ban revokes the sessions; one set in the table by hand still stops a resume.
         if account_id && (ban = @bans.active(account_id))

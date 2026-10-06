@@ -106,10 +106,11 @@ class ServerFloodGuardTest < Minitest::Test
   def test_pings_past_the_burst_close_the_socket_and_only_a_number_is_echoed
     start_server
     s = TCPSocket.new("127.0.0.1", @port)
-    s.write(Array.new(9) { |i| frame({ type: :ping, t: i }) }.join + frame({ type: :ping, t: "x" * 3000 }))
+    s.write(Array.new(8) { |i| frame({ type: :ping, t: i }) }.join + frame({ type: :ping, t: "x" * 3000 }) +
+            frame({ type: :ping, t: 10**300 }))
     got, state = drain(s)
     assert_equal [:open, 10], [state, got.size]
-    assert_equal [*0..8, nil], got.map { |m| m[:env][:t] }, "a number, not what the client sent"
+    assert_equal [*0..7, nil, nil], got.map { |m| m[:env][:t] }, "a 64-bit number, not what the client sent"
     s2 = TCPSocket.new("127.0.0.1", @port)
     s2.write(Array.new(11) { |i| frame({ type: :ping, t: i }) }.join)
     _, state = drain(s2, 3)
@@ -174,21 +175,44 @@ class ServerFloodGuardTest < Minitest::Test
   end
 
   # A storm of logins (a bcrypt each, slowed here) runs beside the players' work: a save
-  # is answered while every login waits.
-  def test_logins_never_delay_a_save
+  # is answered, and a reconnect's token check too, while every login waits.
+  def test_logins_never_delay_a_save_or_a_reconnect
     start_server
     p1, = open_authed("player", caps: %w[save_ack])
+    token_sock = TCPSocket.new("127.0.0.1", @port)
+    token_sock.write(frame({ type: :login, email: "player@t.co", password: "password1", caps: %w[save_ack] }))
+    token = recv(token_sock)[:env][:token]   # (this login takes the account over from p1)
     accounts = @server.instance_variable_get(:@accounts)
-    accounts.define_singleton_method(:authenticate) { |*| sleep 1.5; [nil, :not_found] }
-    socks = Array.new(8) { TCPSocket.new("127.0.0.1", @port) }
+    accounts.define_singleton_method(:authenticate) { |*| sleep 1.0; [nil, :not_found] }
+    socks = Array.new(6) { TCPSocket.new("127.0.0.1", @port) }
     socks.each { |s| s.write(frame({ type: :login, email: "x@t.co", password: "password1" })) }
     sleep 0.2
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    p1.write(frame({ type: :save, seq: 1 }, "blob"))
-    got, = drain(p1, 1.2)
-    assert_equal [:save_ok], got.map { |m| m[:env][:type] }
-    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, :<, 1.4, "answered before the logins"
-    (socks + [p1]).each(&:close)
+    token_sock.write(frame({ type: :save, seq: 1 }, "blob"))
+    assert_equal :save_ok, recv(token_sock, 2)[:env][:type]
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, :<, 0.6, "answered before the logins"
+    r = TCPSocket.new("127.0.0.1", @port)
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    r.write(frame({ type: :auth, token: token }))
+    assert_equal :auth_ok, recv(r, 2)[:env][:type]
+    assert_operator Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, :<, 0.6, "a reconnect waits for no bcrypt"
+    (socks + [p1, token_sock, r]).each(&:close)
+  end
+
+  # Past AUTH_BACKLOG bcrypts waiting, a login or a register is answered "busy" at once.
+  def test_a_login_past_the_backlog_is_busy
+    start_server
+    pool = @server.instance_variable_get(:@auth_pool)
+    gate = Queue.new
+    (PEMK::Server::AUTH_BACKLOG + PEMK::Server::AUTH_WORKERS).times { pool.submit { gate.pop } }
+    sleep 0.2
+    s = TCPSocket.new("127.0.0.1", @port)
+    s.write(frame({ type: :login, email: "x@t.co", password: "password1" }))
+    assert_equal "busy", recv(s)[:env][:reason]
+    s.write(frame({ type: :register, email: "x@t.co", password: "password1" }))
+    assert_equal "busy", recv(s)[:env][:reason]
+    (PEMK::Server::AUTH_BACKLOG + PEMK::Server::AUTH_WORKERS).times { gate << true }
+    s.close
   end
 
   # --- after it ---------------------------------------------------------------------
@@ -217,12 +241,11 @@ class ServerFloodGuardTest < Minitest::Test
     refute logs.any? { |l| l.include?("account #{id} floods") }
   end
 
-  # A player's client declines invites by itself: a storm of invites makes it answer past
-  # its budget, and those answers must not close it.
-  def test_handshake_answers_are_never_a_flood
+  # A player's client declines trade invites by itself: a storm of invites makes it answer
+  # past its budget, and those answers must not close it. Any other handshake is a flood.
+  def test_a_busy_clients_declines_are_never_a_flood
     start_server
     a, a_id = open_authed("decliner")
-    b, = open_authed("inviter")
     a.write(Array.new(1100) { frame({ type: :trade_decline, to: 999_999, trade_id: "t" }) }.join)
     sleep 1
     a.write(frame({ type: :ping, t: 1 }))
@@ -230,7 +253,32 @@ class ServerFloodGuardTest < Minitest::Test
     assert_equal :open, state
     assert_equal [:pong], got.map { |m| m[:env][:type] }
     refute logs.any? { |l| l.include?("account #{a_id} floods") }
-    [a, b].each(&:close)
+    c, c_id = open_authed("canceller")
+    c.write(Array.new(1100) { frame({ type: :trade_cancel, to: 999_999, trade_id: "t" }) }.join)
+    _, state = drain(c, 5)
+    assert_equal :eof, state
+    assert logs.any? { |l| l.start_with?("server: account #{c_id} floods (") && l.include?("dropped on this connection) -> closed") }
+    a.close
+  end
+
+  # A client's value in a log line is cut short; the login limiter forgets the addresses
+  # whose bucket refilled, at the reactor's tick.
+  def test_log_values_are_bounded_and_the_limiter_forgets
+    start_server
+    s = TCPSocket.new("127.0.0.1", @port)
+    s.write(frame({ type: :"#{'x' * 3000}" }))
+    drain(s, 2)
+    line = logs.find { |l| l.start_with?("server: pre-auth :xxx") }
+    refute_nil line
+    assert_operator line.size, :<, 120
+    limiter = @server.instance_variable_get(:@limiter)
+    on_reactor do
+      limiter.allow?("198.51.100.9", now: Process.clock_gettime(Process::CLOCK_MONOTONIC) - 3600)
+      @server.instance_variable_set(:@last_limiter_prune, nil)
+    end
+    deadline = Time.now + 3
+    sleep 0.1 until on_reactor { limiter.size }.zero? || Time.now > deadline
+    assert_equal 0, on_reactor { limiter.size }
   end
 
   # The client names the type: any this server does not know shares one budget from the
@@ -266,8 +314,14 @@ class ServerFloodGuardTest < Minitest::Test
   def test_every_handled_type_is_known
     src = File.read(File.expand_path("../lib/pemk/server.rb", __dir__))
     dispatch = src[/def dispatch_frame.*?\n    end\n/m]
-    handled = dispatch.scan(/when ((?::\w+(?:, )?)+) then/).flat_map { |(list)| list.scan(/:(\w+)/).flatten.map(&:to_sym) }
-    refute_empty handled
+    handled = dispatch.scan(/^\s*when\s+(.+?)\s+then\b/).flat_map do |(list)|
+      list.split(",").map(&:strip).flat_map do |item|
+        item.start_with?("*") ? PEMK::Server.const_get(item[1..]) : [item.delete_prefix(":").to_sym]
+      end
+    end
+    assert_operator handled.size, :>, 30
+    assert_includes handled, :ping
+    assert_includes handled, :trade_lock
     assert_empty handled - PEMK::Server::KNOWN_TYPES
   end
 
