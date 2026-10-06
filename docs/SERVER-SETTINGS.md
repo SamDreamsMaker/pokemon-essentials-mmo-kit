@@ -80,7 +80,7 @@ no row here fails the suite, and so does a row no code reads.
 | Setting | Default | Values | What it does |
 |---|---|---|---|
 | `PEMK_BATTLE_ENFORCE_TEAMS` | `off` | `off` / `shadow` / `on` | a team's legality: species line, sets, the first-sight lock on IVs, shiny and gender. Detection only today, every mode logs |
-| `PEMK_BATTLE_ENFORCE_ENCOUNTERS` | `off` | `off` / `shadow` / `on` | wild encounters. `shadow` audits the client's against the tables. `on` has the server mint them: species, level, shiny, IVs |
+| `PEMK_BATTLE_ENFORCE_ENCOUNTERS` | `off` | `off` / `shadow` / `on` | wild encounters: the encounter table's own rolls (a step, a rod, Headbutt, Rock Smash, Sweet Scent). `shadow` audits the client's against the tables. `on` has the server mint them: species, level, shiny, IVs. An event's battle, a roaming Pokemon and the Poke Radar's chains stay the game's: never minted, so their battles open no reward window and their catches stay the client's |
 | `PEMK_BATTLE_ENFORCE_CATCHES` | `off` | `off` / `shadow` / `on` | the shakes of a Poke Ball. `on` has the server roll them. Needs encounters `on`: a catch with no mint stays the client's |
 | `PEMK_BATTLE_ENFORCE_REWARDS` | `off` | `off` / `shadow` / `on` | the EXP and money a wild battle may pay. Detection only: an impossible jump is logged. Needs encounters on for the foe |
 | `PEMK_BATTLE_ENFORCE_EXP` | `off` | `off` / `shadow` / `on` | each owned Pokemon's EXP high-water. `shadow` flags a rollback: an old save, an edit. `on` raises the party back to it, never lowers |

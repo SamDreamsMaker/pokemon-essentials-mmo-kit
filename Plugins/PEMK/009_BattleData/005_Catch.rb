@@ -56,7 +56,8 @@ module PEMK
     # Numeric — the engine carries floats like 67.5), which the server clamps to the
     # ball's legitimate cap. -> Hash | nil (a build fault -> caller stays local).
     # NOTE: only D2-minted encounters can be server-adjudicated — static/event wild
-    # battles, roamers and scaling-level maps never mint, so their catches stay local.
+    # battles, roamers, the Poké Radar's chains and scaling-level maps never mint, so their
+    # catches stay local (the seam below asks for a minted foe only).
     def build_payload(pkmn, battler, ball, battle)
       base = pkmn.species_data.catch_rate
       ub   = (pkmn.species_data.has_flag?("UltraBeast") rescue false)
@@ -155,7 +156,8 @@ if defined?(Battle) && Battle.method_defined?(:pbCaptureCalc) &&
   class Battle
     alias_method :pemk_orig_pbCaptureCalc, :pbCaptureCalc
     def pbCaptureCalc(pkmn, battler, catch_rate, ball)
-      if catch_rate.nil? && wildBattle? && (PEMK::Catch.enforcing? rescue false)
+      if catch_rate.nil? && wildBattle? && (PEMK::Catch.enforcing? rescue false) &&
+         (PEMK::Encounter.granted?(pkmn) rescue false)   # a foe the server minted: it has its mint
         v = (PEMK::Catch.request_verdict(pkmn, battler, ball, self) rescue nil)
         if v
           @criticalCapture = v[:critical]

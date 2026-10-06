@@ -40,6 +40,21 @@
 > catch-spam at 21+; ball ownership isn't validated — the bag is blob-authoritative);
 > static/event/roamer catches never mint so they stay local.
 >
+> **Fix (2026-10-06): only the encounter table's own roll is minted or reported.** The
+> alias read any `pbGenerateWildPokemon` call made while `$game_temp.encounter_type` was set
+> as the table's encounter: a roaming Pokémon (the roamer handler rewrites the roll in
+> place) was minted as a table roll and the roamer then built FROM it, for good; the Poké
+> Radar's chains were replaced by the server's roll; an encounter a Repel turned away left
+> the type set, so an event's battle after it (the invisible Kecleon, a legendary) was
+> replaced too; and `shadow` reported all of them as SUSPECT, plus every form species
+> under its base id. Now `choose_wild_pokemon` marks its roll, the `:on_wild_species_chosen`
+> handlers work on a copy that notes any write (even of the values it held), and
+> `generate_foes` mints or reports only the marked rolls still untouched (`PEMK::Encounter
+> .table_roll` lets a plugin mark its own). Catches are asked for minted foes only. What
+> stays the game's - events, roamers, radar chains - opens no D4 window and no Pay Day
+> proof, as event battles always did. Proven on the engine's own code (the old plugin turns
+> the roamer into the minted Pokémon there); autotest 096.
+>
 > **Progress (2026-07-22): D3 part 2 shipped (persisted rolls + mint provenance).**
 > Every D2 `on` mint is persisted (`encounter_rolls`, migration 009 — additive), the
 > catch verdict stamps it caught, and the caught mon's M3 UID mint CLAIMS it: each
