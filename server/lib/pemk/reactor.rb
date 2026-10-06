@@ -277,6 +277,20 @@ module PEMK
       end
     end
 
+    # What the client sent and nobody read, read and dropped before the close (1 MiB at
+    # most): a close with unread input is a reset, not an end, and a Windows client loses
+    # to a reset the frames still on their way to it - a ban's notice, a last answer.
+    DRAIN_MAX = 16
+
+    def drain_input(conn)
+      DRAIN_MAX.times do
+        d = conn.io.read_nonblock(READ_CHUNK, exception: false)
+        break if d.nil? || d == :wait_readable
+      end
+    rescue IOError, SystemCallError
+      nil
+    end
+
     def frame_max(conn)
       @preauth_frame_max && conn.data[:account_id].nil? ? @preauth_frame_max : MAX_FRAME
     end
@@ -301,6 +315,7 @@ module PEMK
 
       conn.closing = true   # the rest of a batch read with the frame that closed it is dropped
       @conns.delete(conn.io)
+      drain_input(conn)
       (conn.io.close rescue nil)
       @on_close&.call(conn)
       @log.call("reactor: - #{conn.addr} (#{@conns.size})")

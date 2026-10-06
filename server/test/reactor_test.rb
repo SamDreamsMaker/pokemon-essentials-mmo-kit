@@ -171,6 +171,45 @@ class ReactorTest < Minitest::Test
     t.join(3)
   end
 
+  # A socket closed while what its client sent is unread: the close must still deliver
+  # what was sent to it (a ban's notice) - a close with unread input is a reset, and a
+  # reset throws away the data still on its way to the client.
+  def test_a_close_delivers_what_was_sent_before_it
+    @reactor.stop
+    @thread.join(3)
+    r = nil
+    closer = lambda do |conn, _payload|
+      next if conn.data[:told]
+
+      conn.data[:told] = true
+      sleep 0.3   # the client's whole write is in by now, mostly unread
+      r.send_frame(conn, W.encode_split({ type: :banned, note: "bye" }))
+      r.finish(conn)
+    end
+    r = PEMK::Reactor.new(host: "127.0.0.1", port: 0, on_frame: closer)
+    r.start
+    t = Thread.new { r.run_loop }
+    sock = TCPSocket.new("127.0.0.1", r.port)
+    pad = W.encode_split({ type: :ping, pad: "p" * 4000 })
+    sock.write(W.encode_split({ type: :ping, t: 1 }) + (pad * 50))   # far more than one read
+    sleep 0.8
+    got = begin
+      read_frame(sock)
+    rescue Errno::ECONNRESET => e
+      flunk "the close was a reset: what was sent before it is lost (#{e.class})"
+    end
+    assert_equal :banned, got[:env][:type], "the notice arrives before the close"
+    ended = begin
+      Timeout.timeout(3) { sock.read(1) }
+    rescue Errno::ECONNRESET
+      :reset
+    end
+    assert_nil ended, "a clean end (a FIN): a reset is what a Windows client loses the notice to"
+    sock.close
+    r.stop
+    t.join(3)
+  end
+
   def test_two_frames_in_one_write
     sock = TCPSocket.new("127.0.0.1", @reactor.port)
     sock.write(W.encode_split({ type: :ping, t: 1 }) + W.encode_split({ type: :ping, t: 2 }))
