@@ -494,6 +494,18 @@ first. What bounds a connection today:
   few hundred at most, after a long network stall. A type the server does not know (a
   newer client's) shares one budget and is logged once. Each socket is read 64 KiB per
   turn of the loop, so no one connection holds it.
+- **What players send each other** (`PEMK_RELAY_GUARD`, on by default). A battle or a
+  trade session is per pair of players and per kind: opened only by an answer to an
+  invite (an accept from whom the invite reached), ended only by its own pair's decline,
+  cancel or battle end. Before, one session per player was kept, any accept opened one
+  and any decline or cancel - a stranger's, or a busy client's automatic decline of an
+  honest invite - ended the target's: inviting a player in a battle froze that battle.
+  An invite reaches a stranger, so it carries an invite and no more (no body, 2 KiB),
+  5 per account then 1 per 5 s, and none reaches a player whose output is 512 KiB
+  behind (a flood of them disconnected the target, its 4 MiB buffer overflowing). A
+  partner's bodies are a team and an escrow at the kit's sizes; a trade both sides
+  committed is the server's (a cancel after it is not relayed); a player gone mid-battle
+  ends it for the other (a draw), mid-trade cancels it.
 - **What is the network's job.** The number of connections an address may open, and how
   fast: a firewall rule or the reverse proxy. Behind a proxy every player shares its
   address, and the login limit with it.

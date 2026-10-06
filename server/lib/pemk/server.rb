@@ -166,6 +166,8 @@ module PEMK
       @online   = {}                                    # account_id => conn; reactor-thread only
       @pending_trades = {}                              # trade_id => rendezvous; reactor-thread only
       @peer_sessions  = {}                              # account_id => partner id (mutual); reactor-thread only
+      @peers          = PeerSessions.new                # the relay guard's invites and sessions; reactor-thread only
+      @invite_limiter = RateLimiter.new(max: 5, per: 25) # invites per ACCOUNT (a reconnect refills nothing)
       @trade_bodies   = {}                              # sender => its last locked escrow; reactor-thread only
       @conn_buckets   = {}                              # conn => [tokens, last_refill]; reactor-thread only
       @reactor  = Reactor.new(
@@ -3217,6 +3219,9 @@ module PEMK
       end
 
       @pending_trades.delete(trade_id)
+      # Both committed: the trade is the server's now, whatever comes of it - its session
+      # closes (its partners keep no right to send each other trade frames).
+      @peers.close(pending[:account], account_id, :trade, trade_id: trade_id) if @config.relay_guard
       # Cross-check the two commits name each other and mirror give/recv exactly. A
       # third party guessing a trade_id fails here (its partner id won't match).
       unless pending[:account] == partner && pending[:partner] == account_id &&
@@ -3427,6 +3432,8 @@ module PEMK
 
       @last_limiter_prune = now
       @limiter.prune(now: now)
+      @invite_limiter.prune(now: now)
+      @peers.prune
     end
 
     PROOF_SWEEP_SEC = 5
@@ -4261,6 +4268,8 @@ module PEMK
     RELAY_BODY_MAX = 256 * 1024   # a Marshal'd battle team is a few KB
 
     def handle_addressed(sender, env, body, from_account)
+      return relay_guarded(sender, env, body, from_account) if @config.relay_guard
+
       target = @online[env[:to]]
       if target.nil? || target.equal?(sender)
         @log.call("server: no route for #{bounded(env[:type])} -> #{bounded(env[:to])}")
@@ -4284,6 +4293,104 @@ module PEMK
       hold_escrow(env, body, from_account) if env[:type] == :trade_lock
       note_peer_session(env[:type], from_account, env[:to])
       @reactor.send_frame(target, Wire.encode_split(relayed_envelope(env, from_account), body))
+    end
+
+    # The relay guard (PEMK_RELAY_GUARD). A handshake reaches a stranger - that is what an
+    # invite is - and carries what an invite needs: no body, at most HANDSHAKE_FRAME_MAX,
+    # nothing while the target's output is behind; an invite is rationed per account, an
+    # answer needs the invite it answers, a cancel the trade it ends. Every other frame
+    # needs its pair's session of its kind (a trade's, its trade_id), and carries a body
+    # only as the kit does: a team, an escrow, at their sizes.
+    HANDSHAKE_FRAME_MAX  = 2048
+    HANDSHAKE_OUTBUF_MAX = 512 * 1024
+    PEER_BODY_MAX    = { battle_team: 64 * 1024, trade_lock: ESCROW_MAX }.freeze
+    PEER_BODY_BUDGET = { peer_body: [4, 0.1] }.freeze   # a team a battle, an escrow a trade
+
+    def relay_guarded(sender, env, body, from_account)
+      type   = env[:type]
+      to     = env[:to]
+      target = @online[to]
+      if target.nil? || target.equal?(sender)
+        @log.call("server: no route for #{bounded(type)} -> #{bounded(to)}")
+        return
+      end
+      kind     = PeerSessions::KIND[type]
+      trade_id = env[:trade_id] if kind == :trade && env[:trade_id].is_a?(String) && env[:trade_id].bytesize <= 128
+      return relay_handshake(sender, target, env, from_account, kind, trade_id) if HANDSHAKE.include?(type)
+
+      unless @peers.session?(from_account, to, kind, trade_id: trade_id)
+        return relay_refused(sender, from_account, type, "to #{bounded(to)} without a session of its kind")
+      end
+      if body
+        max = PEER_BODY_MAX[type]
+        body = nil unless max   # only a team and an escrow carry one
+        if body && (body.bytesize > max || !frame_budget_ok?(sender, :peer_body, PEER_BODY_BUDGET))
+          return relay_refused(sender, from_account, type, "a body past the kit's (#{body.bytesize}B, at most #{max}B, 4 then 1 per 10 s)")
+        end
+      end
+      return unless peer_body_ok?(type, body, from_account)
+
+      hold_escrow(env, body, from_account) if type == :trade_lock
+      @peers.close(from_account, to, :battle) if type == :battle_end
+      @reactor.send_frame(target, Wire.encode_split(relayed_envelope(env, from_account), body))
+    end
+
+    def relay_handshake(sender, target, env, from_account, kind, trade_id)
+      type  = env[:type]
+      to    = env[:to]
+      frame = Wire.encode_split(relayed_envelope(env, from_account))   # a body, if any, stays here
+      return relay_refused(sender, from_account, type, "of #{frame.bytesize}B - an invite is small") if frame.bytesize > HANDSHAKE_FRAME_MAX
+      if target.outbuf.bytesize > HANDSHAKE_OUTBUF_MAX
+        return relay_refused(sender, from_account, type, "to #{to}, whose output is #{target.outbuf.bytesize >> 10} KiB behind")
+      end
+
+      case type
+      when :challenge, :trade_invite
+        return relay_refused(sender, from_account, type, "past its invites (5, then 1 per 5 s)") unless @invite_limiter.allow?(from_account)
+
+        @peers.invite(from_account, to, kind, trade_id: trade_id)
+      when :challenge_accept, :trade_accept, :challenge_decline, :trade_decline
+        unless @peers.answer(from_account, to, kind, accept: type.to_s.end_with?("_accept"), trade_id: trade_id)
+          return relay_refused(sender, from_account, type, "with no invite of #{to} to answer")
+        end
+      when :trade_cancel
+        unless @peers.session?(from_account, to, :trade, trade_id: trade_id) ||
+               @peers.invited?(from_account, to, :trade, trade_id: trade_id) || @peers.invited?(to, from_account, :trade, trade_id: trade_id)
+          return relay_refused(sender, from_account, type, "with no trade with #{to} to end")
+        end
+        # a trade this side committed is the server's to finish: its partner, committing
+        # too, would drop the trade and miss its result
+        return relay_refused(sender, from_account, type, "after its own commit") if @pending_trades[trade_id]&.dig(:account) == from_account
+
+        @peers.close(from_account, to, :trade, trade_id: trade_id)
+      end
+      @reactor.send_frame(target, frame)
+    end
+
+    # A relay refused: said once per 10 s per connection (the frames are the sender's).
+    def relay_refused(sender, from_account, type, why)
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      return if sender.data[:relay_said] && now - sender.data[:relay_said] < OVER_SAID
+
+      sender.data[:relay_said] = now
+      @log.call("server: account #{from_account} #{bounded(type)} #{why} -> drop")
+    end
+
+    # An account gone for good (its last connection closed): its partners are told - a
+    # battle's ends (decision 5, the draw an abandoned battle takes), a trade's is
+    # cancelled - and its invites and sessions go. +committed+: the trades a commit was
+    # waiting on (already answered "partner_left").
+    def peers_gone(account_id, committed)
+      @peers.drop_account(account_id).each do |partner, kind, trade_id|
+        conn = @online[partner]
+        next unless conn
+
+        if kind == :battle
+          reply(conn, type: :battle_end, from: account_id, to: partner, decision: 5)
+        elsif !committed.include?(trade_id)
+          reply(conn, type: :trade_cancel, from: account_id, to: partner, trade_id: trade_id)
+        end
+      end
     end
 
     # The receiver Marshal-loads a relayed body, so one naming a class outside the
@@ -4399,8 +4506,13 @@ module PEMK
       aid = conn.data[:account_id]
       @online.delete(aid) if aid && @online[aid].equal?(conn)
       if aid
+        committed = @pending_trades.select { |_, p| p[:account] == aid || p[:partner] == aid }.keys
         cancel_pending_trades(aid, conn)
-        clear_peer_session(aid)   # a dropped account's peer session dies with it
+        if !@config.relay_guard
+          clear_peer_session(aid)   # a dropped account's peer session dies with it
+        elsif !@online.key?(aid)
+          peers_gone(aid, committed)   # not a replaced socket: the account is gone
+        end
         @flag_state&.forget(aid) unless @online.key?(aid)   # step 5 mirrors of a gone account
         # a forgotten account's own rows go again after its last queued work (a save
         # pushed just before it quit) - whether the ban sweep let it go or it left first

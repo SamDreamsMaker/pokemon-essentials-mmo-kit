@@ -17,7 +17,7 @@ module PEMK
                 :shop_enforce, :item_authority, :item_local, :item_grace, :money_authority,
                 :money_payday_daily, :money_local_daily, :money_repeat_daily, :trainer_proof,
                 :money_unproven_daily, :badge_authority, :badge_ignore, :client_debug, :presence_dedup,
-                :mode_moves, :flood_guard
+                :mode_moves, :flood_guard, :relay_guard
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -82,6 +82,14 @@ module PEMK
       # sending far over its frame budgets after, is closed. On by default (an abuse fix);
       # off = such frames are only dropped, as before.
       @flood_guard = env.fetch("PEMK_FLOOD_GUARD", "on").to_s.strip.downcase != "off"
+
+      # Relays between players: an invite is answered only by whom it invited, a session
+      # is per pair and kind (a decline or a cancel ends its own, never another player's),
+      # an invite carries no body and at most 2 KiB, a partner's bodies keep the kit's
+      # sizes, and a player gone mid-battle ends it for the other. On by default (abuse
+      # fixes, and an honest player's battle no longer broken by someone's invite); off =
+      # the relay as before.
+      @relay_guard = env.fetch("PEMK_RELAY_GUARD", "on").to_s.strip.downcase != "off"
 
       # M4 Layer D: team/set legality enforcement mode, same off/shadow/on tri-state as
       # PEMK_POS_ENFORCE. Default off. D1 is detection-only (there is no battle-entry
