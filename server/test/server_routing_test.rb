@@ -153,11 +153,11 @@ class ServerRoutingTest < Minitest::Test
     a, a_id = open_authed("Invi", "passwordA1")
     b, b_id = open_authed("Card", "passwordB1")
 
-    send_env(a, { type: :trade_invite, to: b_id, name: "Invi" })
+    send_env(a, { type: :trade_invite, to: b_id, trade_id: "t1", name: "Invi" })
     assert_equal :trade_invite, recv(b)[:env][:type]
 
     # ...the invitee never accepts, and the inviter's watchdog cancels
-    send_env(a, { type: :trade_cancel, to: b_id })
+    send_env(a, { type: :trade_cancel, to: b_id, trade_id: "t1" })
     assert_equal :trade_cancel, recv(b)[:env][:type]
 
     a.close
@@ -169,12 +169,12 @@ class ServerRoutingTest < Minitest::Test
     a, a_id = open_authed("Tra1", "passwordA1")
     b, b_id = open_authed("Tra2", "passwordB1")
 
-    send_env(a, { type: :trade_invite, to: b_id }); recv(b)
-    send_env(b, { type: :trade_accept, to: a_id }); recv(a)   # opens the session both ways
+    send_env(a, { type: :trade_invite, to: b_id, trade_id: "t2" }); recv(b)
+    send_env(b, { type: :trade_accept, to: a_id, trade_id: "t2" }); recv(a)   # opens the session both ways
 
-    send_env(a, { type: :trade_offer, to: b_id, uid: 1 })
+    send_env(a, { type: :trade_offer, to: b_id, trade_id: "t2", uid: 1 })
     assert_equal :trade_offer, recv(b)[:env][:type]
-    send_env(b, { type: :trade_lock, to: a_id }, Marshal.dump([:mon]))
+    send_env(b, { type: :trade_lock, to: a_id, trade_id: "t2" }, Marshal.dump([:mon]))
     assert_equal :trade_lock, recv(a)[:env][:type]
 
     a.close

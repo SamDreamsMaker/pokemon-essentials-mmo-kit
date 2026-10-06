@@ -77,7 +77,9 @@ class ServerRelayGuardTest < Minitest::Test
     send_env(c, { type: :register, email: "#{user}@t.co", password: "password1" })
     recv(c)
     send_env(c, { type: :login, email: "#{user}@t.co", password: "password1" })
-    [c, recv(c)[:env][:account_id]]
+    id = recv(c)[:env][:account_id]
+    (@ids ||= {})[c] = id
+    [c, id]
   end
 
   def battle(a, a_id, b, b_id)
@@ -295,7 +297,8 @@ class ServerRelayGuardTest < Minitest::Test
     reactor = @server.instance_variable_get(:@reactor)
     queued = Queue.new
     reactor.post do
-      40.times { reactor.send_frame(online[b_id], W.encode_split({ type: :pad }, "\0".b * (64 * 1024))) }
+      online[b_id].io.setsockopt(Socket::SOL_SOCKET, Socket::SO_SNDBUF, 4096)   # the kernel takes little
+      55.times { reactor.send_frame(online[b_id], W.encode_split({ type: :pad }, "\0".b * (64 * 1024))) }
       queued << online[b_id].outbuf.bytesize
     end
     assert_operator Timeout.timeout(3) { queued.pop }, :>, PEMK::Server::HANDSHAKE_OUTBUF_MAX, "behind"
@@ -319,6 +322,134 @@ class ServerRelayGuardTest < Minitest::Test
     5.times { send_env(a, { type: :battle_team, to: b_id }, "team") }
     assert_equal 4, types(b).size, "four, then one per 10 s"
     [a, b].each(&:close)
+  end
+
+  # A stranger's decline reaches no one: the client's own check of a decline is that it
+  # is addressed to it, so it would forget its challenge and say "X declined".
+  def test_a_strangers_decline_reaches_no_one
+    start_server
+    a, = login("a15")
+    b, b_id = login("b15")
+    s, = login("s15")
+    send_env(b, { type: :challenge, to: a_id_of(a) })
+    drain(a)
+    send_env(s, { type: :challenge_decline, to: b_id })
+    send_env(s, { type: :trade_decline, to: b_id, trade_id: "t" })
+    assert_empty types(b)
+    [a, b, s].each(&:close)
+  end
+
+  # A cancelled trade is closed: no frame of it passes, and a commit after it - a
+  # modified client's, its partner having dropped the trade - is refused, the partner's
+  # waiting commit with it.
+  def test_a_cancelled_trade_cannot_be_committed
+    start_server
+    a, a_id = login("a16")
+    b, b_id = login("b16")
+    trade(a, a_id, b, b_id, "t16")
+    send_env(b, { type: :trade_commit, trade_id: "t16", partner: a_id, give: [2], recv: [1] })
+    sleep 0.2
+    send_env(a, { type: :trade_cancel, to: b_id, trade_id: "t16" })
+    assert_equal [:trade_cancel], types(b)
+    send_env(a, { type: :trade_offer, to: b_id, trade_id: "t16", uid: 1 })
+    assert_empty types(b)
+    send_env(a, { type: :trade_commit, trade_id: "t16", partner: b_id, give: [1], recv: [2] })
+    assert_equal [%i[trade_result no_trade]], drain(a).map { |m| [m[:env][:type], m[:env][:reason]&.to_sym] }
+    assert_equal [%i[trade_result no_trade]], drain(b).map { |m| [m[:env][:type], m[:env][:reason]&.to_sym] }
+    [a, b].each(&:close)
+  end
+
+  # Who committed waits for its partner: told "partner_left" when the partner goes, never a
+  # cancel; a partner who had not committed is told the trade is off.
+  def test_a_partner_gone_after_a_commit
+    start_server
+    a, a_id = login("a17")
+    b, b_id = login("b17")
+    trade(a, a_id, b, b_id, "t17")
+    send_env(b, { type: :trade_commit, trade_id: "t17", partner: a_id, give: [2], recv: [1] })
+    sleep 0.2
+    a.close
+    got = drain(b, 1.5).map { |m| m[:env] }
+    assert_equal [[:trade_result, "partner_left"]], got.map { |e| [e[:type], e[:reason]] }
+    c, c_id = login("c17")
+    d, d_id = login("d17")
+    trade(c, c_id, d, d_id, "t17b")
+    send_env(c, { type: :trade_commit, trade_id: "t17b", partner: d_id, give: [3], recv: [4] })
+    sleep 0.2
+    c.close
+    got = drain(d, 1.5).map { |m| m[:env] }
+    assert_equal [[:trade_cancel, "t17b"]], got.map { |e| [e[:type], e[:trade_id]] }
+    [b, d].each(&:close)
+  end
+
+  # A relogin replaces the socket: its battles end for the partner at once, even while the
+  # old socket still holds unsent output (it closes late: the partner was never told).
+  def test_a_relogin_ends_the_battle_for_the_partner
+    start_server
+    a, a_id = login("a18")
+    b, b_id = login("b18")
+    battle(a, a_id, b, b_id)
+    online = @server.instance_variable_get(:@online)
+    reactor = @server.instance_variable_get(:@reactor)
+    stuck = Queue.new
+    reactor.post do
+      online[a_id].io.setsockopt(Socket::SOL_SOCKET, Socket::SO_SNDBUF, 4096)   # the old link takes little
+      55.times { reactor.send_frame(online[a_id], W.encode_split({ type: :pad }, "\0".b * (64 * 1024))) }
+      stuck << online[a_id].outbuf.bytesize
+    end
+    assert_operator Timeout.timeout(3) { stuck.pop }, :>, 0, "the old socket cannot drain"
+    a2 = TCPSocket.new("127.0.0.1", @port)
+    send_env(a2, { type: :login, email: "a18@t.co", password: "password1" })
+    recv(a2)
+    got = drain(b, 1.5).map { |m| m[:env] }
+    assert_equal [[:battle_end, a_id, 5]], got.map { |e| e.values_at(:type, :from, :decision) }
+    [a, a2, b].each(&:close)
+  end
+
+  # A trade frame names its trade by a String, as the kit does: none, or a number, could
+  # stand for another trade of the pair.
+  def test_a_trade_frame_needs_a_trade_id
+    start_server
+    a, a_id = login("a20")
+    b, b_id = login("b20")
+    send_env(a, { type: :trade_invite, to: b_id })
+    send_env(a, { type: :trade_invite, to: b_id, trade_id: 1 })
+    assert_empty types(b)
+    send_env(a, { type: :trade_invite, to: b_id, trade_id: "t20" })
+    assert_equal [:trade_invite], types(b)
+    send_env(b, { type: :trade_accept, to: a_id })
+    assert_empty types(a)
+    [a, b].each(&:close)
+  end
+
+  # Each kind of refusal is said: one does not hide another for 10 s.
+  def test_each_refusal_is_said
+    start_server
+    s, s_id = login("s21")
+    b, b_id = login("b21")
+    send_env(s, { type: :challenge_accept, to: b_id })
+    send_env(s, { type: :trade_decline, to: b_id, trade_id: "t" })
+    sleep 0.3
+    assert_equal 1, logs.count { |l| l.start_with?("server: account #{s_id} :challenge_accept with no invite") }
+    assert_equal 1, logs.count { |l| l.start_with?("server: account #{s_id} :trade_decline with no invite") }
+    [s, b].each(&:close)
+  end
+
+  def test_an_escrow_past_32_KiB_is_not_relayed
+    start_server
+    a, a_id = login("a19")
+    b, b_id = login("b19")
+    trade(a, a_id, b, b_id, "t19")
+    send_env(a, { type: :trade_lock, to: b_id, trade_id: "t19", uid: 1 }, "x" * (40 * 1024))
+    assert_empty types(b)
+    send_env(a, { type: :trade_lock, to: b_id, trade_id: "t19", uid: 1 }, "x" * 1024)
+    assert_equal [:trade_lock], types(b)
+    [a, b].each(&:close)
+  end
+
+  def a_id_of(sock)
+    @ids ||= {}
+    @ids[sock]
   end
 
   # Off: the relay as before - a stranger's accept opens a session.

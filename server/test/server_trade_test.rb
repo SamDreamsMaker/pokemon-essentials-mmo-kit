@@ -64,11 +64,21 @@ class ServerTradeTest < Minitest::Test
                           status: "active", flagged: false)
   end
 
+  # The two agreed to the trade: the invite and its accept their clients relay (a commit
+  # needs its trade open).
+  def agree(a, acct_a, b, acct_b, tid)
+    send_env(a, { type: :trade_invite, to: acct_b, trade_id: tid })
+    recv(b)
+    send_env(b, { type: :trade_accept, to: acct_a, trade_id: tid })
+    recv(a)
+  end
+
   def test_full_trade_swaps_and_login_evicts
     a = open_conn; acct_a = reg_login(a, "ta@t.co")[:account_id]
     b = open_conn; acct_b = reg_login(b, "tb@t.co")[:account_id]
     ua = mint(acct_a, "PIKACHU", 1)
     ub = mint(acct_b, "EEVEE", 2)
+    agree(a, acct_a, b, acct_b, "T1")
 
     send_env(a, { type: :trade_commit, trade_id: "T1", partner: acct_b, give: [ua], recv: [ub] })
     send_env(b, { type: :trade_commit, trade_id: "T1", partner: acct_a, give: [ub], recv: [ua] })
@@ -95,9 +105,10 @@ class ServerTradeTest < Minitest::Test
     b = open_conn; acct_b = reg_login(b, "tb@t.co")[:account_id]
     ua = mint(acct_a, "PIKACHU", 1)
     ub = mint(acct_b, "EEVEE", 2)
+    agree(a, acct_a, b, acct_b, "T2")
 
     send_env(a, { type: :trade_commit, trade_id: "T2", partner: acct_b, give: [ua], recv: [ub] })
-    send_env(b, { type: :trade_commit, trade_id: "T2", partner: 999_999, give: [ub], recv: [ua] }) # wrong partner
+    send_env(b, { type: :trade_commit, trade_id: "T2", partner: acct_a, give: [ub], recv: [999] }) # not what A gives
     ra = recv(a)
     recv(b)
     assert_equal false, ra[:ok]

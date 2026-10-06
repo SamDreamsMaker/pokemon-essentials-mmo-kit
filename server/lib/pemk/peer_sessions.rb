@@ -66,10 +66,10 @@ module PEMK
       end
     end
 
-    # An account gone for good: its invites dropped, its sessions closed. ->
-    # [[partner, kind, trade_id], ...] for the partners to tell.
+    # An account's sessions closed (it left, or a relogin dropped them). Its invites stay to
+    # their TTL: a client keeps a challenge across a relogin. -> [[partner, kind,
+    # trade_id], ...] for the partners to tell.
     def drop_account(account_id)
-      @invites.delete_if { |(from, to, _), _| from == account_id || to == account_id }
       gone = []
       @sessions.delete_if do |(a, b), s|
         next false unless a == account_id || b == account_id

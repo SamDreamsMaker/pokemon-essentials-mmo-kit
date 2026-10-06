@@ -67,8 +67,9 @@ class PeerSessionsTest < Minitest::Test
     @p.answer(3, 1, :trade, accept: true, trade_id: "t")
     @p.invite(1, 4, :battle)
     assert_equal [[2, :battle, nil], [3, :trade, "t"]], @p.drop_account(1).sort_by(&:first)
-    refute @p.invited?(1, 4, :battle)
-    assert_equal 0, @p.size
+    assert @p.invited?(1, 4, :battle), "an invite stays to its TTL (a relogin keeps a challenge)"
+    assert_equal 1, @p.size
+    assert_empty @p.drop_account(1), "told once"
   end
 
   def test_an_old_invite_is_forgotten
