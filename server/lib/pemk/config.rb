@@ -17,7 +17,7 @@ module PEMK
                 :shop_enforce, :item_authority, :item_local, :item_grace, :money_authority,
                 :money_payday_daily, :money_local_daily, :money_repeat_daily, :trainer_proof,
                 :money_unproven_daily, :badge_authority, :badge_ignore, :client_debug, :presence_dedup,
-                :mode_moves
+                :mode_moves, :flood_guard
 
     def initialize(env: ENV, root: File.expand_path("../..", __dir__))
       @bind         = env.fetch("PEMK_BIND", "127.0.0.1")
@@ -77,6 +77,11 @@ module PEMK
       # party the client reports. On by default (a closed cheat path); off = the badge
       # alone, for a game whose swims need no Pokemon.
       @mode_moves = env.fetch("PEMK_MODE_MOVES", "on").to_s.strip.downcase != "off"
+
+      # Floods: a connection that floods the server before its session exists, or keeps
+      # sending far over its frame budgets after, is closed. On by default (an abuse fix);
+      # off = such frames are only dropped, as before.
+      @flood_guard = env.fetch("PEMK_FLOOD_GUARD", "on").to_s.strip.downcase != "off"
 
       # M4 Layer D: team/set legality enforcement mode, same off/shadow/on tri-state as
       # PEMK_POS_ENFORCE. Default off. D1 is detection-only (there is no battle-entry

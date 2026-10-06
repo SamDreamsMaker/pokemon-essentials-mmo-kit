@@ -474,6 +474,29 @@ All of the above assumes the bytes on the wire are the client's. They're sent ov
   client `Marshal.load`s its own save and a peer's battle team, so a MITM that can
   rewrite those bytes is a client-side remote-code-execution risk. TLS closes that.
 
+## Availability: what one connection can cost (`PEMK_FLOOD_GUARD`)
+
+A server that stays up for everyone is the first thing the players see, and the audit of
+2026-07-25 found that the stock configuration, every check off, was where it failed
+first. What bounds a connection today:
+
+- **Before its login.** A socket may send what the kit's client sends - 3 `:auth`, 5
+  `:login` (typed by hand), 3 `:register`, 10 `:ping` - each frame under 4 KiB, and it must
+  log in within 30 s; past that it is closed (`PEMK_FLOOD_GUARD`, on by default). Each
+  `:auth` used to be a pool job and a database read, and one read of 16 MiB held about
+  280,000 of them. Logins and registers (a bcrypt each) are limited per address, an IPv6
+  host counted by its /64, and run on a pool of their own: a storm of them delays other
+  logins, never a player's saves.
+- **After it.** Each frame type has a budget; a frame over it is dropped and logged once
+  per type per 10 s with the count (a line a frame was a log as large as the flood); a
+  connection that drops 1000 in a burst is closed (the guard) - an honest client drops a
+  few hundred at most, after a long network stall. A type the server does not know (a
+  newer client's) shares one budget and is logged once. Each socket is read 64 KiB per
+  turn of the loop, so no one connection holds it.
+- **What is the network's job.** The number of connections an address may open, and how
+  fast: a firewall rule or the reverse proxy. Behind a proxy every player shares its
+  address, and the login limit with it.
+
 ### Debug mode on the clients (`PEMK_CLIENT_DEBUG`)
 
 Essentials' debug mode (`$DEBUG`) walks through walls (Ctrl), skips a battle and decides

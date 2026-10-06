@@ -203,4 +203,13 @@ class ConfigTest < Minitest::Test
     assert_equal false, PEMK::Config.new(env: ENV.to_h.merge("PEMK_PRESENCE_DEDUP" => " OFF ")).presence_dedup
     assert_equal true,  PEMK::Config.new(env: ENV.to_h.merge("PEMK_PRESENCE_DEDUP" => "junk")).presence_dedup
   end
+
+  # An abuse fix: on unless said off.
+  def test_flood_guard_defaults_on
+    env = ENV.to_h
+    env.delete("PEMK_FLOOD_GUARD")
+    assert_equal true,  PEMK::Config.new(env: env).flood_guard
+    assert_equal false, PEMK::Config.new(env: ENV.to_h.merge("PEMK_FLOOD_GUARD" => " Off ")).flood_guard
+    assert_equal true,  PEMK::Config.new(env: ENV.to_h.merge("PEMK_FLOOD_GUARD" => "junk")).flood_guard
+  end
 end

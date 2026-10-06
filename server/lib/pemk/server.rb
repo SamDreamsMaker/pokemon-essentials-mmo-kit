@@ -2,6 +2,7 @@
 
 require "time"
 require "set"
+require "ipaddr"
 
 module PEMK
   # Milestone 1 server: reactor + worker pool + a connection AUTH-GATE. A socket is
@@ -26,6 +27,9 @@ module PEMK
                         trade_invite trade_accept trade_decline trade_offer trade_lock trade_cancel].freeze
     TRADE_TTL      = 15          # seconds a half-committed (lone) trade rendezvous lingers before timeout
     WORKERS        = 8
+    # Registers, logins and token checks run on a pool of their own: a flood of them (a
+    # bcrypt each, or a database read) delays other logins, never a player's saves.
+    AUTH_WORKERS   = 2
     LOGIN_MAX      = 10          # login/register attempts ...
     LOGIN_WINDOW   = 60          # ... per this many seconds, per IP
 
@@ -37,7 +41,7 @@ module PEMK
     def initialize(config: Config.new, logger: nil)
       @config   = config
       @log      = logger || self.class.method(:log)
-      @db       = DB.connect(@config.database_url, max_connections: WORKERS + 2)
+      @db       = DB.connect(@config.database_url, max_connections: WORKERS + AUTH_WORKERS + 2)
       @accounts   = Accounts.new(@db)
       @sessions   = Sessions.new(@db)
       @bans       = Bans.new(@db)   # moderation: set and lifted by the operator (bin/pemk_admin.rb)
@@ -151,6 +155,7 @@ module PEMK
       @mode_keys  = @world.field_keys   # what Surf and Dive need (nil: an export from before)
       @pickups    = Pickups.new(@db)   # M4 Layer C one-shot ledger
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
+      @auth_pool = WorkerPool.new(size: AUTH_WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
       @zones    = Hash.new { |h, k| h[k] = Set.new }   # map_id => Set(conn); reactor-thread only
       @zone_legacy = {}                                 # map_id => Set(conn) without presence_v2; reactor-thread only
@@ -163,7 +168,8 @@ module PEMK
       @reactor  = Reactor.new(
         host: @config.bind, port: @config.port,
         on_frame: method(:on_frame), on_close: method(:on_close),
-        on_tick: method(:on_tick), logger: @log
+        on_tick: method(:on_tick), logger: @log,
+        preauth_frame_max: (PREAUTH_FRAME_MAX if @config.flood_guard)
       )
       @mailbox  = PlayerMailbox.new(pool: @pool, post: @reactor.method(:post), logger: @log)
     end
@@ -263,7 +269,11 @@ module PEMK
       @log.call("server: presence dedup = #{@config.presence_dedup ? 'on' : 'off'} " \
                 "(#{@config.presence_dedup ? "an idle player's repeats reach only older clients; " \
                                              "a member silent #{PRESENCE_SILENCE.to_i}s leaves its map" : 'every frame to everyone'})")
+      @log.call("server: flood guard = #{@config.flood_guard ? 'on' : 'off'} " \
+                "(#{@config.flood_guard ? 'a flood before login, or a sustained one after, closes its connection; ' \
+                                          'a frame announced before login is small' : 'floods are only dropped'})")
       @pool.start
+      @auth_pool.start
       @reactor.start
       @thread = Thread.new { @reactor.run_loop }
       @thread.abort_on_exception = true
@@ -272,6 +282,7 @@ module PEMK
     def stop
       @reactor.stop
       @thread&.join(5)
+      @auth_pool.shutdown
       @pool.shutdown
       @db.disconnect   # the workers are done: a stopped server holds no connection
       @log.call("server: stopped")
@@ -281,6 +292,7 @@ module PEMK
       install_signal_handlers
       start
       @thread.join           # block until SIGTERM stops the reactor
+      @auth_pool.shutdown
       @pool.shutdown
       @db.disconnect
       @log.call("server: stopped")
@@ -306,7 +318,15 @@ module PEMK
       authed = conn.data[:account_id]
 
       unless authed || AUTH_TYPES.include?(type)
-        @log.call("server: pre-auth #{type.inspect} from #{conn.addr} -> drop")
+        @log.call("server: pre-auth #{bounded(type)} from #{conn.addr} -> drop")
+        conn.closing = true
+        return
+      end
+
+      # Before its session exists a socket is budgeted too: each :auth is a pool job and a
+      # database read, and one read of 16 MiB held ~280k of them (a flood guard rule).
+      if !authed && @config.flood_guard && !frame_budget_ok?(conn, type, PREAUTH_BUDGETS, :pre_budgets)
+        @log.call("server: pre-auth flood (#{bounded(type)}) from #{conn.addr} -> closed")
         conn.closing = true
         return
       end
@@ -316,8 +336,8 @@ module PEMK
       # the mailbox/pool queues ate the host. Honest clients send these at human,
       # debounced cadence, so the budgets are generous.
       if authed && !(frame_budget_ok?(conn, type) && (!PRESENCE_TYPES.include?(type) || frame_budget_ok?(conn, :presence)))
-        @log.call("server: account #{authed} over budget on #{type.inspect} -> drop")
         claim_sent(conn, env[:nonce]) if type == :money_claim   # a Pay Day after it waits for it
+        over_budget(conn, type, authed)
         return
       end
 
@@ -327,7 +347,12 @@ module PEMK
     rescue StandardError => e
       # A raise used to unwind to the reactor's blanket rescue, aborting the whole tick
       # (and the rest of this socket's already-parsed frames) with an unattributable log.
-      @log.call("server: handler error on #{type.inspect} account #{authed.inspect}: #{e.class}: #{e.message}")
+      @log.call("server: handler error on #{bounded(type)} account #{authed.inspect}: #{e.class}: #{e.message[0, 200]}")
+    end
+
+    # A client's value in a log line: its inspect, cut short (an envelope holds 64 KiB).
+    def bounded(value)
+      value.inspect[0, 40]
     end
 
     # Token bucket per connection. Tight for the DB-touching types, generous for
@@ -343,26 +368,75 @@ module PEMK
       pos: [40, 20], dir: [40, 20], step: [40, 20], spawn: [10, 2],
       # all presence types together: a bike is 10 steps/s - alternating types must not
       # triple the fan-out a script can force on its map
-      presence: [40, 20]
+      presence: [40, 20],
+      # every type this server does not know (a newer client's), together
+      other: [10, 2]
     }.freeze
     FRAME_BUDGET_DEFAULT = [30, 10].freeze
     PRESENCE_TYPES = %i[pos dir step spawn].freeze
+    # The types a handler reads. The client names a frame's type: any other shares the
+    # :other budget - a key each was memory for the connection's life and a fresh burst.
+    KNOWN_TYPES = (FRAME_BUDGETS.keys - %i[presence other] + AUTH_TYPES + ADDRESSED +
+                   %i[pickups_reset encounter_report catch_report battle_end_report]).uniq.freeze
 
-    def frame_budget_ok?(conn, type)
-      burst, rate = FRAME_BUDGETS.fetch(type, FRAME_BUDGET_DEFAULT)
+    # Before its session exists a client sends one :auth, or :login attempts typed by hand
+    # (a :register and a :login for a new account), on each connection - it reconnects on a
+    # new one - and never a :ping. Past these the connection is a flood (flood guard).
+    PREAUTH_BUDGETS = { ping: [10, 2], auth: [3, 0.1], login: [5, 0.2], register: [3, 0.1] }.freeze
+    # ... and each is small: the largest, a login with its email, password and caps, is
+    # under 1 KiB; a socket announcing more before its session exists is closed by the
+    # reactor (it could buffer 16 MiB before saying anything).
+    PREAUTH_FRAME_MAX = 4096
+    # Frames an authenticated connection may drop over budget in a burst, refilled
+    # FLOOD_RATE a second; past them it is closed (flood guard). An honest client drops a
+    # few hundred at most: the presence frames a long network stall delivers at once. The
+    # handshake answers are never counted: a player's client declines invites by itself.
+    FLOOD_DROPS = 1000
+    FLOOD_RATE  = 20.0
+    OVER_SAID   = 10.0   # an over-budget drop is said once per type per this many seconds
+
+    def frame_budget_ok?(conn, type, table = FRAME_BUDGETS, store = :budgets)
+      b = (conn.data[store] ||= {})
+      key = KNOWN_TYPES.include?(type) ? type : :other
+      burst, rate = table.fetch(key, FRAME_BUDGET_DEFAULT)
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      b = (conn.data[:budgets] ||= {})
-      tokens, last = b[type] || [burst.to_f, now]
+      tokens, last = b[key] || [burst.to_f, now]
       tokens = [tokens + ((now - last) * rate), burst.to_f].min
-      return (b[type] = [tokens, now]) && false if tokens < 1.0
+      return (b[key] = [tokens, now]) && false if tokens < 1.0
 
-      b[type] = [tokens - 1.0, now]
+      b[key] = [tokens - 1.0, now]
       true
+    end
+
+    # A frame over its budget is dropped, and said once per type per OVER_SAID with how
+    # many went since (one line a frame was a log as large as the flood). Under the flood
+    # guard a connection that keeps it up is closed.
+    def over_budget(conn, type, account_id)
+      now  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      said = (conn.data[:over_said] ||= {})
+      key  = KNOWN_TYPES.include?(type) ? type : :other
+      last, count = said[key] || [nil, 0]
+      count += 1
+      if last.nil? || now - last >= OVER_SAID
+        @log.call("server: account #{account_id} over budget on #{bounded(key)} -> drop (#{count} dropped)")
+        said[key] = [now, 0]
+      else
+        said[key] = [last, count]
+      end
+      return unless @config.flood_guard && !HANDSHAKE.include?(type)
+
+      tokens, at = conn.data[:flood] || [FLOOD_DROPS.to_f, now]
+      tokens = [tokens + ((now - at) * FLOOD_RATE), FLOOD_DROPS.to_f].min - 1
+      conn.data[:flood] = [tokens, now]
+      return unless tokens.negative?
+
+      @log.call("server: account #{account_id} floods (#{FLOOD_DROPS} frames over budget in a burst) -> closed")
+      conn.closing = true
     end
 
     def dispatch_frame(conn, env, type, authed, body)
       case type
-      when :ping     then reply(conn, type: :pong, t: env[:t])
+      when :ping     then reply(conn, type: :pong, t: (env[:t] if env[:t].is_a?(Numeric)))   # echoed: a number, not 64 KiB
       when :register then handle_register(conn, env)
       when :login    then handle_login(conn, env)
       when :auth     then handle_auth(conn, env)
@@ -395,19 +469,22 @@ module PEMK
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, body, authed)
       else
-        # Other authenticated gameplay frames (economy, battle) — per-player mailbox
-        # routing + handlers land in later milestones.
-        @log.call("server: authed #{type.inspect} from account #{authed}")
+        # A type this server does not know (a newer client's): ignored, said once per
+        # connection (a line a frame was a log as large as the frames).
+        unless conn.data[:unknown_said]
+          conn.data[:unknown_said] = true
+          @log.call("server: account #{authed} sent #{bounded(type)}, a frame this server does not know (a newer client?) - ignored")
+        end
       end
     end
 
     def handle_register(conn, env)
-      return reply(conn, type: :register_err, reason: "rate_limited") unless @limiter.allow?(conn.addr)
+      return reply(conn, type: :register_err, reason: "rate_limited") unless @limiter.allow?(limiter_key(conn.addr))
 
       email = env[:email].to_s
       pw    = env[:password].to_s
       uname = env[:username]   # optional display handle
-      @pool.submit do
+      @auth_pool.submit do
         result =
           begin
             id = @accounts.create(email: email, password: pw, username: uname)
@@ -419,6 +496,19 @@ module PEMK
           end
         @reactor.post { reply(conn, **result) }
       end
+    end
+
+    # The login limiter's key for an address: an IPv6 one by its /64 (one host holds a
+    # whole /64, and rotating through it bought a bcrypt each), an IPv4-mapped one by its
+    # IPv4 address.
+    def limiter_key(addr)
+      ip = IPAddr.new(addr.to_s)
+      return ip.native.to_s if ip.ipv4_mapped?
+      return ip.mask(64).to_s if ip.ipv6?
+
+      ip.to_s
+    rescue IPAddr::Error, ArgumentError
+      addr.to_s
     end
 
     # What a client says it can do (a login or auth frame's :caps). Unknown words are
@@ -442,10 +532,11 @@ module PEMK
     end
 
     def handle_login(conn, env)
-      return reply(conn, type: :login_err, reason: "rate_limited") unless @limiter.allow?(conn.addr)
       # A socket is one session: the game reconnects on a new one. A second login here
       # would leave the first account's map, relays and claims pointing at this socket.
+      # (Before the limiter: a refused login spends no attempt of the address.)
       return reply(conn, type: :login_err, reason: "already_authed") if conn.data[:account_id]
+      return reply(conn, type: :login_err, reason: "rate_limited") unless @limiter.allow?(limiter_key(conn.addr))
 
       note_caps(conn, env)
       return reply(conn, type: :login_err, reason: "update_required") if money_update_required?(conn)
@@ -453,7 +544,7 @@ module PEMK
       email = env[:email].to_s
       pw    = env[:password].to_s
       addr  = conn.addr
-      @pool.submit do
+      @auth_pool.submit do
         acct, err = @accounts.authenticate(email, pw)
         # Banned: told until when and why, once the password is right (a stranger learns
         # nothing), and no session is issued.
@@ -505,7 +596,7 @@ module PEMK
       # A reconnect resuming a live session must not be judged like a fresh one: the
       # client keeps its state, it does not load the stored blob.
       fresh = env[:resume] != true
-      @pool.submit do
+      @auth_pool.submit do
         account_id = @sessions.resolve(token)
         # A ban revokes the sessions; one set in the table by hand still stops a resume.
         if account_id && (ban = @bans.active(account_id))
@@ -3073,8 +3164,8 @@ module PEMK
                                      claimed_rate: env[:claimed_rate],
                                      dex_owned: env[:dex_owned], charm: env[:charm] == true)
       wm = would ? "#{would[:shakes]}#{would[:critical] ? ' CRIT' : ''}#{would[:caught] ? ' CAUGHT' : ''}" : "-"
-      @log.call("catch: account #{account_id} report #{species}@#{env[:level].inspect} " \
-                "ball=#{env[:ball].to_s[0, 24]} client_shakes=#{env[:shakes].inspect} server_would=#{wm}")
+      @log.call("catch: account #{account_id} report #{species}@#{bounded(env[:level])} " \
+                "ball=#{env[:ball].to_s[0, 24]} client_shakes=#{bounded(env[:shakes])} server_would=#{wm}")
     end
 
     # Server-authoritative trade COMMIT (M3.2). The only authoritative trade frame
@@ -3303,6 +3394,16 @@ module PEMK
       maybe_resim_sweep
       maybe_item_sweep
       maybe_prune_deals
+      maybe_prune_limiter
+    end
+
+    # The login limiter forgets the addresses whose bucket has refilled (reactor thread).
+    def maybe_prune_limiter
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      return if @last_limiter_prune && now - @last_limiter_prune < LOGIN_WINDOW
+
+      @last_limiter_prune = now
+      @limiter.prune(now: now)
     end
 
     PROOF_SWEEP_SEC = 5
@@ -4139,18 +4240,18 @@ module PEMK
     def handle_addressed(sender, env, body, from_account)
       target = @online[env[:to]]
       if target.nil? || target.equal?(sender)
-        @log.call("server: no route for #{env[:type].inspect} -> #{env[:to].inspect}")
+        @log.call("server: no route for #{bounded(env[:type])} -> #{bounded(env[:to])}")
         return
       end
 
       if body && body.bytesize > RELAY_BODY_MAX
-        @log.call("server: account #{from_account} oversized #{env[:type].inspect} body " \
+        @log.call("server: account #{from_account} oversized #{bounded(env[:type])} body " \
                   "(#{body.bytesize}B > #{RELAY_BODY_MAX}) -> drop")
         return
       end
 
       unless relay_allowed?(env[:type], from_account, env[:to])
-        @log.call("server: account #{from_account} #{env[:type].inspect} -> #{env[:to].inspect} " \
+        @log.call("server: account #{from_account} #{bounded(env[:type])} -> #{bounded(env[:to])} " \
                   "without a peer session -> drop")
         return
       end
