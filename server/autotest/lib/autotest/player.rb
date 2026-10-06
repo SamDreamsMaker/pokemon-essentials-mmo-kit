@@ -10,7 +10,7 @@ module Autotest
     VERBS = %w[press hold release wait wait_until choose type pick dismiss walk_to talk_to enter
                face interact warp events event_pages grass battle decide fast advance screenshot save
                set_switch get_switch set_var get_var set_selfswitch get_selfswitch
-               add_item get_item add_pokemon set_badge heal money bp set_raw_var set_raw_switch abort
+               add_item get_item add_pokemon set_badge repel heal money bp set_raw_var set_raw_switch abort
                hold_saves pc_deposit pc_withdraw get_pc give_held take_held get_held partner set_debug].freeze
 
     attr_reader :name, :instance, :email, :pid

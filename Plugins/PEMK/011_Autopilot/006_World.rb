@@ -18,6 +18,7 @@
 #   set_switch ID on|off   set_var ID VALUE   set_selfswitch MAP EVENT LETTER on|off
 #   add_item ITEM [QTY]    add_pokemon SPECIES LEVEL [foreign]    heal    money AMOUNT    bp AMOUNT
 #   set_badge INDEX on|off (the badge write an event makes: $player.badges[i] = true)
+#   repel STEPS (the steps a Repel's use leaves: $PokemonGlobal.repel)
 # Readers: get_switch ID, get_var ID, get_selfswitch MAP EVENT LETTER, get_item ITEM
 # (how many the bag holds). And save.
 # set_raw_var ID VALUE / set_raw_switch ID on|off change a value without the game's
@@ -190,8 +191,11 @@ module PEMK
         return Autopilot.respond(id, "ok" => false, "error" => "walk_to X Y") unless tx && ty
         return Autopilot.respond(id, "ok" => false, "error" => "not on a map") unless on_map?
 
-        # A door or an NPC stands on its tile: nobody walks onto it, you bump into it.
-        blocker = $game_map.events.values.find { |e| e.x == tx && e.y == ty && !e.through }
+        # A door or an NPC stands on its tile: nobody walks onto it, you bump into it. One
+        # with no graphic (an invisible trigger) is walked onto, as the engine lets a player.
+        blocker = $game_map.events.values.find do |e|
+          e.x == tx && e.y == ty && !e.through && !(e.character_name.to_s.empty? && e.tile_id.to_i <= 0)
+        end
         if blocker && at != [tx, ty]
           return Autopilot.respond(id, "ok" => false, "status" => "no_path",
                                        "detail" => "event #{blocker.id} (#{blocker.name}) stands there: " \
@@ -413,6 +417,9 @@ module PEMK
           when "set_badge"                   # index on|off: as a gym leader's event writes it
             $player.badges[a[0].to_i] = on?(a[1])
             { "badge" => a[0].to_i, "value" => $player.badges[a[0].to_i] ? true : false, "badges" => $player.badge_count }
+          when "repel"                       # steps: what a Repel's use leaves (pbRepel)
+            $PokemonGlobal.repel = [a[0].to_i, 0].max
+            { "repel" => $PokemonGlobal.repel }
           when "get_switch"
             { "switch" => a[0].to_i, "value" => $game_switches[a[0].to_i] ? true : false }
           when "get_var"
@@ -479,7 +486,7 @@ module PEMK
       Autopilot.verb("grass")    { |id, _| cmd_grass(id) }
       Autopilot.verb("event_pages") { |id, rest| cmd_event_pages(id, rest) }
       Autopilot.verb("warp")     { |id, rest| cmd_warp(id, rest) }
-      %w[set_switch set_var set_selfswitch add_item add_pokemon heal money bp set_badge
+      %w[set_switch set_var set_selfswitch add_item add_pokemon heal money bp set_badge repel
          get_switch get_var get_selfswitch get_item set_raw_var set_raw_switch
          pc_deposit pc_withdraw get_pc give_held take_held get_held partner set_debug].each do |name|
         Autopilot.verb(name) do |id, rest|
