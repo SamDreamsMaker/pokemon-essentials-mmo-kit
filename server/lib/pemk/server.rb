@@ -1376,8 +1376,9 @@ module PEMK
       awake = team.select { |m| m.is_a?(Hash) }.first(@config.monster_caps[:party_max] || 6)
                   .reject { |m| (m["egg"] || m[:egg]) == true }
       conn.data[:swim_moves] = awake.flat_map { |m| (mv = m["moves"] || m[:moves]).is_a?(Array) ? mv.map(&:to_s) : [] }.uniq.first(64)
-      # field gates: what the party has known while the loaded maps stood
-      (epoch = @field_epochs[conn.data[:account_id]]) && epoch[:moves].merge(conn.data[:swim_moves])
+      # field gates: what the party has known while the loaded maps stood (the gates' moves
+      # alone: a report names any string it likes)
+      (epoch = @field_epochs[conn.data[:account_id]]) && epoch[:moves].merge(conn.data[:swim_moves] & FIELD_MOVE.keys)
     end
 
     # Audit item 5: lock each owned mon's identity traits on first sight and flag a
@@ -4195,67 +4196,85 @@ module PEMK
       "#{what.join(', ')} (the party a client reports before a swim; older clients: the badge)"
     end
 
-    # Field gates (detection only): a Cut tree, a Rock Smash rock or a Strength boulder
-    # standing in the way, a headbutt tree, a waterfall climbed - judged on the straight
-    # line a frame covers (a forced climb, a hop, is one frame). Logged once a tile per
-    # epoch; nothing refused, nothing flagged.
+    # Field gates (detection only): a step onto a Cut tree, a Rock Smash rock or a Strength
+    # boulder still standing, or onto a headbutt tree; a waterfall climbed (one frame, on
+    # the water). Logged once a tile per epoch, FIELD_SAID_MAX lines a minute an account at
+    # most; nothing refused, nothing flagged.
     #
     # An epoch is what the player's loaded maps have seen: the engine keeps an obstacle
     # removed while its map stays loaded - through connection walks, same-map transfers, a
     # save and a load - and stands it again after a transfer to another map. So per
     # account, across reconnects: a transfer starts one (the party's moves then, and every
     # report after), a connection walk keeps it. One the server never saw start (its own
-    # restart, an account's first frames) is not judged.
+    # restart, an account's first frames) is not judged, and a connection's first frame
+    # keeps the epoch only on one of its maps.
     FIELD_MOVE = { "CUT" => :cut, "ROCKSMASH" => :rocksmash, "STRENGTH" => :strength }.freeze
-    FIELD_EPOCH_TTL = 3600.0
+    FIELD_EPOCH_TTL   = 3600.0
+    FIELD_SAID_MAX    = 10
+    FIELD_SAID_WINDOW = 60.0
 
     def field_audit(conn, account_id, prev, env)
       gates = @world.field_gates
       map = env[:map]; x = env[:x]; y = env[:y]
-      return unless gates && prev && @config.client_debug != :allow && x.is_a?(Integer) && y.is_a?(Integer)
+      return unless gates && @config.client_debug != :allow && x.is_a?(Integer) && y.is_a?(Integer)
 
-      epoch = field_epoch(conn, account_id, prev[0], map)
-      return unless prev[0] == map && epoch[:seen]
+      # A connection's first frame starts from the tile its login read (the last saved), or
+      # from none: it places the player, nothing more.
+      first = prev.nil? || conn.data[:presence_seen].nil?
+      epoch = field_epoch(conn, account_id, first ? nil : prev[0], map)
+      return if first || prev[0] != map || !epoch[:seen]
 
       px, py = prev[1], prev[2]
+      return unless on_map?(map, x, y) && on_map?(map, px, py)   # no line to walk off the map
       return if (x == px && y == py) || (x != px && y != py)   # a turn, a repeat; a diagonal: frames lost
-      return if field_exempt?(map, px, py, x, y)
+      return if field_exempt?(map, x, y)
 
-      line = straight_line(px, py, x, y)
-      line.each do |tx, ty|
-        if @world.wall_at?(map, tx, ty)
-          field_said(epoch, account_id, map, tx, ty, "crossed a headbutt tree")
-        elsif (o = @world.obstacle_at(map, tx, ty)) && (why = gate_missing(conn, epoch, FIELD_MOVE[o[:move]], o[:move], epoch[:moves]))
-          field_said(epoch, account_id, map, tx, ty, "crossed a #{o[:move].downcase} gate (event #{o[:event]}) with no key (#{why})")
+      # A gate is judged on a step: a longer frame is a gap (a cutscene walks with no frame).
+      if (x - px).abs + (y - py).abs == 1
+        if @world.wall_at?(map, x, y)
+          field_said(epoch, account_id, map, x, y, "crossed a headbutt tree")
+        elsif (o = @world.obstacle_at(map, x, y)) && (why = gate_missing(conn, FIELD_MOVE[o[:move]], o[:move], epoch[:moves]))
+          field_said(epoch, account_id, map, x, y, "crossed a #{o[:move].downcase} gate (event #{o[:event]}) with no key (#{why})")
         end
       end
-      return unless y < py && line.any? { |tx, ty| @world.fall?(map, tx, ty) }
+      return unless env[:mode] == :surf && y < py && straight_line(px, py, x, y).any? { |tx, ty| @world.fall?(map, tx, ty) }
 
-      why = gate_missing(conn, epoch, :waterfall, "WATERFALL", Array(conn.data[:swim_moves]))
+      why = gate_missing(conn, :waterfall, "WATERFALL", Array(conn.data[:swim_moves]))
       field_said(epoch, account_id, map, x, y, "climbed a waterfall with no key (#{why})") if why
     end
 
-    # The account's epoch, moved on by this frame's map.
+    # The account's epoch, moved on by this frame's map (+from_map+ nil: a connection's
+    # first frame).
     def field_epoch(conn, account_id, from_map, map)
-      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       e = @field_epochs[account_id]
-      if from_map != map && !@world.connected?(from_map, map)   # a transfer: the maps stand anew
-        e = @field_epochs[account_id] = { maps: Set[map], moves: Set.new(Array(conn.data[:swim_moves])), seen: true, said: Set.new }
+      if from_map.nil?
+        e = new_field_epoch(account_id, map, Set.new, false) unless e && e[:maps].include?(map)
+      elsif from_map != map && !@world.connected?(from_map, map)   # a transfer: the maps stand anew
+        e = new_field_epoch(account_id, map, Set.new(Array(conn.data[:swim_moves]) & FIELD_MOVE.keys), true)
       elsif e.nil?   # the first map this server sees the account on: what stands there is unknown
-        e = @field_epochs[account_id] = { maps: Set[map], moves: Set.new, seen: false, said: Set.new }
+        e = new_field_epoch(account_id, map, Set.new, false)
       elsif from_map != map
         e[:maps] << map
       end
-      e[:at] = now
+      e[:at] = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       e
     end
 
-    # A ledge hop, or the arrival of a same-map warp or a respawn: the engine's own move.
-    def field_exempt?(map, px, py, x, y)
-      return true if @world.warp_dest?(map, map, x, y, reach: PositionAudit::ARRIVAL_REACH) ||
-                     @world.spawn_tile?(map, x, y, reach: PositionAudit::ARRIVAL_REACH)
+    # The account's lines held to FIELD_SAID_MAX a minute go on from one epoch to the next.
+    def new_field_epoch(account_id, map, moves, seen)
+      old = @field_epochs[account_id]
+      @field_epochs[account_id] = { maps: Set[map], moves: moves, seen: seen, said: Set.new, rate: old && old[:rate] }
+    end
 
-      (x - px).abs + (y - py).abs == 2 && @world.ledge?(map, (px + x) / 2, (py + y) / 2)
+    def on_map?(map, x, y)
+      (d = @world.dims(map)) && x >= 0 && y >= 0 && x < d[0] && y < d[1]
+    end
+
+    # The arrival of a same-map warp or a respawn: the engine's own move (a warp ignores
+    # what stands where it lands).
+    def field_exempt?(map, x, y)
+      @world.warp_dest?(map, map, x, y, reach: PositionAudit::ARRIVAL_REACH) ||
+        @world.spawn_tile?(map, x, y, reach: PositionAudit::ARRIVAL_REACH)
     end
 
     # The tiles from (px, py) to (x, y), the start left out.
@@ -4268,9 +4287,13 @@ module PEMK
 
     # What a gate's key lacks: its badge (the mode keys' badge read, when there is one)
     # and, for a client that reports its party (field_report) where the game still asks
-    # for a Pokemon, the move in +moves+. -> the text, or nil when nothing lacks.
-    def gate_missing(conn, _epoch, sym, move, moves)
+    # for a Pokemon, the move in +moves+. -> the text, or nil when nothing lacks - and
+    # always nil where a script redefines the move's function (its rule is unknown).
+    def gate_missing(conn, sym, move, moves)
       gates = @world.field_gates
+      rule = gates[:moves][sym]
+      return nil if rule.nil?
+
       out = []
       need = gates[:badges][sym]
       held = conn.data.dig(:mode_keys, :surf, :held)
@@ -4278,16 +4301,26 @@ module PEMK
         ok = @mode_keys[:count_badges] ? badge_count(held) >= need : held[need] == 1
         out << "#{@mode_keys[:count_badges] ? "#{need} badges" : "badge #{need}"} needed" unless ok
       end
-      if gates[:moves][sym] == true && conn.data[:field_report] && !moves.include?(move)
-        out << "no Pokemon knowing #{move}"
-      end
+      out << "no Pokemon knowing #{move}" if rule == true && conn.data[:field_report] && !moves.include?(move)
       out.empty? ? nil : out.join("; ")
     end
 
+    # Once a tile per epoch, and FIELD_SAID_MAX lines a FIELD_SAID_WINDOW an account: the
+    # next line said counts those held back (a door walked to and fro resets the tiles).
     def field_said(epoch, account_id, map, x, y, what)
       return unless epoch[:said].add?([map, x, y])
 
-      @log.call("fieldaudit: account #{account_id} #{what} at #{map}(#{x},#{y})")
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      rate = (epoch[:rate] ||= { at: now, said: 0, held: 0 })
+      rate[:at], rate[:said] = now, 0 if now - rate[:at] >= FIELD_SAID_WINDOW
+      if rate[:said] >= FIELD_SAID_MAX
+        rate[:held] += 1
+        return
+      end
+      rate[:said] += 1
+      held = rate[:held].positive? ? " (#{rate[:held]} more held back before it)" : ""
+      rate[:held] = 0
+      @log.call("fieldaudit: account #{account_id} #{what} at #{map}(#{x},#{y})#{held}")
     end
 
     # Presence zones (reactor thread). A client without presence_v2 is also in its

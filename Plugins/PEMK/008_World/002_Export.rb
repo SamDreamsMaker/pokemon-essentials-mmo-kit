@@ -1489,13 +1489,19 @@ module PEMK
     GATE_SCRIPT  = /\A\s*(pbSmashThisEvent|pbSmashEvent\(\s*get_self\s*\)|pbRockSmashRandomEncounter|pbPushThisBoulder|pbHeadbutt)\s*\z/.freeze
     GATE_BRANCH  = /\A\s*(pbCut|pbRockSmash|pbStrength)\s*\z/.freeze
     GATE_CODES   = [0, 101, 401, 108, 408, 111, 411, 412, 115, 209, 509, 355, 655].freeze
+    # The move route commands a gate may run on itself (a shake): waits, turns, speed,
+    # animation, direction fix, always on top, opacity, blending, a sound. Never a move,
+    # a jump, through, a switch, a new graphic or a script.
+    GATE_ROUTE   = [0, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 29, 30, 31, 32, 33, 34, 35, 36,
+                    39, 40, 42, 43, 44].freeze
 
     # -> [obstacles, walls] of a map. An obstacle - a Cut tree, a Rock Smash rock, a
-    # Strength boulder - is listed only when it is nothing but its gate: every page shows
-    # it, blocks and stands still, and runs only the gate (the shake, the branch on the
-    # move, the smash or the push); and nothing else on the map moves or places it. A game
-    # that removes one for good (a page for a switch: the boulder fallen down a hole) is
-    # not listed. Walls: headbutt trees, which never fall.
+    # Strength boulder - is listed only when it is nothing but its gate: one of its pages
+    # asks for nothing (so a page always applies), every page shows a character, blocks
+    # and stands still, and runs only the gate (the shake, the branch on the move, the
+    # smash or the push); and nothing else on the map moves or places it. A game that
+    # removes one for good (a page for a switch: the boulder fallen down a hole) is not
+    # listed. Walls: headbutt trees, which never fall.
     def map_gates(map)
       moved = moved_event_ids(map)
       obstacles = []
@@ -1504,7 +1510,8 @@ module PEMK
         name = ev.name.to_s
         move = GATE_NAMES.find { |re, _| name =~ re }&.last
         next unless move || name =~ /headbutt/i
-        next if moved.include?(ev.id) || !ev.pages.all? { |pg| gate_page?(pg) }
+        next if moved.include?(ev.id) || !ev.pages.all? { |pg| gate_page?(pg) } ||
+                ev.pages.none? { |pg| unconditional?(pg) }
 
         if move
           obstacles << { :event => ev.id, :x => ev.x, :y => ev.y, :move => move }
@@ -1515,9 +1522,11 @@ module PEMK
       [obstacles, walls]
     end
 
+    # A character graphic blocks the player whatever its tile; a tile graphic only where
+    # that tile's passage does (not read here), so it is not one.
     def gate_page?(pg)
       g = pg.graphic
-      return false unless g && (g.character_name.to_s != "" || g.tile_id.to_i > 0)
+      return false unless g && g.character_name.to_s != ""
       return false if pg.through || pg.move_type.to_i != 0
 
       Array(pg.list).all? do |cmd|
@@ -1526,10 +1535,24 @@ module PEMK
         case cmd.code
         when 111 then cmd.parameters[0] == 12 && cmd.parameters[1].to_s.match?(GATE_BRANCH)
         when 355, 655 then cmd.parameters[0].to_s.match?(GATE_SCRIPT)
-        when 209 then cmd.parameters[0] == 0   # its own move route (the shake), nobody else's
+        when 209 then cmd.parameters[0] == 0 && gate_route?(cmd.parameters[1])   # its own shake, nobody else's
+        when 509 then gate_route_command?(cmd.parameters[0])
         else true
         end
       end
+    end
+
+    def gate_route?(route)
+      route.respond_to?(:list) && Array(route.list).all? { |mc| gate_route_command?(mc) }
+    end
+
+    def gate_route_command?(mc)
+      mc.respond_to?(:code) && GATE_ROUTE.include?(mc.code)
+    end
+
+    def unconditional?(pg)
+      c = pg.condition
+      c && !c.switch1_valid && !c.switch2_valid && !c.variable_valid && !c.self_switch_valid
     end
 
     # The event ids something on the map moves or places: a move route (209) or a location

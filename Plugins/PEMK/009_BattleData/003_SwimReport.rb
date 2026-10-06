@@ -111,3 +111,21 @@ class Interpreter
     end
   end
 end
+
+# Strength is asked for once, as it is used (a boulder's own prompt or the party menu);
+# the pushes that follow need only that it was: the report goes then too.
+unless defined?(pemk_orig_pbStrength)
+  alias pemk_orig_pbStrength pbStrength
+  def pbStrength
+    PEMK::SwimReport.before_swim
+    pemk_orig_pbStrength
+  end
+
+  use_strength = HiddenMoveHandlers::UseMove[:STRENGTH]
+  if use_strength
+    HiddenMoveHandlers::UseMove.add(:STRENGTH, proc { |move, pokemon|
+      PEMK::SwimReport.before_swim
+      use_strength.call(move, pokemon)
+    })
+  end
+end

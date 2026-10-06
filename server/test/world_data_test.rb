@@ -363,7 +363,11 @@ class WorldDataTest < Minitest::Test
     m = doc["maps"]["7"]
     m["obstacles"] = [{ "event" => 3, "x" => 1, "y" => 0, "move" => "CUT" }, { "x" => "bad" }, { "x" => 2, "y" => 0, "move" => "FLY" }]
     m["walls"] = [{ "event" => 4, "x" => 2, "y" => 1 }]
-    m["falls"] = Array.new(m["height"]) { |y| y.zero? ? "f" + ("." * (m["width"] - 1)) : "." * m["width"] }
+    m["falls"] = Array.new(m["height"]) do |y|
+      next "f" + ("." * (m["width"] - 1)) if y.zero?
+
+      y == 1 ? ("." * (m["width"] - 1)) + "f" : "." * m["width"]
+    end
     doc["field_gates"] = { "badges" => { "cut" => 1, "rocksmash" => 2, "strength" => 3, "waterfall" => 6 },
                            "moves" => { "cut" => true, "rocksmash" => false, "strength" => nil, "waterfall" => "yes" } }
     w = load(doc)
@@ -374,6 +378,8 @@ class WorldDataTest < Minitest::Test
     assert w.fall?(7, 0, 0)
     refute w.fall?(7, 1, 0)
     refute w.fall?(7, 0, 99), "outside the grid"
+    assert w.fall?(7, m["width"] - 1, 1)
+    refute w.fall?(7, -1, 1), "a negative x is off the map, not the row's end"
     assert_equal({ badges: { cut: 1, rocksmash: 2, strength: 3, waterfall: 6 },
                    moves: { cut: true, rocksmash: false, strength: nil, waterfall: nil } }, w.field_gates)
     m["falls"] = ["ff"]   # not the map's size

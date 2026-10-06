@@ -131,7 +131,7 @@ module PEMK
     # A waterfall a player climbs only with Waterfall (not its crest).
     def fall?(map_id, x, y)
       grid = @falls[map_id]
-      return false unless grid && y >= 0 && y < grid.length
+      return false unless grid && y >= 0 && y < grid.length && x >= 0   # a negative index reads from the end
 
       grid[y][x] == "f"
     end
