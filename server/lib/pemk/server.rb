@@ -168,6 +168,7 @@ module PEMK
       @peer_sessions  = {}                              # account_id => partner id (mutual); reactor-thread only
       @peers          = PeerSessions.new                # the relay guard's invites and sessions; reactor-thread only
       @invite_limiter = RateLimiter.new(max: 5, per: 25) # invites per ACCOUNT (a reconnect refills nothing)
+      @field_epochs   = {}                              # account_id => what its loaded maps have seen (field gates); reactor-thread only
       @trade_bodies   = {}                              # sender => its last locked escrow; reactor-thread only
       @conn_buckets   = {}                              # conn => [tokens, last_refill]; reactor-thread only
       @reactor  = Reactor.new(
@@ -621,6 +622,7 @@ module PEMK
       # A reconnect resuming a live session must not be judged like a fresh one: the
       # client keeps its state, it does not load the stored blob.
       fresh = env[:resume] != true
+      conn.data[:resumed] = !fresh   # field gates: the client kept its maps
       @pool.submit do
         account_id = @sessions.resolve(token)
         # A ban revokes the sessions; one set in the table by hand still stops a resume.
@@ -1375,6 +1377,10 @@ module PEMK
       awake = team.select { |m| m.is_a?(Hash) }.first(@config.monster_caps[:party_max] || 6)
                   .reject { |m| (m["egg"] || m[:egg]) == true }
       conn.data[:swim_moves] = awake.flat_map { |m| (mv = m["moves"] || m[:moves]).is_a?(Array) ? mv.map(&:to_s) : [] }.uniq.first(64)
+      # field gates: what the party has known while the loaded maps stood (the gates' moves
+      # alone: a report names any string it likes), and that this connection reported it
+      conn.data[:team_seen] = true
+      (epoch = @field_epochs[conn.data[:account_id]]) && epoch[:moves].merge(conn.data[:swim_moves] & FIELD_MOVE.keys)
     end
 
     # Audit item 5: lock each owned mon's identity traits on first sight and flag a
@@ -3453,6 +3459,7 @@ module PEMK
       @limiter.prune(now: now)
       @invite_limiter.prune(now: now)
       @peers.prune
+      @field_epochs.delete_if { |_, e| now - e[:at] > FIELD_EPOCH_TTL }
     end
 
     PROOF_SWEEP_SEC = 5
@@ -3889,12 +3896,14 @@ module PEMK
       # frame: no zone change and no fan-out of the rejected position, so peers keep
       # seeing the offender at its last accepted tile and it never joins the illegal
       # map's zone. In :off/:shadow correct_to is never set, so the frame flows on.
+      prev = conn.data[:last_pos]
       @pos_audit.check(account_id, env, conn.data)
       if (tgt = conn.data.delete(:correct_to))
         conn.data.delete(:sync_at) if tgt[0] != map   # a snap-back to another map clears the client's remotes: its next ask is honoured
         reply(conn, type: :pos_correct, map: tgt[0], x: tgt[1], y: tgt[2])
         return
       end
+      field_audit(conn, account_id, prev, env)
 
       # :map_id is the last map this connection reported (money claims, gifts and the
       # reconnect fallback read it); :zone the map whose presence zone it is in - none
@@ -4187,6 +4196,135 @@ module PEMK
         end
       end
       "#{what.join(', ')} (the party a client reports before a swim; older clients: the badge)"
+    end
+
+    # Field gates (detection only): a step onto a Cut tree, a Rock Smash rock or a Strength
+    # boulder still standing, or onto a headbutt tree; a waterfall climbed (one frame, on
+    # the water). Logged once a tile per epoch, FIELD_SAID_MAX lines a minute an account at
+    # most; nothing refused, nothing flagged.
+    #
+    # An epoch is what the player's loaded maps have seen: the engine keeps an obstacle
+    # removed while its map stays loaded - through connection walks, same-map transfers, a
+    # save and a load - and stands it again after a transfer to another map. So per
+    # account, across reconnects: a transfer starts one (the party's moves then, and every
+    # report after), a connection walk keeps it. One the server never saw start (its own
+    # restart, an account's first frames) is not judged; a connection's first frame keeps
+    # the epoch only for a resume (the client kept its maps) onto one of its maps - a login
+    # loads a save, which may be older than the epoch.
+    FIELD_MOVE = { "CUT" => :cut, "ROCKSMASH" => :rocksmash, "STRENGTH" => :strength }.freeze
+    FIELD_EPOCH_TTL   = 3600.0
+    FIELD_SAID_MAX    = 10
+    FIELD_SAID_WINDOW = 60.0
+
+    def field_audit(conn, account_id, prev, env)
+      gates = @world.field_gates
+      map = env[:map]; x = env[:x]; y = env[:y]
+      return unless gates && @config.client_debug != :allow && x.is_a?(Integer) && y.is_a?(Integer)
+
+      # A connection's first frame starts from the tile its login read (the last saved), or
+      # from none: it places the player, nothing more.
+      first = prev.nil? || conn.data[:presence_seen].nil?
+      epoch = field_epoch(conn, account_id, first ? nil : prev[0], map)
+      return if first || prev[0] != map || !epoch[:seen]
+
+      px, py = prev[1], prev[2]
+      return unless on_map?(map, x, y)   # what is told names the tile: one of the map's
+      return if (x == px && y == py) || (x != px && y != py)   # a turn, a repeat; askew: frames lost
+
+      what = field_gate(conn, epoch, map, px, py, x, y, env[:mode])
+      field_said(epoch, account_id, map, x, y, what) if what && !field_exempt?(map, x, y)
+    end
+
+    # What this frame crossed with no key | nil. A gate is judged on a step - a longer frame
+    # is a gap: a cutscene sends few frames, a stall drops some; a climb is one frame up on
+    # the water from right under a fall, where pbAscendWaterfall starts.
+    def field_gate(conn, epoch, map, px, py, x, y, mode)
+      if (x - px).abs + (y - py).abs == 1
+        return "crossed a headbutt tree" if @world.wall_at?(map, x, y)
+
+        o = @world.obstacle_at(map, x, y)
+        why = o && gate_missing(conn, FIELD_MOVE[o[:move]], o[:move], epoch[:moves])
+        return "crossed a #{o[:move].downcase} gate (event #{o[:event]}) with no key (#{why})" if why
+      end
+      return nil unless mode == :surf && y < py && @world.fall?(map, px, py - 1)
+
+      why = gate_missing(conn, :waterfall, "WATERFALL", Array(conn.data[:swim_moves]))
+      why && "climbed a waterfall with no key (#{why})"
+    end
+
+    # The account's epoch, moved on by this frame's map (+from_map+ nil: a connection's
+    # first frame).
+    def field_epoch(conn, account_id, from_map, map)
+      e = @field_epochs[account_id]
+      if from_map.nil?
+        e = new_field_epoch(account_id, map, Set.new, false) unless conn.data[:resumed] && e && e[:maps].include?(map)
+      elsif from_map != map && !@world.connected?(from_map, map)   # a transfer: the maps stand anew
+        e = new_field_epoch(account_id, map, Set.new(Array(conn.data[:swim_moves]) & FIELD_MOVE.keys), true)
+      elsif e.nil?   # the first map this server sees the account on: what stands there is unknown
+        e = new_field_epoch(account_id, map, Set.new, false)
+      elsif from_map != map
+        e[:maps] << map
+      end
+      e[:at] = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      e
+    end
+
+    # The account's lines held to FIELD_SAID_MAX a minute go on from one epoch to the next.
+    def new_field_epoch(account_id, map, moves, seen)
+      old = @field_epochs[account_id]
+      @field_epochs[account_id] = { maps: Set[map], moves: moves, seen: seen, said: Set.new, rate: old && old[:rate] }
+    end
+
+    def on_map?(map, x, y)
+      (d = @world.dims(map)) && x >= 0 && y >= 0 && x < d[0] && y < d[1]
+    end
+
+    # The arrival of a same-map warp or a respawn: the engine's own move (a warp ignores
+    # what stands where it lands).
+    def field_exempt?(map, x, y)
+      @world.warp_dest?(map, map, x, y, reach: PositionAudit::ARRIVAL_REACH) ||
+        @world.spawn_tile?(map, x, y, reach: PositionAudit::ARRIVAL_REACH)
+    end
+
+    # What a gate's key lacks: its badge (the mode keys' badge read, when there is one)
+    # and, for a client that reports its party (field_report) and has on this connection
+    # (a resume sends it within a second), where the game still asks for a Pokemon, the move
+    # in +moves+. -> the text, or nil when nothing lacks - and always nil where a script
+    # redefines the move's function (its rule is unknown).
+    def gate_missing(conn, sym, move, moves)
+      gates = @world.field_gates
+      rule = gates[:moves][sym]
+      return nil if rule.nil?
+
+      out = []
+      need = gates[:badges][sym]
+      held = conn.data.dig(:mode_keys, :surf, :held)
+      if @mode_keys && held && need >= 0
+        ok = @mode_keys[:count_badges] ? badge_count(held) >= need : held[need] == 1
+        out << "#{@mode_keys[:count_badges] ? "#{need} badge#{'s' unless need == 1}" : "badge #{need}"} needed" unless ok
+      end
+      out << "no Pokemon knowing #{move}" if rule == true && conn.data[:field_report] && conn.data[:team_seen] && !moves.include?(move)
+      out.empty? ? nil : out.join("; ")
+    end
+
+    # Once a tile per epoch, and FIELD_SAID_MAX lines a FIELD_SAID_WINDOW an account: the
+    # next line said counts those held back (a door walked to and fro resets the tiles), and
+    # a tile held back is told when it is crossed again once the window opens.
+    def field_said(epoch, account_id, map, x, y, what)
+      return if epoch[:said].include?([map, x, y])
+
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      rate = (epoch[:rate] ||= { at: now, said: 0, held: 0 })
+      rate[:at], rate[:said] = now, 0 if now - rate[:at] >= FIELD_SAID_WINDOW
+      if rate[:said] >= FIELD_SAID_MAX
+        rate[:held] += 1
+        return
+      end
+      epoch[:said] << [map, x, y]
+      rate[:said] += 1
+      held = rate[:held].positive? ? " (#{rate[:held]} more held back before it)" : ""
+      rate[:held] = 0
+      @log.call("fieldaudit: account #{account_id} #{what} at #{map}(#{x},#{y})#{held}")
     end
 
     # Presence zones (reactor thread). A client without presence_v2 is also in its
@@ -4499,6 +4637,7 @@ module PEMK
       conn.data[:account_id] = account_id
       conn.data[:presence_v2] = @config.presence_dedup && Array(conn.data[:caps]).include?("presence_v2")
       conn.data[:swim_report] = Array(conn.data[:caps]).include?("swim_report")   # mode keys: it reports its party before a swim
+      conn.data[:field_report] = Array(conn.data[:caps]).include?("field_report") # ... and before a field gate opens
       @online[account_id] = conn
       @log.call("server: authed #{conn.addr} as account #{account_id}")
       return if @config.client_debug == :allow || Array(conn.data[:caps]).include?("debug_lock")

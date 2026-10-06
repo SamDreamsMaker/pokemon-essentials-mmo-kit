@@ -355,6 +355,42 @@ class WorldDataTest < Minitest::Test
     assert_equal [], load(gym_sample).badge_ignorable, "an export before the badges"
   end
 
+  # Field gates: the obstacles, the headbutt walls, the falls a player climbs, and what
+  # each move needs. They feed detection: a malformed entry is left out, never an error.
+  def test_field_gates
+    doc = sample
+    assert_nil load(doc).field_gates, "an export before the gates"
+    assert_match(/connections, no field gates \(schema/, load(doc).summary)
+    m = doc["maps"]["7"]
+    m["obstacles"] = [{ "event" => 3, "x" => 1, "y" => 0, "move" => "CUT" }, { "x" => "bad" }, { "x" => 2, "y" => 0, "move" => "FLY" }]
+    m["walls"] = [{ "event" => 4, "x" => 2, "y" => 1 }]
+    m["falls"] = Array.new(m["height"]) do |y|
+      next "f" + ("." * (m["width"] - 1)) if y.zero?
+
+      y == 1 ? ("." * (m["width"] - 1)) + "f" : "." * m["width"]
+    end
+    doc["field_gates"] = { "badges" => { "cut" => 1, "rocksmash" => 2, "strength" => 3, "waterfall" => 6 },
+                           "moves" => { "cut" => true, "rocksmash" => false, "strength" => nil, "waterfall" => "yes" } }
+    w = load(doc)
+    assert_equal({ event: 3, move: "CUT" }, w.obstacle_at(7, 1, 0))
+    assert_nil w.obstacle_at(7, 2, 0), "a move the gates do not know"
+    assert w.wall_at?(7, 2, 1)
+    refute w.wall_at?(7, 1, 1)
+    assert w.fall?(7, 0, 0)
+    refute w.fall?(7, 1, 0)
+    refute w.fall?(7, 0, 99), "outside the grid"
+    assert w.fall?(7, m["width"] - 1, 1)
+    refute w.fall?(7, -1, 1), "a negative x is off the map, not the row's end"
+    assert_equal({ badges: { cut: 1, rocksmash: 2, strength: 3, waterfall: 6 },
+                   moves: { cut: true, rocksmash: false, strength: nil, waterfall: nil } }, w.field_gates)
+    assert_match(/field gates \(1 obstacles, 1 headbutt trees, 1 maps with falls\)/, w.summary)
+    m["falls"] = ["ff"]   # not the map's size
+    doc["field_gates"]["badges"]["cut"] = "1"
+    w = load(doc)
+    refute w.fall?(7, 0, 0), "malformed falls: none"
+    assert_nil w.field_gates, "malformed badges: as if absent"
+  end
+
   # Mode keys: what Surf and Dive need, and what starts a swim by itself.
   def test_field_keys
     doc = sample

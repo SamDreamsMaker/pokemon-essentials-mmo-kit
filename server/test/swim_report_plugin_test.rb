@@ -29,7 +29,23 @@ class SwimReportPluginTest < Minitest::Test
     def pbStartSurfing; $log << :surfing; end
     def pbDive; $log << :diving; :dived; end
     def pbSurfacing; $log << :surfacing; end
+    def pbSmashEvent(event); $log << [:smash, event]; :smashed; end
+    def pbAscendWaterfall; $log << :climbing; :climbed; end
+    def pbStrength; $log << :strength; :strong; end
+    class Interpreter
+      def pbPushThisEvent(strength = false); $log << [:push, strength]; :pushed; end
+    end
+    module HiddenMoveHandlers
+      class Hash2
+        def initialize; @h = {}; end
+        def [](sym); @h[sym]; end
+        def add(sym, handler); @h[sym] = handler; end
+      end
+      UseMove = Hash2.new
+      UseMove.add(:STRENGTH, proc { |move, pkmn| $log << [:use, move, pkmn]; :used })
+    end
     load ARGV[0]
+    load ARGV[0]                                 # loaded twice: wrapped once
 
     mine  = Pokemon.new
     other = Pokemon.new
@@ -43,13 +59,21 @@ class SwimReportPluginTest < Minitest::Test
     raise "pbDive's result lost" unless pbDive == :dived
     pbStartSurfing
     pbSurfacing
+    results = [pbSmashEvent(:tree),              # a field gate opens: the report first
+               pbAscendWaterfall,
+               Interpreter.new.pbPushThisEvent(true),
+               pbStrength,                       # Strength is asked for as it is used...
+               HiddenMoveHandlers::UseMove[:STRENGTH].call(:STRENGTH, :mon)]   # ... from the party menu too
+    raise "a gate's result lost: #{results.inspect}" unless results == %i[smashed climbed pushed strong used]
     print $log.inspect
   RUBY
 
   def test_moves_mark_and_a_swim_flushes_first
     out = IO.popen([RbConfig.ruby, "-W0", "-e", RUNNER, PLUGIN], err: %i[child out], &:read)
     assert $?.success?, "runner crashed:\n#{out}"
-    assert_equal [:mark, :mark, :mark, :mark, :flush_party, :diving, :flush_party, :surfing, :flush_party, :surfacing],
+    assert_equal [:mark, :mark, :mark, :mark, :flush_party, :diving, :flush_party, :surfing, :flush_party, :surfacing,
+                  :flush_party, [:smash, :tree], :flush_party, :climbing, :flush_party, [:push, true],
+                  :flush_party, :strength, :flush_party, [:use, :STRENGTH, :mon]],
                  eval(out) # rubocop:disable Security/Eval
   end
 

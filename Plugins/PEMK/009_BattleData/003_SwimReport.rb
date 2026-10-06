@@ -62,6 +62,18 @@ module PEMK
     rescue StandardError => e
       PEMK.log("swim: flush error #{e.class}: #{e.message}")
     end
+
+    # The party menu's use of a field move +sym+: the report first. (The original is held
+    # here, not in a top-level local: every plugin is evaluated in the same binding.)
+    def report_before_use(sym)
+      original = HiddenMoveHandlers::UseMove[sym]
+      return unless original
+
+      HiddenMoveHandlers::UseMove.add(sym, proc { |move, pokemon|
+        before_swim
+        original.call(move, pokemon)
+      })
+    end
   end
 end
 
@@ -83,4 +95,43 @@ unless defined?(pemk_orig_pbStartSurfing)
     PEMK::SwimReport.before_swim
     pemk_orig_pbSurfacing
   end
+end
+
+# Field gates (the `field_report` cap): the way a Cut tree, a Rock Smash rock, a Strength
+# boulder or a waterfall opens, from the event or from the party menu alike - the report
+# first, so the server knows the move that opened it before the player steps through.
+unless defined?(pemk_orig_pbSmashEvent)
+  alias pemk_orig_pbSmashEvent pbSmashEvent
+  def pbSmashEvent(event)
+    PEMK::SwimReport.before_swim
+    pemk_orig_pbSmashEvent(event)
+  end
+
+  alias pemk_orig_pbAscendWaterfall pbAscendWaterfall
+  def pbAscendWaterfall
+    PEMK::SwimReport.before_swim
+    pemk_orig_pbAscendWaterfall
+  end
+end
+
+class Interpreter
+  unless method_defined?(:pemk_orig_pbPushThisEvent)
+    alias pemk_orig_pbPushThisEvent pbPushThisEvent
+    def pbPushThisEvent(strength = false)
+      PEMK::SwimReport.before_swim
+      pemk_orig_pbPushThisEvent(strength)
+    end
+  end
+end
+
+# Strength is asked for once, as it is used (a boulder's own prompt or the party menu);
+# the pushes that follow need only that it was: the report goes then too.
+unless defined?(pemk_orig_pbStrength)
+  alias pemk_orig_pbStrength pbStrength
+  def pbStrength
+    PEMK::SwimReport.before_swim
+    pemk_orig_pbStrength
+  end
+
+  PEMK::SwimReport.report_before_use(:STRENGTH)
 end
