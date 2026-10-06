@@ -90,15 +90,15 @@ class ServerPeerBodyTest < Minitest::Test
   def pair
     a, la = login("pa@t.co")
     b, lb = login("pb@t.co")
-    send_env(a, { type: :trade_invite, to: lb[:account_id], trade_id: 1 })
+    send_env(a, { type: :trade_invite, to: lb[:account_id], trade_id: "t1" })
     recv_type(b, :trade_invite)
-    send_env(b, { type: :trade_accept, to: la[:account_id], trade_id: 1 })
+    send_env(b, { type: :trade_accept, to: la[:account_id], trade_id: "t1" })
     recv_type(a, :trade_accept)
     [a, b, lb[:account_id], la]
   end
 
   def lock(from, to_id, body)
-    send_env(from, { type: :trade_lock, to: to_id, trade_id: 1 }, body)
+    send_env(from, { type: :trade_lock, to: to_id, trade_id: "t1" }, body)
   end
 
   def test_a_party_is_relayed
@@ -116,7 +116,7 @@ class ServerPeerBodyTest < Minitest::Test
     start_server("on")
     a, b, bid, = pair
     lock(a, bid, party_bytes(Stranger.new))
-    send_env(a, { type: :trade_offer, to: bid, trade_id: 1, uid: 5 })
+    send_env(a, { type: :trade_offer, to: bid, trade_id: "t1", uid: 5 })
     env, = recv_type(b, :trade_lock, :trade_offer)
     assert_equal :trade_offer, env[:type], "the refused body never reached the partner"
     assert(logs.any? { |l| l.include?("REFUSED (class ServerPeerBodyTest::Stranger)") })

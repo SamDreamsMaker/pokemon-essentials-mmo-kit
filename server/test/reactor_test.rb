@@ -127,6 +127,89 @@ class ReactorTest < Minitest::Test
     @close_on_frame = false
   end
 
+  # One read a tick: a socket that wrote 200 KiB of tiny frames hands the loop at most
+  # READ_CHUNK of them a tick - the rest wait in the kernel, and all arrive in the end.
+  def test_one_read_a_tick
+    @reactor.stop
+    @thread.join(3)
+    r = PEMK::Reactor.new(host: "127.0.0.1", port: 0, on_frame: method(:handle))
+    r.start
+    sock = TCPSocket.new("127.0.0.1", r.port)
+    small = W.encode_split({ type: :ping, t: 1, pad: "p" * 150 })
+    sock.write(small * 1000)
+    sleep 0.3
+    r.tick(0.5) until r.conn_count == 1
+    got = @received.size
+    r.tick(0.5) while @received.size == got
+    first = @received.size
+    assert_operator first, :<=, (PEMK::Reactor::READ_CHUNK / small.bytesize) + 1, "one read's worth"
+    Timeout.timeout(5) { r.tick(0.5) until @received.size >= 1000 }
+    assert_equal 1000, @received.size
+    sock.close
+    r.stop
+    r.shutdown
+  end
+
+  # Before its session a socket may announce a small frame only (when asked); after, any.
+  def test_a_big_frame_before_the_session_closes_the_socket
+    @reactor.stop
+    @thread.join(3)
+    r = PEMK::Reactor.new(host: "127.0.0.1", port: 0, on_frame: method(:handle), preauth_frame_max: 1024)
+    r.start
+    t = Thread.new { r.run_loop }
+    sock = TCPSocket.new("127.0.0.1", r.port)
+    sock.write([2000].pack("N"))
+    assert_nil Timeout.timeout(3) { sock.read(1) }, "closed"
+    sock2 = TCPSocket.new("127.0.0.1", r.port)
+    sock2.write(W.encode_split({ type: :ping, t: 1 }))
+    Timeout.timeout(3) { @received.pop }
+    @last_conn.data[:account_id] = 7   # a session
+    sock2.write(W.encode_split({ type: :ping, t: 2, pad: "p" * 2000 }))
+    assert_equal 2, Timeout.timeout(3) { @received.pop }[:env][:t]
+    [sock, sock2].each(&:close)
+    r.stop
+    t.join(3)
+  end
+
+  # A socket closed while what its client sent is unread: the close must still deliver
+  # what was sent to it (a ban's notice) - a close with unread input is a reset, and a
+  # reset throws away the data still on its way to the client.
+  def test_a_close_delivers_what_was_sent_before_it
+    @reactor.stop
+    @thread.join(3)
+    r = nil
+    closer = lambda do |conn, _payload|
+      next if conn.data[:told]
+
+      conn.data[:told] = true
+      sleep 0.3   # the client's whole write is in by now, mostly unread
+      r.send_frame(conn, W.encode_split({ type: :banned, note: "bye" }))
+      r.finish(conn)
+    end
+    r = PEMK::Reactor.new(host: "127.0.0.1", port: 0, on_frame: closer)
+    r.start
+    t = Thread.new { r.run_loop }
+    sock = TCPSocket.new("127.0.0.1", r.port)
+    pad = W.encode_split({ type: :ping, pad: "p" * 4000 })
+    sock.write(W.encode_split({ type: :ping, t: 1 }) + (pad * 50))   # far more than one read
+    sleep 0.8
+    got = begin
+      read_frame(sock)
+    rescue Errno::ECONNRESET => e
+      flunk "the close was a reset: what was sent before it is lost (#{e.class})"
+    end
+    assert_equal :banned, got[:env][:type], "the notice arrives before the close"
+    ended = begin
+      Timeout.timeout(3) { sock.read(1) }
+    rescue Errno::ECONNRESET
+      :reset
+    end
+    assert_nil ended, "a clean end (a FIN): a reset is what a Windows client loses the notice to"
+    sock.close
+    r.stop
+    t.join(3)
+  end
+
   def test_two_frames_in_one_write
     sock = TCPSocket.new("127.0.0.1", @reactor.port)
     sock.write(W.encode_split({ type: :ping, t: 1 }) + W.encode_split({ type: :ping, t: 2 }))

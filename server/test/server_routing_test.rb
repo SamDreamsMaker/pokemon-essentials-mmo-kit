@@ -77,7 +77,7 @@ class ServerRoutingTest < Minitest::Test
   # The invite's name lands in the target's "X wants to trade! Accept?" box, which
   # runs message codes: "\ch[51,0,A]" there would set the target's variable 51.
   def test_a_relayed_name_carries_no_message_codes
-    a, = open_authed("Codes", "passwordA1")
+    a, a_id = open_authed("Codes", "passwordA1")
     b, b_id = open_authed("Taker", "passwordB1")
 
     send_env(a, { type: :trade_invite, to: b_id, trade_id: "t1", name: "\\ch[51,0,A]Eve<b>\u202e" })
@@ -86,8 +86,8 @@ class ServerRoutingTest < Minitest::Test
     send_env(a, { type: :challenge, to: b_id, name: "\\se[bang]" + "x" * 40 })
     assert_equal "se[bang]xxxxxxxx", recv(b)[:env][:name]
 
-    send_env(a, { type: :challenge_decline, to: b_id, name: "\\<>" })
-    refute recv(b)[:env].key?(:name)   # nothing printable left: the client shows "?"
+    send_env(b, { type: :challenge_decline, to: a_id, name: "\\<>" })   # the invitee answers
+    refute recv(a)[:env].key?(:name)   # nothing printable left: the client shows "?"
     a.close
     b.close
   end
@@ -153,11 +153,11 @@ class ServerRoutingTest < Minitest::Test
     a, a_id = open_authed("Invi", "passwordA1")
     b, b_id = open_authed("Card", "passwordB1")
 
-    send_env(a, { type: :trade_invite, to: b_id, name: "Invi" })
+    send_env(a, { type: :trade_invite, to: b_id, trade_id: "t1", name: "Invi" })
     assert_equal :trade_invite, recv(b)[:env][:type]
 
     # ...the invitee never accepts, and the inviter's watchdog cancels
-    send_env(a, { type: :trade_cancel, to: b_id })
+    send_env(a, { type: :trade_cancel, to: b_id, trade_id: "t1" })
     assert_equal :trade_cancel, recv(b)[:env][:type]
 
     a.close
@@ -169,12 +169,12 @@ class ServerRoutingTest < Minitest::Test
     a, a_id = open_authed("Tra1", "passwordA1")
     b, b_id = open_authed("Tra2", "passwordB1")
 
-    send_env(a, { type: :trade_invite, to: b_id }); recv(b)
-    send_env(b, { type: :trade_accept, to: a_id }); recv(a)   # opens the session both ways
+    send_env(a, { type: :trade_invite, to: b_id, trade_id: "t2" }); recv(b)
+    send_env(b, { type: :trade_accept, to: a_id, trade_id: "t2" }); recv(a)   # opens the session both ways
 
-    send_env(a, { type: :trade_offer, to: b_id, uid: 1 })
+    send_env(a, { type: :trade_offer, to: b_id, trade_id: "t2", uid: 1 })
     assert_equal :trade_offer, recv(b)[:env][:type]
-    send_env(b, { type: :trade_lock, to: a_id }, Marshal.dump([:mon]))
+    send_env(b, { type: :trade_lock, to: a_id, trade_id: "t2" }, Marshal.dump([:mon]))
     assert_equal :trade_lock, recv(a)[:env][:type]
 
     a.close
