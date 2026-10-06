@@ -6,24 +6,27 @@ actually verify, and which does it take on faith?** It then lays out the plan
 
 Guiding principle, borrowed from every serious multiplayer engine:
 **never trust the client.** The client renders and predicts; the server decides.
-Today PEMK meets that bar for *data* (money, items, Pokémon) but not yet for
-*gameplay* (where you are, what you touch, how a battle resolves).
+PEMK meets that bar for *data* (accounts, the ledger, items, Pokémon) out of the box,
+and for much of *gameplay* (where you are, what you pick up, which gifts you get,
+which wild Pokémon appear, a catch, a trainer's prize, a badge) once the operator
+turns each check on. Every gameplay check is **off by default**: the ramp is in
+[`GETTING-STARTED.md`](GETTING-STARTED.md), every setting in
+[`SERVER-SETTINGS.md`](SERVER-SETTINGS.md).
 
 ---
 
 ## TL;DR — is "pick up the item" secured?
 
-**No.** Picking up an overworld item is computed entirely on the client. There is
-**no distance check, no "does this item exist / is it still there" check** on the
-server. The client runs the map event, adds the item locally, and then syncs its
-**bag** to the server as a snapshot. The server checks the *bag*'s shape and caps
-and flags what breaks them (it records the bag either way) — but it never validated the **act** of
-picking it up: it doesn't know the item's tile, doesn't know your position, and
-can't tell a legitimate pickup from a fabricated one.
+**Yes, with `PEMK_PICKUP_ENFORCE=on` (off by default).** The client then asks before an
+item ball goes into the bag, and the server grants it only if the ball exists in the
+world export, the player stands next to it (the position the server holds, not the
+client's word), and the account never took it before. With the setting off, picking an
+item up is computed on the client, and the server only records the bag that results -
+which item authority (`PEMK_ITEM_AUTHORITY`) then judges against the sources it knows.
 
-So the bag *contents* are server-recorded, but the *event that changed them*
-is trusted. That distinction is the whole point of this document, and closing it
-is Milestone 4.
+The distinction this document is about is between the *contents* (server-recorded, in
+every configuration) and the *act* that changed them (server-judged only where a check
+is on). Each section below says which acts are judged, by which setting.
 
 ---
 
@@ -32,13 +35,14 @@ is Milestone 4.
 | Capability | Computed by | Server-verified? | If a cheat client lies… |
 |---|---|---|---|
 | **Login / identity** | server | ✅ yes | can't — bcrypt + opaque session token, no client-claimed id |
-| **Money / coins / BP / soot** | client → **server ledger** | ⚠️ capped + audited, not authored | the VALUE is client-pushed; the ledger caps it, makes it append-only and idempotent, and M4-D4 bounds battle gains — but an in-cap lie is persisted |
-| **Badges** | client → **server ledger** | ⚠️ capped, not authored | the client computes the bitmask and pushes it on the `:econ` channel; the server enforces the cap, not the earning |
+| **Money** | client → **server ledger**; **server-moved** with `PEMK_MONEY_AUTHORITY=on` | ✅ enforceable (money authority M3, trainer proof) | off: the value is client-pushed and the ledger caps it. On: money rises only through the server's own transactions - a trainer's prize judged (and, with `PEMK_TRAINER_PROOF=on`, proven by its battle's replay), Pay Day bounded, Mart deals made by the server - and a money frame above them is refused |
+| **Coins / BP / soot** | client → **server ledger** | ⚠️ capped + audited, not authored | the value is client-pushed; the ledger caps it, makes it append-only and idempotent - an in-cap lie is persisted (BP spent at the exchange is the server's with `PEMK_SHOP_ENFORCE=on`) |
+| **Badges** | client → **server ledger**; **server-owned** with `PEMK_BADGE_AUTHORITY=on` | ✅ enforceable (badge authority B2) | off: the client's bitmask, capped. On (with trainer proof and money authority enforcing): a badge is the server's once its battle's win is proven by a replay; one no win explains is refused (see [`BADGE-AUTHORITY-DESIGN.md`](BADGE-AUTHORITY-DESIGN.md)) |
 | **Bag, PC item storage, held items** | client → **server record** | ⚠️ recorded and restored together (item authority E0); every increase judged against server-known sources (E2, `PEMK_ITEM_AUTHORITY=shadow`), not refused yet | a crash can no longer duplicate an item moved between them; an item from nowhere is logged `UNEXPLAINED` and reported, but still kept (see [`ITEM-AUTHORITY-DESIGN.md`](ITEM-AUTHORITY-DESIGN.md)) |
 | **Pokémon identity & ownership** | server (UIDs) | ✅ yes | can't dupe — UID registry + ownership |
 | **Trades** | server | ✅ yes | can't dupe/steal — atomic CAS swap, rollback; a Pokémon the receiver never saved (a crash, a lost result) is sent again |
 | **Where a Pokémon came from (pickup, gift, catch)** | **client** | ❌ no | can fabricate acquiring one (within UID rules) |
-| **Overworld movement / position** | client → **server-audited** | ✅ enforceable (M4-B) | no-clip / illegal-warp snapped back to last-good tile (opt-in flag; audit-only by default) |
+| **Overworld movement / position** | client → **server-audited** | ✅ enforceable (M4-B) | no-clip / illegal-warp snapped back to last-good tile; a swim needs the badge and a party Pokémon knowing the move (mode keys); the pace of the steps is logged (opt-in flag; audit-only by default) |
 | **Item pickup (distance, existence)** | client → **server-granted** | ✅ enforceable (M4-C) | remote / duplicate pickups denied — distance gate + one-shot + server grant (opt-in flag) |
 | **Interacting with NPCs / objects** | client → **server-audited** | ⚠️ partial (M4-C, `PEMK_GIFT_ENFORCE`) | item balls are distance-gated + one-shot; a one-shot NPC **gift** is paid once per account and only on its event's map (`PEMK_GIFT_ENFORCE=on`), other gifts are recorded; the event's own conditions (a battle won, a switch on) still run on the client |
 | **Story progression (switches, variables, self-switches)** | client → **server-shadowed** | ⚠️ partial (`PEMK_FLAG_STATE`, `PEMK_FLAG_ENFORCE`) | a rollback of saved one-shot progression is detected (`shadow`) and undone at login (`on`); a tracked value edited in session is repaired (`PEMK_FLAG_ENFORCE=on`); writes through the game's own setters are trusted |
@@ -72,8 +76,9 @@ The honest counterweight to the ✅ column — these are the real remaining gaps
 | Per-mon stat block (IVs/EVs/moves/ability/nature) | **server first-sight lock** (detection, with `PEMK_BATTLE_ENFORCE_TEAMS`) | IVs, shiny and gender are locked the first time the server sees a mon, and a divergence is flagged (D5 `mon_counterfeit`); moves, EVs, ability and nature change in normal play, so they are recorded but not judged |
 | PC boxes, Pokédex, roamers, daycare | **client-only** | not projected at all — "park it in a box" evades the party shadow (their held items are recorded, E0) |
 | Party composition | **server-shadowed** | detection-only; the save blob remains authoritative |
-| Money / badges | **server-persisted, client-authored** | capped and audited, not earned server-side |
-| Overworld position | **enforceable** | a surfer crosses only the water the export marks and a diver walks like on the ground; whether the player may surf at all (a Pokemon with Surf, the badge) is not checked |
+| Money / badges | **server-persisted**; **server-moved / server-owned** under money and badge authority `on` | client-authored with the settings off (capped and audited); enforcement needs the whole ramp (D2, the shop gate, item authority, trainer proof with its replay daemon) |
+| Coins / soot | **server-persisted, client-authored** | capped and audited, not earned server-side |
+| Overworld position | **enforceable** | a surfer crosses only the water the export marks, needs the badge the game asks for and a party Pokémon knowing Surf (Dive for a diver); a bike with no bicycle is not checked, and a step's pace is logged, never corrected |
 
 ### Story state: switches, variables, self-switches (`PEMK_FLAG_STATE`)
 
@@ -188,29 +193,38 @@ gift a map event gives through a common event it calls is not known to the expor
 so it is granted and recorded; one given outside any map event (a common event
 running on its own, or Ruby code) is not gated at all.
 
-### The precise list of currently **unsecured** interactions
+### What runs on the client with every setting off (the default)
 
-Everything the game does in the overworld and in battle is client-side:
+With the stock configuration the game the client runs is trusted, and the server keeps
+the records. Each interaction below has a check an operator can turn on:
 
-1. **Movement** — position, facing, speed, collision. The server relays your
-   coordinates to same-map players but never checks they're reachable.
-2. **Item pickup** — no distance check, no check that the item exists or is
-   unclaimed. Only the resulting bag is clamped.
-3. **Hidden items / Poké-finder / foraging** — same as pickup.
-4. **NPC & object interaction** — talking, receiving gifts, cut/rock-smash/etc.,
-   triggering switches — all client-run; the server isn't consulted.
-5. **Wild encounters** — encounter roll, species, level, shininess, IVs.
-6. **Catching** — capture success and the resulting Pokémon's data (the UID makes
-   it non-duplicable, but not *un-fabricable*).
-7. **NPC/trainer battles** — outcome, rewards, EXP, item drops.
-8. **PvP battles** — deterministic and relayed, but each side simulates locally;
-   authority is "challenger's RNG," not the server. A modified client can cheat.
-9. **Spawn point & respawn** — where you appear on login or after a faint.
-10. **Map warps / transfers** — which map you move to and where you land.
+1. **Movement** - position, facing, collision, warps, swims, spawn: audited and
+   logged always; snapped back with `PEMK_POS_ENFORCE=on`. The speed of the steps is
+   only logged.
+2. **Item pickup** - granted by the server with `PEMK_PICKUP_ENFORCE=on`.
+3. **Hidden items / Poké-finder / foraging** - hidden items are item balls to the
+   export (the pickup gate); foraging tables are a local tier (`PEMK_ITEM_LOCAL`).
+4. **NPC & object interaction** - a one-shot gift is paid once with
+   `PEMK_GIFT_ENFORCE=on`, a Mart deal is the server's with `PEMK_SHOP_ENFORCE=on`, the
+   story state is held with `PEMK_FLAG_STATE` / `PEMK_FLAG_ENFORCE`. Walking through a
+   Cut tree, a Rock Smash rock or a Strength boulder (events, not tiles) is not checked.
+5. **Wild encounters** - minted by the server with `PEMK_BATTLE_ENFORCE_ENCOUNTERS=on`.
+6. **Catching** - rolled by the server with `PEMK_BATTLE_ENFORCE_CATCHES=on`.
+7. **NPC/trainer battles** - seeded and replayed (`PEMK_BATTLE_ENFORCE_RNG`,
+   `PEMK_BATTLE_ENFORCE_RESIM`), a prize paid on proof (`PEMK_TRAINER_PROOF`), EXP held
+   to a high-water (`PEMK_BATTLE_ENFORCE_EXP`).
+8. **PvP battles** - deterministic and relayed; each side simulates locally and the
+   authority is the challenger's RNG, not the server. A modified client can cheat its
+   own side: D9 (ranked) is the milestone that changes it.
+9. **Spawn point & respawn** - where you appear at login is judged from the last good
+   position the server holds (an illegal warp from it, snapped back with
+   `PEMK_POS_ENFORCE=on`); a whiteout lands on a heal or home tile the export knows.
+10. **Map warps / transfers** - audited; an illegal one snapped back with
+    `PEMK_POS_ENFORCE=on`.
 
-None of these is a bug — it's the current milestone. The client runs the *entire*
-Essentials engine, so anything the engine computes is, by definition, trusted
-until the server grows an independent copy of the rules.
+The client runs the *entire* Essentials engine, so what the engine computes is trusted
+until the server holds an independent copy of the rule - which is what each of these
+settings adds, one surface at a time.
 
 ---
 
