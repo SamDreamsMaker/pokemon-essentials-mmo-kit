@@ -43,4 +43,5 @@ Autotest.scenario "an honest walk is never corrected", flags: { PEMK_POS_ENFORCE
   s.check("it corrected nothing") { s.server.grep(/posenforce/).empty? }
   s.check("the client was never snapped back") { a.log_tail(400).none? { |l| l.include?("poscorrect: snapped") } }
   s.check("an honest walk has the game's pace") { s.server.grep(/posaudit: account #{id} paces/).empty? }
+  s.check("and crosses no field gate") { s.server.grep(/fieldaudit: account #{id} /).empty? }
 end

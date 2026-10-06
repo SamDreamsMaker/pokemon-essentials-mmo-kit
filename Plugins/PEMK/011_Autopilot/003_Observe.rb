@@ -103,7 +103,9 @@ module PEMK
           "in_battle"    => gt.in_battle ? true : false,
           "message"      => gt.message_window_showing ? true : false,
           "transferring" => gt.player_transferring ? true : false,
-          "event"        => ($game_map ? (pbMapInterpreterRunning? rescue false) : false) }
+          "event"        => ($game_map ? (pbMapInterpreterRunning? rescue false) : false),
+          "encounter_type" => (gt.encounter_type rescue nil)&.to_s,   # left set by an encounter a Repel turned away
+          "repel"        => ($PokemonGlobal ? ($PokemonGlobal.repel rescue nil) : nil) }
       end
 
       def current_message

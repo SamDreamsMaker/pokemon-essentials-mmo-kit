@@ -46,7 +46,7 @@ is on). Each section below says which acts are judged, by which setting.
 | **Item pickup (distance, existence)** | client → **server-granted** | ✅ enforceable (M4-C) | remote / duplicate pickups denied — distance gate + one-shot + server grant (opt-in flag) |
 | **Interacting with NPCs / objects** | client → **server-audited** | ⚠️ partial (M4-C, `PEMK_GIFT_ENFORCE`) | item balls are distance-gated + one-shot; a one-shot NPC **gift** is paid once per account and only on its event's map (`PEMK_GIFT_ENFORCE=on`), other gifts are recorded; the event's own conditions (a battle won, a switch on) still run on the client |
 | **Story progression (switches, variables, self-switches)** | client → **server-shadowed** | ⚠️ partial (`PEMK_FLAG_STATE`, `PEMK_FLAG_ENFORCE`) | a rollback of saved one-shot progression is detected (`shadow`) and undone at login (`on`); a tracked value edited in session is repaired (`PEMK_FLAG_ENFORCE=on`); writes through the game's own setters are trusted |
-| **Wild encounters / which Pokémon appears** | **server** | ✅ enforceable (M4-D2, `PEMK_BATTLE_ENFORCE_ENCOUNTERS=on`) | the server mints species/level/PID/IVs/shiny; the client builds what it is given |
+| **Wild encounters / which Pokémon appears** | **server** | ✅ enforceable (M4-D2, `PEMK_BATTLE_ENFORCE_ENCOUNTERS=on`) | the server mints species/level/PID/IVs/shiny of the encounter table's own rolls; the client builds what it is given (an event's battle, a roaming Pokémon and the Poké Radar's chains stay the game's) |
 | **Catching** | **server** | ✅ enforceable (M4-D3, `PEMK_BATTLE_ENFORCE_CATCHES=on`) | the server runs the capture formula and rolls the shakes with SecureRandom, clamping every client input |
 | **Battle rewards (vs NPC)** | client → **server-bounded** | ✅ detection (M4-D4, `PEMK_BATTLE_ENFORCE_REWARDS`) | EXP/money beyond the closed-form envelope is flagged to the review queue |
 | **Battle RNG + outcome (vs NPC)** | **server-seeded, re-simulated** | ✅ enforceable (M4-D7/D8, `PEMK_BATTLE_ENFORCE_RNG` + `PEMK_BATTLE_ENFORCE_RESIM`) | rolls derive from a server seed and are refuted value-by-value at ingest; the battle is re-simulated headless, and a refuted catch is quarantined |
@@ -314,6 +314,28 @@ refills the bucket: a cutscene's move route announces no steps (one jump, a logg
 teleport), and a hop, a warp pad, a map change or a violation leaves it as it is. The
 client's own `:speed` is never used. Nothing is corrected or flagged yet: the lines come
 first.
+
+**Field gates** (2026-10-06, detection only): a Cut tree, a Rock Smash rock and a Strength
+boulder are events standing on walkable tiles, a headbutt tree too, and a waterfall is a
+surfable tile - the passability grid sees none of them. The export lists the obstacles
+the engine knows by name when they are nothing but their gate (a page that asks for no
+switch, variable or self switch, so one always applies; every page shows a character,
+blocks, stands still and runs only the gate; nothing else on the map moves it: a game
+that removes one for good is left out), the headbutt trees as walls, and the waterfalls a
+player climbs (not their crests). The server logs `fieldaudit:`, once a tile per epoch and
+ten lines a minute an account at most: a step onto a headbutt tree; a step onto an
+obstacle with no key - its badge, and for a client that reports its party before a gate
+opens (`field_report`) and has reported it on this connection, a Pokemon knowing the move
+while the player's maps stood (the engine keeps an obstacle down until it reloads its
+map: a transfer to another, or a connection walk far enough to drop it); a waterfall
+climbed with no key (one frame up on the water from right under the fall; its badge and,
+in the party reported, Waterfall). Not judged: a frame longer than a step against a gate
+(a cutscene sends few frames, a stall drops some), a connection's first frame (it starts
+from the last tile saved), the maps after a login (the save it loads may be older than
+what the server saw) or after a resume elsewhere, the maps an account is first seen on
+after a server start, and a gate whose move function a game redefines. A cutscene that
+walks the player through a standing obstacle may still be told (its heartbeat frames are
+steps). Nothing is refused or flagged: the lines come first.
 
 **Water.** The passability grid counts every water tile as a wall. The world export
 also marks, per map, where a surfer may be (`water` rows: `w`, the engine's rule for
@@ -755,8 +777,10 @@ be the server's own mints for the account (D2 on), fresh, and never claimed for 
 before; a trainer battle's names its prize claim, which must have been judged payable. The
 bound is 5 x the level of the strongest party Pokemon that could use it (Pay Day,
 Metronome, or a copying move when a foe knows Pay Day) x the uses its PP and the foes allow,
-doubled per multiplier fact. Without mints a wild battle's Pay Day is only bounded, and the
-log says `unminted`. Autotest 078 lets a Meowth scatter coins on Route 1.
+doubled per multiplier fact. With D2 off a wild battle's Pay Day is only bounded, and the
+log says `unminted`; with D2 on, a battle the game keeps for itself - an event's, a roaming
+Pokémon's, a Poké Radar chain's - has no mint, and its Pay Day is `unproven` (refused under
+`PEMK_MONEY_AUTHORITY=on`). Autotest 078 lets a Meowth scatter coins on Route 1.
 
 A mint is handed out on request, so it does not prove a fought battle: a wild claim pays at
 most one use per second since its mint, and Pay Day is capped per account and day

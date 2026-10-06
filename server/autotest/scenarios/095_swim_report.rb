@@ -62,4 +62,5 @@ Autotest.scenario "a surfer's party is known before its first stroke",
   s.check("and swims on") { stroke && where.call == [ROUTE8_095, *stroke, "surf"] }
   s.check("the server saw the party and the badges: no key was missing") { s.server.grep(/account #{id} (surf|dive) with no key/).empty? }
   s.check("nothing was flagged") { s.db[:player_flags].where(account_id: id, kind: "mode_illegal").empty? }
+  s.check("no field gate was said") { s.server.grep(/fieldaudit: account #{id} /).empty? }
 end
