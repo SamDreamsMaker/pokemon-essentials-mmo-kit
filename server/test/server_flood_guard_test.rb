@@ -248,6 +248,20 @@ class ServerFloodGuardTest < Minitest::Test
     s.close
   end
 
+  # A player walking (10 steps a second, the bike's pace) loses no step: presence frames
+  # share the presence budget, never the unknown types' one.
+  def test_a_walk_loses_no_step
+    start_server
+    s, id = open_authed("walker")
+    60.times do |i|
+      s.write(frame({ type: :step, map: 1, x: i, y: 0, dir: 6 }))
+      sleep 0.1
+    end
+    sleep 0.3
+    refute logs.any? { |l| l.include?("account #{id} over budget") }, logs.grep(/over budget/).join("\n")
+    s.close
+  end
+
   # Every type a handler reads has its own budget: a new handler must be listed.
   def test_every_handled_type_is_known
     src = File.read(File.expand_path("../lib/pemk/server.rb", __dir__))

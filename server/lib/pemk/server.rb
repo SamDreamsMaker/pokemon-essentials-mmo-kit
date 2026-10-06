@@ -335,9 +335,10 @@ module PEMK
       # after login before this (audit): one socket could spam DB-touching frames until
       # the mailbox/pool queues ate the host. Honest clients send these at human,
       # debounced cadence, so the budgets are generous.
-      if authed && !(frame_budget_ok?(conn, type) && (!PRESENCE_TYPES.include?(type) || frame_budget_ok?(conn, :presence)))
+      key = KNOWN_TYPES.include?(type) ? type : :other   # the client names the type
+      if authed && !(frame_budget_ok?(conn, key) && (!PRESENCE_TYPES.include?(type) || frame_budget_ok?(conn, :presence)))
         claim_sent(conn, env[:nonce]) if type == :money_claim   # a Pay Day after it waits for it
-        over_budget(conn, type, authed)
+        over_budget(conn, key, authed)
         return
       end
 
@@ -395,9 +396,10 @@ module PEMK
     FLOOD_RATE  = 20.0
     OVER_SAID   = 10.0   # an over-budget drop is said once per type per this many seconds
 
-    def frame_budget_ok?(conn, type, table = FRAME_BUDGETS, store = :budgets)
+    # +key+: a known frame type, :other, or a budget the server keeps across types
+    # (:presence) - never a name the client chose.
+    def frame_budget_ok?(conn, key, table = FRAME_BUDGETS, store = :budgets)
       b = (conn.data[store] ||= {})
-      key = KNOWN_TYPES.include?(type) ? type : :other
       burst, rate = table.fetch(key, FRAME_BUDGET_DEFAULT)
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       tokens, last = b[key] || [burst.to_f, now]
@@ -411,10 +413,9 @@ module PEMK
     # A frame over its budget is dropped, and said once per type per OVER_SAID with how
     # many went since (one line a frame was a log as large as the flood). Under the flood
     # guard a connection that keeps it up is closed.
-    def over_budget(conn, type, account_id)
+    def over_budget(conn, key, account_id)
       now  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       said = (conn.data[:over_said] ||= {})
-      key  = KNOWN_TYPES.include?(type) ? type : :other
       last, count = said[key] || [nil, 0]
       count += 1
       if last.nil? || now - last >= OVER_SAID
@@ -423,7 +424,7 @@ module PEMK
       else
         said[key] = [last, count]
       end
-      return unless @config.flood_guard && !HANDSHAKE.include?(type)
+      return unless @config.flood_guard && !HANDSHAKE.include?(key)
 
       tokens, at = conn.data[:flood] || [FLOOD_DROPS.to_f, now]
       tokens = [tokens + ((now - at) * FLOOD_RATE), FLOOD_DROPS.to_f].min - 1
