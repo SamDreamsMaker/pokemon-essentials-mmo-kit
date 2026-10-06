@@ -100,10 +100,12 @@ class ServerCatchTest < Minitest::Test
     r
   end
 
-  def catch_req(c, grant, ball:, seq:, hp: 10)
-    send_env(c, { type: :catch_req, species: grant[:species], level: grant[:level],
-                  ball: ball, hp_current: hp, status: :NONE, claimed_rate: 255,
-                  dex_owned: 0, charm: false, seq: seq })
+  def catch_req(c, grant, ball:, seq:, hp: 10, pid: false)
+    req = { type: :catch_req, species: grant[:species], level: grant[:level],
+            ball: ball, hp_current: hp, status: :NONE, claimed_rate: 255,
+            dex_owned: 0, charm: false, seq: seq }
+    req[:pid] = grant[:pid] if pid   # a client that names the foe it built
+    send_env(c, req)
     recv(c)
   end
 
@@ -205,6 +207,57 @@ class ServerCatchTest < Minitest::Test
   # fabricated identity in the same batch (a pid the server never issued) -> "client".
   # Mailbox FIFO makes the ordering deterministic: record, mark_caught and mint_batch run
   # in submit order for the account.
+  # Two mints alike in the stash (a Spinarak that fled, then another): the catch names its
+  # foe's personal id, and that foe's roll is the one judged, stamped and claimed.
+  def test_a_catch_is_judged_against_its_own_mint
+    start_server
+    c, = authed_conn("ct9@t.co")
+    fled = mint(c, seq: 1)
+    met  = mint(c, seq: 2)
+    assert_equal [fled[:species], fled[:level]], [met[:species], met[:level]]
+    r = catch_req(c, met, ball: :MASTERBALL, seq: 3, pid: true)
+    assert_equal :catch_verdict, r[:type]
+    send_env(c, { type: :uid_req, seq: 4, mons: [{ tmp: 21, species: met[:species], level: met[:level], pid: met[:pid], egg: false }] })
+    ug = recv(c)
+    assert_equal "wild_caught", @db[:monsters].where(id: ug[:grants][0][:uid]).get(:origin), "the caught one's own roll"
+    id = @db[:accounts].where(email: "ct9@t.co").get(:id)
+    assert_nil @db[:encounter_rolls].where(account_id: id, pid: fled[:pid]).get(:caught_at), "the fled one stays uncaught"
+    c.close
+  end
+
+  # A pid that is no number is no pid (older behaviour: species and level); one the stash
+  # does not hold has no mint.
+  def test_a_catch_names_a_pid_the_stash_holds
+    start_server
+    c, = authed_conn("ct10@t.co")
+    g = mint(c)
+    r = catch_req(c, g.merge(pid: 4_294_967_295), ball: :MASTERBALL, seq: 2, pid: true)
+    assert_equal [:catch_deny, "no_encounter"], [r[:type], r[:reason]]
+    r = catch_req(c, g.merge(pid: "x"), ball: :MASTERBALL, seq: 3, pid: true)
+    assert_equal :catch_verdict, r[:type]
+    c.close
+  end
+
+  # The shadow report judges against the foe it names too.
+  def test_the_shadow_report_names_its_foe
+    start_server(catches: "shadow")
+    c, = authed_conn("ct11@t.co")
+    hp_ivs = []
+    @server.instance_variable_get(:@catch_calc).define_singleton_method(:adjudicate) { |*a, **_k| hp_ivs << a[2]; nil }
+    a = b = nil
+    10.times do |i|
+      a = b
+      b = mint(c, seq: 10 + i)
+      break if a && a[:iv][0] != b[:iv][0]
+    end
+    refute_equal a[:iv][0], b[:iv][0], "two mints with different HP IVs"
+    send_env(c, { type: :catch_report, species: b[:species], level: b[:level], pid: b[:pid], ball: :POKEBALL,
+                  hp_current: 5, status: :NONE, claimed_rate: 255, dex_owned: 0, charm: false, shakes: 1 })
+    sync(c)
+    assert_equal [b[:iv][0]], hp_ivs
+    c.close
+  end
+
   def test_caught_mon_uid_mint_gets_wild_caught_provenance
     start_server
     c, = authed_conn("ct8@t.co")

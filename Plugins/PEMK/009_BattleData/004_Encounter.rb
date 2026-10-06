@@ -197,9 +197,16 @@ module PEMK
     # SHADOW: fire-and-forget report of a locally-rolled encounter (no reply).
     def report(map, enctype, species, level)
       PEMK.send_message(:type => :encounter_report, :map => map, :enctype => enctype.to_s,
-                        :species => species.to_s, :level => level)
+                        :species => species.to_s, :level => level, :version => table_version)
     rescue StandardError => e
       PEMK.log("encounter: report error #{e.class}: #{e.message}")
+    end
+
+    # The game's encounter version (a story event moves it on): which of the map's tables
+    # the game rolls from.
+    def table_version
+      v = ($PokemonGlobal && $PokemonGlobal.encounter_version) rescue nil
+      v.is_a?(Integer) ? v : 0
     end
 
     # ON: request a server mint for this map and +type+ and BUILD the wild Pokémon from it.
@@ -217,7 +224,8 @@ module PEMK
     def request(map, enctype)
       @inbox.clear   # a new encounter supersedes any late reply from a timed-out one
       @seq += 1
-      PEMK.send_message(:type => :encounter_req, :map => map, :enctype => enctype.to_s, :seq => @seq)
+      PEMK.send_message(:type => :encounter_req, :map => map, :enctype => enctype.to_s, :seq => @seq,
+                        :version => table_version)
       wait_for(@seq)
     end
 

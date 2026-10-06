@@ -37,9 +37,10 @@ module PEMK
       @rng   = rng   # must respond to random_number(n) -> 0..n-1
     end
 
-    # Roll a full wild encounter for (map_id, enctype). -> Hash | nil (no table here).
-    def roll(map_id, enctype)
-      slots = table_slots(map_id, enctype)
+    # Roll a full wild encounter for (map_id, enctype) in the game's encounter +version+.
+    # -> Hash | nil (no table here).
+    def roll(map_id, enctype, version: 0)
+      slots = table_slots(map_id, enctype, version)
       return nil unless slots
 
       species, level = pick_slot(slots)
@@ -56,8 +57,8 @@ module PEMK
 
     # Is +species+ a legal wild encounter for (map_id, enctype)? (D2 shadow detection:
     # a client reporting a species absent from the table is fabricating an encounter.)
-    def legal?(map_id, enctype, species)
-      slots = table_slots(map_id, enctype)
+    def legal?(map_id, enctype, species, version: 0)
+      slots = table_slots(map_id, enctype, version)
       return nil unless slots   # unjudgeable — no table for this map/type (unexported)
 
       want = species.to_s
@@ -65,12 +66,14 @@ module PEMK
     end
 
     # The raw slot list [[weight, "SPECIES", min, max], ...] for (map_id, enctype), or nil
-    # when there's no table (map unexported / no such encounter type). Version 0 (default).
-    def table_slots(map_id, enctype)
+    # when there's no table (map unexported / no such encounter type). The tables of the
+    # game's encounter +version+, or version 0's when that version has none for the map -
+    # GameData::Encounter.get's own fallback (a map with no version 0 has none then).
+    def table_slots(map_id, enctype, version = 0)
       enc = @world.encounters(map_id)
       return nil unless enc.is_a?(Hash)
 
-      ver = enc["0"] || enc.values.find { |v| v.is_a?(Hash) }
+      ver = enc[version.to_s] || enc["0"]
       return nil unless ver.is_a?(Hash)
 
       t = ver[enctype.to_s]

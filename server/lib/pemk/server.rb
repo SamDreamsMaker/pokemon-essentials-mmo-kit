@@ -1421,20 +1421,29 @@ module PEMK
       level   = env[:level]
       return unless map.is_a?(Integer) && !enctype.empty? && !species.empty?
 
-      legal     = @encounter_mint.legal?(map, enctype, species)   # nil (no table) | true | false
+      version   = table_version(env)
+      legal     = @encounter_mint.legal?(map, enctype, species, version: version)   # nil (no table) | true | false
       pos       = conn.data[:last_pos]
       wrong_map = pos.is_a?(Array) && pos[0] != map
-      would     = @encounter_mint.roll(map, enctype)
+      would     = @encounter_mint.roll(map, enctype, version: version)
 
       tag = if legal == false then "SUSPECT species-not-in-table"
             elsif wrong_map    then "SUSPECT wrong-map(on #{pos[0]})"
             else "ok"
             end
       wm = would ? "#{would['species']}@#{would['level']}#{would['shiny'] ? '/shiny' : ''}" : "-"
-      @log.call("encounter: account #{account_id} #{tag} map #{map} #{enctype} " \
+      @log.call("encounter: account #{account_id} #{tag} map #{map} #{enctype} v#{version} " \
                 "client=#{species}@#{level} server_would=#{wm}")
       flag_anomaly(account_id, :encounter_species)   if legal == false
       flag_anomaly(account_id, :encounter_wrong_map) if legal != false && wrong_map
+    end
+
+    # The game's encounter version a client names (a story event moves it on) - older
+    # clients name none: version 0, as before. The client's word, like the encounter type:
+    # only the map's exported versions are read, and the logs say which.
+    def table_version(env)
+      v = env[:version]
+      v.is_a?(Integer) && v.bit_length < 32 ? v : 0
     end
 
     # M4 Layer D D2 (on): server-authoritative wild-encounter MINT. The client requests an
@@ -1468,7 +1477,8 @@ module PEMK
         return reply(conn, type: :encounter_deny, seq: seq, reason: "wrong_map")
       end
 
-      mint = @encounter_mint.roll(map, enctype)
+      version = table_version(env)
+      mint = @encounter_mint.roll(map, enctype, version: version)
       return reply(conn, type: :encounter_deny, seq: seq, reason: "no_table") unless mint   # unexported -> local
 
       # Stash the mint on the connection (last 2 — a double wild battle mints two) so a
@@ -1495,7 +1505,7 @@ module PEMK
         end
       end
 
-      @log.call("encounter: account #{account_id} MINT map #{map} #{enctype} -> " \
+      @log.call("encounter: account #{account_id} MINT map #{map} #{enctype} v#{version} -> " \
                 "#{mint['species']}@#{mint['level']}#{mint['shiny'] ? ' /SHINY' : ''}")
       grant = { type: :encounter_grant, seq: seq,
                 species: mint["species"], level: mint["level"],
@@ -3130,8 +3140,13 @@ module PEMK
       species = env[:species].to_s[0, 32]
       level   = env[:level]
       mints   = conn.data[:enc_mints]
+      pid     = env[:pid]
+      # The foe's own mint when the client names its personal id (a stash holds two: a
+      # fled Pidgey and the next one alike); species and level otherwise (older clients).
       mint    = mints.is_a?(Array) &&
-                mints.find { |m| !m["caught"] && m["species"] == species && m["level"] == level }
+                mints.find do |m|
+                  !m["caught"] && m["species"] == species && m["level"] == level && (!pid.is_a?(Integer) || m["pid"] == pid)
+                end
       unless mint
         @log.call("catch: account #{account_id} req #{species}@#{level.inspect} has NO stashed mint -> local")
         return reply(conn, type: :catch_deny, seq: seq, reason: "no_encounter")
@@ -3188,7 +3203,8 @@ module PEMK
       return if species.empty?
 
       mints = conn.data[:enc_mints]
-      mint  = mints.is_a?(Array) && mints.find { |m| m["species"] == species }
+      pid   = env[:pid]
+      mint  = mints.is_a?(Array) && mints.find { |m| m["species"] == species && (!pid.is_a?(Integer) || m["pid"] == pid) }
       hp_iv = mint && mint["iv"].is_a?(Array) ? mint["iv"][0] : nil
       would = @catch_calc.adjudicate(species, env[:level], hp_iv,
                                      env[:ball].to_s, env[:hp_current], env[:status].to_s,

@@ -38,6 +38,23 @@ class EncounterMintTest < Minitest::Test
     assert_nil m.table_slots(99, "Land")    # unexported map
   end
 
+  # The game's encounter version: its own tables, version 0's where the map has none for
+  # it (GameData::Encounter.get), and none at all for a map with no version 0 then.
+  def test_versions
+    w = FakeWorld.new(5 => { "0" => { "Land" => { "slots" => [[100, "PIDGEY", 3, 3]] } },
+                             "1" => { "Land" => { "slots" => [[100, "ZUBAT", 9, 9]] } } },
+                      6 => { "1" => { "Land" => { "slots" => [[100, "ZUBAT", 9, 9]] } } })
+    m = PEMK::EncounterMint.new(w)
+    assert_equal [[100, "ZUBAT", 9, 9]], m.table_slots(5, "Land", 1)
+    assert_equal [[100, "PIDGEY", 3, 3]], m.table_slots(5, "Land", 4)
+    assert_equal [[100, "PIDGEY", 3, 3]], m.table_slots(5, "Land")
+    assert_equal "ZUBAT", m.roll(5, "Land", version: 1)["species"]
+    assert_equal true, m.legal?(5, "Land", "ZUBAT", version: 1)
+    assert_equal false, m.legal?(5, "Land", "ZUBAT")
+    assert_nil m.table_slots(6, "Land", 0), "no version 0: no encounters there"
+    assert_equal [[100, "ZUBAT", 9, 9]], m.table_slots(6, "Land", 1)
+  end
+
   def test_legality
     m = PEMK::EncounterMint.new(world)
     assert_equal true,  m.legal?(5, "Land", "PIDGEY")

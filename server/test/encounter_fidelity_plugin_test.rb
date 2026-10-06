@@ -89,6 +89,7 @@ class EncounterFidelityPluginTest < Minitest::Test
       end
     end
     load ARGV[0]
+    ORIG_REQUEST = PEMK::Encounter.method(:request)
     module PEMK
       module Encounter
         def self.request(map, type)
@@ -199,6 +200,13 @@ class EncounterFidelityPluginTest < Minitest::Test
       pbGenerateWildPokemon(:PIDGEY, 3)
       pbGenerateWildPokemon(:PIDGEY, 3)
       out[:stray] = stray.call
+    when "version"                                  # the game's encounter version rides both frames
+      $PokemonGlobal.encounter_version = 2
+      PEMK::Encounter.adopt_mode("shadow")
+      pbBattleOnStepTaken(false)
+      PEMK::Encounter.define_singleton_method(:wait_for) { |_seq| nil }
+      ORIG_REQUEST.call(31, :Land)
+      out[:versions] = $sent.map { |h| [h[:type], h[:version]] }
     when "direct_write"                             # changed outside any handler, before the battle
       roll = $PokemonEncounters.choose_wild_pokemon(:Land)
       roll[0] = :MEW
@@ -307,6 +315,10 @@ class EncounterFidelityPluginTest < Minitest::Test
     assert_equal [0, 0, 1], r.values_at(:off, :untyped, :stray), "said once, with a mode and an encounter under way"
   end
 
+  def test_the_games_encounter_version_is_named
+    assert_equal [[:encounter_report, 2], [:encounter_req, 2]], run_case("version")[:versions]
+  end
+
   def test_a_roll_changed_outside_a_handler_or_used_twice
     r = run_case("direct_write")
     assert_empty r[:mints]
@@ -350,7 +362,11 @@ class EncounterFidelityPluginTest < Minitest::Test
     end
     mon = Struct.new(:personalID)
     b = Battle.new
-    print [b.pbCaptureCalc(mon.new(42), nil, nil, :POKEBALL), b.pbCaptureCalc(mon.new(7), nil, nil, :POKEBALL), $asked].inspect
+    verdicts = [b.pbCaptureCalc(mon.new(42), nil, nil, :POKEBALL), b.pbCaptureCalc(mon.new(7), nil, nil, :POKEBALL), $asked]
+    data = Struct.new(:catch_rate) { def has_flag?(_flag) = false }
+    foe = Struct.new(:species, :level, :personalID, :species_data).new(:PIDGEY, 3, 4242, data.new(255))
+    payload = PEMK::Catch.build_payload(foe, Struct.new(:hp, :status).new(10, :NONE), :POKEBALL, nil)
+    print (verdicts + [payload && payload[:pid]]).inspect
   RUBY
 
   def test_a_catch_is_asked_for_a_minted_foe_only
@@ -358,7 +374,7 @@ class EncounterFidelityPluginTest < Minitest::Test
     out = IO.popen([RbConfig.ruby, "-W0", "-e", CATCH, plugin], err: %i[child out], &:read)
     assert $?.success?, "runner crashed:
 #{out}"
-    assert_equal [4, :local, 1], eval(out) # rubocop:disable Security/Eval
+    assert_equal [4, :local, 1, 4242], eval(out), "and the request names the foe's personal id" # rubocop:disable Security/Eval
   end
 
   def test_a_seam_redefined_later_is_said_once

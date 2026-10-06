@@ -29,7 +29,7 @@ Autotest.scenario "a wild Pokemon is caught under server authority",
   wild = foe["species"]
 
   s.check("the server minted the wild #{wild}") do
-    !s.server.grep(/encounter: account #{id} MINT map 5 \S+ -> #{wild}@#{foe['level']}/).empty?
+    !s.server.grep(/encounter: account #{id} MINT map 5 \S+ v\d+ -> #{wild}@#{foe['level']}/).empty?
   end
   s.check("and rolled the ball that caught it") do
     !s.server.grep(/catch: account #{id} VERDICT #{wild}@\d+ .* CAUGHT/).empty?

@@ -28,6 +28,8 @@ class ServerEncounterTest < Minitest::Test
     "maps" => { "5" => { "name" => "Route", "width" => 20, "height" => 20,
                          "encounters" => { "0" => {
                            "Land" => { "step_chance" => 21, "slots" => [[50, "PIDGEY", 3, 5], [50, "RATTATA", 2, 4]] }
+                         }, "1" => {
+                           "Land" => { "step_chance" => 21, "slots" => [[100, "ZUBAT", 9, 9]] }
                          } } } }
   ))
   FIXTURE.flush
@@ -152,6 +154,44 @@ class ServerEncounterTest < Minitest::Test
     assert_equal 6, r[:iv].length
     assert(r[:iv].all? { |v| v.is_a?(Integer) && v >= 0 && v <= 31 })
     assert_includes [true, false], r[:shiny]
+    c.close
+  end
+
+  # The game's encounter version picks the map's table (a story event moves it on); one the
+  # map has no table for falls back to version 0, as the engine does; older clients name none.
+  def test_the_games_encounter_version_picks_its_table
+    start_server(encounter_mode: "on")
+    c, = authed_conn("ecv@t.co")
+    send_env(c, { type: :pos, map: 5, x: 3, y: 3 })
+    species = lambda do |seq, version|
+      req = { type: :encounter_req, map: 5, enctype: :Land, seq: seq }
+      req[:version] = version unless version == :none
+      send_env(c, req)
+      recv(c)[:species].to_s
+    end
+    assert_equal "ZUBAT", species.call(1, 1)
+    assert_includes %w[PIDGEY RATTATA], species.call(2, 7), "no table for version 7: version 0's"
+    assert_includes %w[PIDGEY RATTATA], species.call(3, :none)
+    assert_includes %w[PIDGEY RATTATA], species.call(4, "1"), "a version is a number"
+    assert_includes %w[PIDGEY RATTATA], species.call(5, 2**40), "a 32-bit one"
+    assert(enc_log.any? { |l| l.include?("MINT map 5 Land v1 -> ZUBAT@9") }, enc_log.inspect)
+    assert_empty enc_log.grep(/v#{2**40}/), "a number out of range is no version (nor a log's length)"
+    c.close
+  end
+
+  def test_shadow_judges_against_the_games_version
+    start_server
+    c, = authed_conn("ecv2@t.co")
+    send_env(c, { type: :pos, map: 5, x: 3, y: 3 })
+    send_env(c, { type: :encounter_report, map: 5, enctype: :Land, species: :ZUBAT, level: 9, version: 1 })
+    send_env(c, { type: :encounter_report, map: 5, enctype: :Land, species: :ZUBAT, level: 9 })
+    sync(c)
+    zubat = enc_log.select { |l| l.include?("client=ZUBAT") }
+    assert_equal 2, zubat.size, enc_log.inspect
+    refute_includes zubat[0], "SUSPECT"
+    assert_includes zubat[0], "Land v1 client=ZUBAT@9 server_would=ZUBAT@9", "the version said, and rolled"
+    assert_includes zubat[1], "SUSPECT species-not-in-table"
+    assert_includes zubat[1], "Land v0 "
     c.close
   end
 
