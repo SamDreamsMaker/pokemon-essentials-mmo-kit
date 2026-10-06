@@ -173,6 +173,9 @@ class ServerEncounterTest < Minitest::Test
     assert_includes %w[PIDGEY RATTATA], species.call(2, 7), "no table for version 7: version 0's"
     assert_includes %w[PIDGEY RATTATA], species.call(3, :none)
     assert_includes %w[PIDGEY RATTATA], species.call(4, "1"), "a version is a number"
+    assert_includes %w[PIDGEY RATTATA], species.call(5, 2**40), "a 32-bit one"
+    assert(enc_log.any? { |l| l.include?("MINT map 5 Land v1 -> ZUBAT@9") }, enc_log.inspect)
+    assert_empty enc_log.grep(/v#{2**40}/), "a number out of range is no version (nor a log's length)"
     c.close
   end
 
@@ -186,7 +189,9 @@ class ServerEncounterTest < Minitest::Test
     zubat = enc_log.select { |l| l.include?("client=ZUBAT") }
     assert_equal 2, zubat.size, enc_log.inspect
     refute_includes zubat[0], "SUSPECT"
+    assert_includes zubat[0], "Land v1 client=ZUBAT@9 server_would=ZUBAT@9", "the version said, and rolled"
     assert_includes zubat[1], "SUSPECT species-not-in-table"
+    assert_includes zubat[1], "Land v0 "
     c.close
   end
 

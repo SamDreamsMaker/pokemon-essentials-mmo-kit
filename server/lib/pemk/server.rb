@@ -1432,17 +1432,18 @@ module PEMK
             else "ok"
             end
       wm = would ? "#{would['species']}@#{would['level']}#{would['shiny'] ? '/shiny' : ''}" : "-"
-      @log.call("encounter: account #{account_id} #{tag} map #{map} #{enctype} " \
+      @log.call("encounter: account #{account_id} #{tag} map #{map} #{enctype} v#{version} " \
                 "client=#{species}@#{level} server_would=#{wm}")
       flag_anomaly(account_id, :encounter_species)   if legal == false
       flag_anomaly(account_id, :encounter_wrong_map) if legal != false && wrong_map
     end
 
     # The game's encounter version a client names (a story event moves it on) - older
-    # clients name none: version 0, as before. Only the map's exported versions are read.
+    # clients name none: version 0, as before. The client's word, like the encounter type:
+    # only the map's exported versions are read, and the logs say which.
     def table_version(env)
       v = env[:version]
-      v.is_a?(Integer) && v.between?(0, 999) ? v : 0
+      v.is_a?(Integer) && v.bit_length < 32 ? v : 0
     end
 
     # M4 Layer D D2 (on): server-authoritative wild-encounter MINT. The client requests an
@@ -1476,7 +1477,8 @@ module PEMK
         return reply(conn, type: :encounter_deny, seq: seq, reason: "wrong_map")
       end
 
-      mint = @encounter_mint.roll(map, enctype, version: table_version(env))
+      version = table_version(env)
+      mint = @encounter_mint.roll(map, enctype, version: version)
       return reply(conn, type: :encounter_deny, seq: seq, reason: "no_table") unless mint   # unexported -> local
 
       # Stash the mint on the connection (last 2 — a double wild battle mints two) so a
@@ -1503,7 +1505,7 @@ module PEMK
         end
       end
 
-      @log.call("encounter: account #{account_id} MINT map #{map} #{enctype} -> " \
+      @log.call("encounter: account #{account_id} MINT map #{map} #{enctype} v#{version} -> " \
                 "#{mint['species']}@#{mint['level']}#{mint['shiny'] ? ' /SHINY' : ''}")
       grant = { type: :encounter_grant, seq: seq,
                 species: mint["species"], level: mint["level"],
@@ -3201,7 +3203,8 @@ module PEMK
       return if species.empty?
 
       mints = conn.data[:enc_mints]
-      mint  = mints.is_a?(Array) && mints.find { |m| m["species"] == species }
+      pid   = env[:pid]
+      mint  = mints.is_a?(Array) && mints.find { |m| m["species"] == species && (!pid.is_a?(Integer) || m["pid"] == pid) }
       hp_iv = mint && mint["iv"].is_a?(Array) ? mint["iv"][0] : nil
       would = @catch_calc.adjudicate(species, env[:level], hp_iv,
                                      env[:ball].to_s, env[:hp_current], env[:status].to_s,

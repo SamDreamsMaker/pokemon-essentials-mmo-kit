@@ -68,12 +68,12 @@ module PEMK
     # The raw slot list [[weight, "SPECIES", min, max], ...] for (map_id, enctype), or nil
     # when there's no table (map unexported / no such encounter type). The tables of the
     # game's encounter +version+, or version 0's when that version has none for the map -
-    # GameData::Encounter.get's own fallback.
+    # GameData::Encounter.get's own fallback (a map with no version 0 has none then).
     def table_slots(map_id, enctype, version = 0)
       enc = @world.encounters(map_id)
       return nil unless enc.is_a?(Hash)
 
-      ver = enc[version.to_s] || enc["0"] || enc.values.find { |v| v.is_a?(Hash) }
+      ver = enc[version.to_s] || enc["0"]
       return nil unless ver.is_a?(Hash)
 
       t = ver[enctype.to_s]

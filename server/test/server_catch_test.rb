@@ -225,6 +225,39 @@ class ServerCatchTest < Minitest::Test
     c.close
   end
 
+  # A pid that is no number is no pid (older behaviour: species and level); one the stash
+  # does not hold has no mint.
+  def test_a_catch_names_a_pid_the_stash_holds
+    start_server
+    c, = authed_conn("ct10@t.co")
+    g = mint(c)
+    r = catch_req(c, g.merge(pid: 4_294_967_295), ball: :MASTERBALL, seq: 2, pid: true)
+    assert_equal [:catch_deny, "no_encounter"], [r[:type], r[:reason]]
+    r = catch_req(c, g.merge(pid: "x"), ball: :MASTERBALL, seq: 3, pid: true)
+    assert_equal :catch_verdict, r[:type]
+    c.close
+  end
+
+  # The shadow report judges against the foe it names too.
+  def test_the_shadow_report_names_its_foe
+    start_server(catches: "shadow")
+    c, = authed_conn("ct11@t.co")
+    hp_ivs = []
+    @server.instance_variable_get(:@catch_calc).define_singleton_method(:adjudicate) { |*a, **_k| hp_ivs << a[2]; nil }
+    a = b = nil
+    10.times do |i|
+      a = b
+      b = mint(c, seq: 10 + i)
+      break if a && a[:iv][0] != b[:iv][0]
+    end
+    refute_equal a[:iv][0], b[:iv][0], "two mints with different HP IVs"
+    send_env(c, { type: :catch_report, species: b[:species], level: b[:level], pid: b[:pid], ball: :POKEBALL,
+                  hp_current: 5, status: :NONE, claimed_rate: 255, dex_owned: 0, charm: false, shakes: 1 })
+    sync(c)
+    assert_equal [b[:iv][0]], hp_ivs
+    c.close
+  end
+
   def test_caught_mon_uid_mint_gets_wild_caught_provenance
     start_server
     c, = authed_conn("ct8@t.co")
