@@ -51,13 +51,16 @@ module PEMK
 
     attr_reader :port
 
-    def initialize(host:, port:, on_frame:, on_close: nil, on_tick: nil, logger: nil)
+    # +preauth_frame_max+: the largest frame a socket may announce before its session
+    # exists (nil: MAX_FRAME, as after) - a login is well under a kilobyte.
+    def initialize(host:, port:, on_frame:, on_close: nil, on_tick: nil, logger: nil, preauth_frame_max: nil)
       @host     = host
       @port     = port
       @on_frame = on_frame
       @on_close = on_close
       @on_tick  = on_tick   # reactor-thread hook fired each loop (~<=0.5s) — coarse periodic work
       @log      = logger || ->(_m) {}
+      @preauth_frame_max = preauth_frame_max
       @conns    = {}
       @running  = false
       @posts    = Queue.new
@@ -229,18 +232,18 @@ module PEMK
       end
     end
 
+    # One read a tick per socket: what it sent past READ_CHUNK waits in the kernel for the
+    # next tick (the select wakes again at once), so no socket holds the loop - reading to
+    # EAGAIN let one of them hand a single tick 16 MiB of tiny frames to decode. A client
+    # sending faster than that is held back by its own socket.
     def read_conn(conn)
       return unless conn
 
-      eof = false
-      loop do
-        data = conn.io.read_nonblock(READ_CHUNK, exception: false)
-        if data.nil?          # EOF — but frames may still sit in inbuf
-          eof = true
-          break
-        end
-        break if data == :wait_readable
+      data = conn.io.read_nonblock(READ_CHUNK, exception: false)
+      return if data == :wait_readable
 
+      eof = data.nil?   # EOF — but frames may still sit in inbuf
+      unless eof
         conn.inbuf << data
         return close_conn(conn) if conn.inbuf.bytesize > MAX_FRAME + LEN_BYTES
       end
@@ -259,7 +262,7 @@ module PEMK
         break if buf.bytesize < LEN_BYTES
 
         len = buf.byteslice(0, LEN_BYTES).unpack1("N")
-        return close_conn(conn) if len > MAX_FRAME
+        return close_conn(conn) if len > frame_max(conn)
 
         total = LEN_BYTES + len
         break if buf.bytesize < total
@@ -272,6 +275,24 @@ module PEMK
           return
         end
       end
+    end
+
+    # What the client sent and nobody read, read and dropped before the close (1 MiB at
+    # most): a close with unread input is a reset, not an end, and a Windows client loses
+    # to a reset the frames still on their way to it - a ban's notice, a last answer.
+    DRAIN_MAX = 16
+
+    def drain_input(conn)
+      DRAIN_MAX.times do
+        d = conn.io.read_nonblock(READ_CHUNK, exception: false)
+        break if d.nil? || d == :wait_readable
+      end
+    rescue IOError, SystemCallError
+      nil
+    end
+
+    def frame_max(conn)
+      @preauth_frame_max && conn.data[:account_id].nil? ? @preauth_frame_max : MAX_FRAME
     end
 
     def write_conn(conn)
@@ -294,6 +315,7 @@ module PEMK
 
       conn.closing = true   # the rest of a batch read with the frame that closed it is dropped
       @conns.delete(conn.io)
+      drain_input(conn)
       (conn.io.close rescue nil)
       @on_close&.call(conn)
       @log.call("reactor: - #{conn.addr} (#{@conns.size})")

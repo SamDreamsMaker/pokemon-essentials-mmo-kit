@@ -24,6 +24,11 @@ module PEMK
       @jobs << job
     end
 
+    # Jobs waiting for a worker.
+    def backlog
+      @jobs.size
+    end
+
     def shutdown
       @size.times { @jobs << :stop }
       @threads.each { |t| t.join(5) }

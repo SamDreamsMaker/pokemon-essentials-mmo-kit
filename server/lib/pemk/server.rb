@@ -2,6 +2,7 @@
 
 require "time"
 require "set"
+require "ipaddr"
 
 module PEMK
   # Milestone 1 server: reactor + worker pool + a connection AUTH-GATE. A socket is
@@ -26,6 +27,12 @@ module PEMK
                         trade_invite trade_accept trade_decline trade_offer trade_lock trade_cancel].freeze
     TRADE_TTL      = 15          # seconds a half-committed (lone) trade rendezvous lingers before timeout
     WORKERS        = 8
+    # Registers and password logins (a bcrypt each, ~250 ms) run on a pool of their own: a
+    # flood of them delays other password logins, never a player's saves nor a reconnect
+    # (a token check is one indexed read: it stays on the main pool). Past AUTH_BACKLOG
+    # waiting, one is answered "busy" at once.
+    AUTH_WORKERS   = 2
+    AUTH_BACKLOG   = 32
     LOGIN_MAX      = 10          # login/register attempts ...
     LOGIN_WINDOW   = 60          # ... per this many seconds, per IP
 
@@ -37,7 +44,7 @@ module PEMK
     def initialize(config: Config.new, logger: nil)
       @config   = config
       @log      = logger || self.class.method(:log)
-      @db       = DB.connect(@config.database_url, max_connections: WORKERS + 2)
+      @db       = DB.connect(@config.database_url, max_connections: WORKERS + AUTH_WORKERS + 2)
       @accounts   = Accounts.new(@db)
       @sessions   = Sessions.new(@db)
       @bans       = Bans.new(@db)   # moderation: set and lifted by the operator (bin/pemk_admin.rb)
@@ -151,6 +158,7 @@ module PEMK
       @mode_keys  = @world.field_keys   # what Surf and Dive need (nil: an export from before)
       @pickups    = Pickups.new(@db)   # M4 Layer C one-shot ledger
       @pool     = WorkerPool.new(size: WORKERS, logger: @log)
+      @auth_pool = WorkerPool.new(size: AUTH_WORKERS, logger: @log)
       @limiter  = RateLimiter.new(max: LOGIN_MAX, per: LOGIN_WINDOW)
       @zones    = Hash.new { |h, k| h[k] = Set.new }   # map_id => Set(conn); reactor-thread only
       @zone_legacy = {}                                 # map_id => Set(conn) without presence_v2; reactor-thread only
@@ -158,12 +166,15 @@ module PEMK
       @online   = {}                                    # account_id => conn; reactor-thread only
       @pending_trades = {}                              # trade_id => rendezvous; reactor-thread only
       @peer_sessions  = {}                              # account_id => partner id (mutual); reactor-thread only
+      @peers          = PeerSessions.new                # the relay guard's invites and sessions; reactor-thread only
+      @invite_limiter = RateLimiter.new(max: 5, per: 25) # invites per ACCOUNT (a reconnect refills nothing)
       @trade_bodies   = {}                              # sender => its last locked escrow; reactor-thread only
       @conn_buckets   = {}                              # conn => [tokens, last_refill]; reactor-thread only
       @reactor  = Reactor.new(
         host: @config.bind, port: @config.port,
         on_frame: method(:on_frame), on_close: method(:on_close),
-        on_tick: method(:on_tick), logger: @log
+        on_tick: method(:on_tick), logger: @log,
+        preauth_frame_max: (PREAUTH_FRAME_MAX if @config.flood_guard)
       )
       @mailbox  = PlayerMailbox.new(pool: @pool, post: @reactor.method(:post), logger: @log)
     end
@@ -263,7 +274,11 @@ module PEMK
       @log.call("server: presence dedup = #{@config.presence_dedup ? 'on' : 'off'} " \
                 "(#{@config.presence_dedup ? "an idle player's repeats reach only older clients; " \
                                              "a member silent #{PRESENCE_SILENCE.to_i}s leaves its map" : 'every frame to everyone'})")
+      @log.call("server: flood guard = #{@config.flood_guard ? 'on' : 'off'} " \
+                "(#{@config.flood_guard ? 'a flood before login, or a sustained one after, closes its connection; ' \
+                                          'a frame announced before login is small' : 'floods are only dropped'})")
       @pool.start
+      @auth_pool.start
       @reactor.start
       @thread = Thread.new { @reactor.run_loop }
       @thread.abort_on_exception = true
@@ -272,6 +287,7 @@ module PEMK
     def stop
       @reactor.stop
       @thread&.join(5)
+      @auth_pool.shutdown
       @pool.shutdown
       @db.disconnect   # the workers are done: a stopped server holds no connection
       @log.call("server: stopped")
@@ -281,6 +297,7 @@ module PEMK
       install_signal_handlers
       start
       @thread.join           # block until SIGTERM stops the reactor
+      @auth_pool.shutdown
       @pool.shutdown
       @db.disconnect
       @log.call("server: stopped")
@@ -306,7 +323,15 @@ module PEMK
       authed = conn.data[:account_id]
 
       unless authed || AUTH_TYPES.include?(type)
-        @log.call("server: pre-auth #{type.inspect} from #{conn.addr} -> drop")
+        @log.call("server: pre-auth #{bounded(type)} from #{conn.addr} -> drop")
+        conn.closing = true
+        return
+      end
+
+      # Before its session exists a socket is budgeted too: each :auth is a pool job and a
+      # database read, and one read of 16 MiB held ~280k of them (a flood guard rule).
+      if !authed && @config.flood_guard && !frame_budget_ok?(conn, type, PREAUTH_BUDGETS, :pre_budgets, [0, 0])
+        @log.call("server: pre-auth flood (#{bounded(type)}) from #{conn.addr} -> closed")
         conn.closing = true
         return
       end
@@ -315,9 +340,10 @@ module PEMK
       # after login before this (audit): one socket could spam DB-touching frames until
       # the mailbox/pool queues ate the host. Honest clients send these at human,
       # debounced cadence, so the budgets are generous.
-      if authed && !(frame_budget_ok?(conn, type) && (!PRESENCE_TYPES.include?(type) || frame_budget_ok?(conn, :presence)))
-        @log.call("server: account #{authed} over budget on #{type.inspect} -> drop")
+      key = KNOWN_TYPES.include?(type) ? type : :other   # the client names the type
+      if authed && !(frame_budget_ok?(conn, key) && (!PRESENCE_TYPES.include?(type) || frame_budget_ok?(conn, :presence)))
         claim_sent(conn, env[:nonce]) if type == :money_claim   # a Pay Day after it waits for it
+        over_budget(conn, key, authed)
         return
       end
 
@@ -327,7 +353,21 @@ module PEMK
     rescue StandardError => e
       # A raise used to unwind to the reactor's blanket rescue, aborting the whole tick
       # (and the rest of this socket's already-parsed frames) with an unattributable log.
-      @log.call("server: handler error on #{type.inspect} account #{authed.inspect}: #{e.class}: #{e.message}")
+      @log.call("server: handler error on #{bounded(type)} account #{authed.inspect}: #{e.class}: #{e.message[0, 200]}")
+    end
+
+    # A client's value in a log line: its inspect, cut short (an envelope holds 64 KiB).
+    def bounded(value)
+      value.inspect[0, 40]
+    end
+
+    # A ping's stamp, echoed: a 64-bit integer or a float - a wire integer is a decimal
+    # string of any length.
+    def ping_t(value)
+      case value
+      when Float then value
+      when Integer then value if value.bit_length < 64
+      end
     end
 
     # Token bucket per connection. Tight for the DB-touching types, generous for
@@ -343,26 +383,77 @@ module PEMK
       pos: [40, 20], dir: [40, 20], step: [40, 20], spawn: [10, 2],
       # all presence types together: a bike is 10 steps/s - alternating types must not
       # triple the fan-out a script can force on its map
-      presence: [40, 20]
+      presence: [40, 20],
+      # every type this server does not know (a newer client's), together
+      other: [10, 2]
     }.freeze
     FRAME_BUDGET_DEFAULT = [30, 10].freeze
     PRESENCE_TYPES = %i[pos dir step spawn].freeze
+    # The types a handler reads. The client names a frame's type: any other shares the
+    # :other budget - a key each was memory for the connection's life and a fresh burst.
+    KNOWN_TYPES = (FRAME_BUDGETS.keys - %i[presence other] + AUTH_TYPES + ADDRESSED +
+                   %i[pickups_reset encounter_report catch_report battle_end_report]).uniq.freeze
 
-    def frame_budget_ok?(conn, type)
-      burst, rate = FRAME_BUDGETS.fetch(type, FRAME_BUDGET_DEFAULT)
+    # Before its session exists a client sends one :auth, or :login attempts typed by hand
+    # (a :register and a :login for a new account), on each connection - it reconnects on a
+    # new one - and never a :ping. Past these the connection is a flood (flood guard).
+    PREAUTH_BUDGETS = { ping: [10, 2], auth: [3, 0.1], login: [5, 0.2], register: [3, 0.1] }.freeze
+    # ... and each is small: the largest, a login with its email, password and caps, is
+    # under 1 KiB; a socket announcing more before its session exists is closed by the
+    # reactor (it could buffer 16 MiB before saying anything).
+    PREAUTH_FRAME_MAX = 4096
+    # Frames an authenticated connection may drop over budget in a burst, refilled
+    # FLOOD_RATE a second; past them it is closed (flood guard). An honest client drops a
+    # few hundred at most: the presence frames a long network stall delivers at once. The
+    # handshake answers are never counted: a player's client declines invites by itself.
+    FLOOD_DROPS = 1000
+    FLOOD_RATE  = 20.0
+    OVER_SAID   = 10.0   # an over-budget drop is said once per type per this many seconds
+
+    # +key+: a known frame type, :other, or a budget the server keeps across types
+    # (:presence) - never a name the client chose.
+    def frame_budget_ok?(conn, key, table = FRAME_BUDGETS, store = :budgets, default = FRAME_BUDGET_DEFAULT)
+      b = (conn.data[store] ||= {})
+      burst, rate = table.fetch(key, default)
       now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      b = (conn.data[:budgets] ||= {})
-      tokens, last = b[type] || [burst.to_f, now]
+      tokens, last = b[key] || [burst.to_f, now]
       tokens = [tokens + ((now - last) * rate), burst.to_f].min
-      return (b[type] = [tokens, now]) && false if tokens < 1.0
+      return (b[key] = [tokens, now]) && false if tokens < 1.0
 
-      b[type] = [tokens - 1.0, now]
+      b[key] = [tokens - 1.0, now]
       true
+    end
+
+    # A frame over its budget is dropped, and said once per type per OVER_SAID with how
+    # many went since (one line a frame was a log as large as the flood). Under the flood
+    # guard a connection that keeps it up is closed.
+    def over_budget(conn, key, account_id)
+      now  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      said = (conn.data[:over_said] ||= {})
+      last, count = said[key] || [nil, 0]
+      count += 1
+      if last.nil? || now - last >= OVER_SAID
+        @log.call("server: account #{account_id} over budget on #{bounded(key)} -> drop (#{count} dropped)")
+        said[key] = [now, 0]
+      else
+        said[key] = [last, count]
+      end
+      conn.data[:dropped] = conn.data[:dropped].to_i + 1
+      return unless @config.flood_guard && key != :trade_decline   # the one answer a client sends by itself
+
+      tokens, at = conn.data[:flood] || [FLOOD_DROPS.to_f, now]
+      tokens = [tokens + ((now - at) * FLOOD_RATE), FLOOD_DROPS.to_f].min - 1
+      conn.data[:flood] = [tokens, now]
+      return unless tokens.negative?
+
+      @log.call("server: account #{account_id} floods (#{FLOOD_DROPS} frames over budget in a burst, " \
+                "#{conn.data[:dropped]} dropped on this connection) -> closed")
+      conn.closing = true
     end
 
     def dispatch_frame(conn, env, type, authed, body)
       case type
-      when :ping     then reply(conn, type: :pong, t: env[:t])
+      when :ping     then reply(conn, type: :pong, t: ping_t(env[:t]))
       when :register then handle_register(conn, env)
       when :login    then handle_login(conn, env)
       when :auth     then handle_auth(conn, env)
@@ -395,19 +486,23 @@ module PEMK
       when :pos, :dir, :step, :spawn then handle_presence(conn, env, authed)
       when *ADDRESSED then handle_addressed(conn, env, body, authed)
       else
-        # Other authenticated gameplay frames (economy, battle) — per-player mailbox
-        # routing + handlers land in later milestones.
-        @log.call("server: authed #{type.inspect} from account #{authed}")
+        # A type this server does not know (a newer client's): ignored, said once per
+        # connection (a line a frame was a log as large as the frames).
+        unless conn.data[:unknown_said]
+          conn.data[:unknown_said] = true
+          @log.call("server: account #{authed} sent #{bounded(type)}, a frame this server does not know (a newer client?) - ignored")
+        end
       end
     end
 
     def handle_register(conn, env)
-      return reply(conn, type: :register_err, reason: "rate_limited") unless @limiter.allow?(conn.addr)
+      return reply(conn, type: :register_err, reason: "busy") if auth_busy?   # (an attempt not spent)
+      return reply(conn, type: :register_err, reason: "rate_limited") unless @limiter.allow?(limiter_key(conn.addr))
 
       email = env[:email].to_s
       pw    = env[:password].to_s
       uname = env[:username]   # optional display handle
-      @pool.submit do
+      @auth_pool.submit do
         result =
           begin
             id = @accounts.create(email: email, password: pw, username: uname)
@@ -419,6 +514,25 @@ module PEMK
           end
         @reactor.post { reply(conn, **result) }
       end
+    end
+
+    # Under the flood guard: so many bcrypts already wait that one more would wait past the
+    # client's patience - answered "busy" now (the player tries again).
+    def auth_busy?
+      @config.flood_guard && @auth_pool.backlog >= AUTH_BACKLOG
+    end
+
+    # The login limiter's key for an address: an IPv6 one by its /64 (one host holds a
+    # whole /64, and rotating through it bought a bcrypt each), an IPv4-mapped one by its
+    # IPv4 address.
+    def limiter_key(addr)
+      ip = IPAddr.new(addr.to_s)
+      return ip.native.to_s if ip.ipv4_mapped?
+      return ip.mask(64).to_s if ip.ipv6?
+
+      ip.to_s
+    rescue IPAddr::Error, ArgumentError
+      addr.to_s
     end
 
     # What a client says it can do (a login or auth frame's :caps). Unknown words are
@@ -442,10 +556,12 @@ module PEMK
     end
 
     def handle_login(conn, env)
-      return reply(conn, type: :login_err, reason: "rate_limited") unless @limiter.allow?(conn.addr)
       # A socket is one session: the game reconnects on a new one. A second login here
       # would leave the first account's map, relays and claims pointing at this socket.
+      # (Before the limiter: a refused login spends no attempt of the address.)
       return reply(conn, type: :login_err, reason: "already_authed") if conn.data[:account_id]
+      return reply(conn, type: :login_err, reason: "busy") if auth_busy?   # (an attempt not spent)
+      return reply(conn, type: :login_err, reason: "rate_limited") unless @limiter.allow?(limiter_key(conn.addr))
 
       note_caps(conn, env)
       return reply(conn, type: :login_err, reason: "update_required") if money_update_required?(conn)
@@ -453,7 +569,7 @@ module PEMK
       email = env[:email].to_s
       pw    = env[:password].to_s
       addr  = conn.addr
-      @pool.submit do
+      @auth_pool.submit do
         acct, err = @accounts.authenticate(email, pw)
         # Banned: told until when and why, once the password is right (a stranger learns
         # nothing), and no session is issued.
@@ -3073,8 +3189,8 @@ module PEMK
                                      claimed_rate: env[:claimed_rate],
                                      dex_owned: env[:dex_owned], charm: env[:charm] == true)
       wm = would ? "#{would[:shakes]}#{would[:critical] ? ' CRIT' : ''}#{would[:caught] ? ' CAUGHT' : ''}" : "-"
-      @log.call("catch: account #{account_id} report #{species}@#{env[:level].inspect} " \
-                "ball=#{env[:ball].to_s[0, 24]} client_shakes=#{env[:shakes].inspect} server_would=#{wm}")
+      @log.call("catch: account #{account_id} report #{species}@#{bounded(env[:level])} " \
+                "ball=#{env[:ball].to_s[0, 24]} client_shakes=#{bounded(env[:shakes])} server_would=#{wm}")
     end
 
     # Server-authoritative trade COMMIT (M3.2). The only authoritative trade frame
@@ -3094,6 +3210,7 @@ module PEMK
       end
       give = give.sort
       recv = recv.sort
+      return unless trade_open?(conn, account_id, partner, trade_id)
 
       pending = @pending_trades[trade_id]
       if pending.nil?
@@ -3103,6 +3220,9 @@ module PEMK
       end
 
       @pending_trades.delete(trade_id)
+      # Both committed: the trade is the server's now, whatever comes of it - its session
+      # closes (its partners keep no right to send each other trade frames).
+      @peers.close(pending[:account], account_id, :trade, trade_id: trade_id) if @config.relay_guard
       # Cross-check the two commits name each other and mirror give/recv exactly. A
       # third party guessing a trade_id fails here (its partner id won't match).
       unless pending[:account] == partner && pending[:partner] == account_id &&
@@ -3173,6 +3293,24 @@ module PEMK
           end
         end
       end
+    end
+
+    # The relay guard: a commit needs its trade open - accepted, not cancelled. A modified
+    # client that cancelled (its partner then dropped the trade) and committed anyway would
+    # swap with a partner that no longer listens for the result. Refused, and the
+    # partner's waiting commit too (its trade is off; :committing has no timeout).
+    def trade_open?(conn, account_id, partner, trade_id)
+      return true unless @config.relay_guard
+      return true if @peers.session?(account_id, partner, :trade, trade_id: trade_id)
+
+      @log.call("server: account #{account_id} commits trade #{bounded(trade_id)} with no trade open with #{partner} -> refused")
+      reply(conn, type: :trade_result, trade_id: trade_id, ok: false, reason: "no_trade")
+      p = @pending_trades[trade_id]
+      if p && p[:account] == partner && p[:partner] == account_id
+        @pending_trades.delete(trade_id)
+        reply(p[:conn], type: :trade_result, trade_id: trade_id, ok: false, reason: "no_trade") if @reactor.alive?(p[:conn])
+      end
+      false
     end
 
     # The escrow a :trade_lock carried, kept until its trade commits: the receiver loads
@@ -3303,6 +3441,18 @@ module PEMK
       maybe_resim_sweep
       maybe_item_sweep
       maybe_prune_deals
+      maybe_prune_limiter
+    end
+
+    # The login limiter forgets the addresses whose bucket has refilled (reactor thread).
+    def maybe_prune_limiter
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      return if @last_limiter_prune && now - @last_limiter_prune < LOGIN_WINDOW
+
+      @last_limiter_prune = now
+      @limiter.prune(now: now)
+      @invite_limiter.prune(now: now)
+      @peers.prune
     end
 
     PROOF_SWEEP_SEC = 5
@@ -4137,20 +4287,22 @@ module PEMK
     RELAY_BODY_MAX = 256 * 1024   # a Marshal'd battle team is a few KB
 
     def handle_addressed(sender, env, body, from_account)
+      return relay_guarded(sender, env, body, from_account) if @config.relay_guard
+
       target = @online[env[:to]]
       if target.nil? || target.equal?(sender)
-        @log.call("server: no route for #{env[:type].inspect} -> #{env[:to].inspect}")
+        @log.call("server: no route for #{bounded(env[:type])} -> #{bounded(env[:to])}")
         return
       end
 
       if body && body.bytesize > RELAY_BODY_MAX
-        @log.call("server: account #{from_account} oversized #{env[:type].inspect} body " \
+        @log.call("server: account #{from_account} oversized #{bounded(env[:type])} body " \
                   "(#{body.bytesize}B > #{RELAY_BODY_MAX}) -> drop")
         return
       end
 
       unless relay_allowed?(env[:type], from_account, env[:to])
-        @log.call("server: account #{from_account} #{env[:type].inspect} -> #{env[:to].inspect} " \
+        @log.call("server: account #{from_account} #{bounded(env[:type])} -> #{bounded(env[:to])} " \
                   "without a peer session -> drop")
         return
       end
@@ -4160,6 +4312,112 @@ module PEMK
       hold_escrow(env, body, from_account) if env[:type] == :trade_lock
       note_peer_session(env[:type], from_account, env[:to])
       @reactor.send_frame(target, Wire.encode_split(relayed_envelope(env, from_account), body))
+    end
+
+    # The relay guard (PEMK_RELAY_GUARD). A handshake reaches a stranger - that is what an
+    # invite is - and carries what an invite needs: no body, at most HANDSHAKE_FRAME_MAX,
+    # nothing while the target's output is behind; an invite is rationed per account, an
+    # answer needs the invite it answers, a cancel the trade it ends. Every other frame
+    # needs its pair's session of its kind (a trade's, its trade_id), and carries a body
+    # only as the kit does: a team, an escrow, at their sizes.
+    HANDSHAKE_FRAME_MAX  = 2048
+    HANDSHAKE_OUTBUF_MAX = 512 * 1024
+    PEER_BODY_MAX    = { battle_team: 64 * 1024, trade_lock: ESCROW_MAX }.freeze
+    PEER_BODY_BUDGET = { peer_body: [4, 0.1] }.freeze   # a team a battle, an escrow a trade
+
+    def relay_guarded(sender, env, body, from_account)
+      type   = env[:type]
+      to     = env[:to]
+      target = @online[to]
+      if target.nil? || target.equal?(sender)
+        @log.call("server: no route for #{bounded(type)} -> #{bounded(to)}")
+        return
+      end
+      kind     = PeerSessions::KIND[type]
+      trade_id = env[:trade_id] if kind == :trade && env[:trade_id].is_a?(String) && env[:trade_id].bytesize <= 128
+      # a trade frame names its trade as the kit does (a String): none could stand for another
+      return relay_refused(sender, from_account, type, "without a trade id") if kind == :trade && trade_id.nil?
+      return relay_handshake(sender, target, env, from_account, kind, trade_id) if HANDSHAKE.include?(type)
+
+      unless @peers.session?(from_account, to, kind, trade_id: trade_id)
+        return relay_refused(sender, from_account, type, "to #{bounded(to)} without a session of its kind")
+      end
+      if body
+        max = PEER_BODY_MAX[type]
+        body = nil unless max   # only a team and an escrow carry one
+        if body && (body.bytesize > max || !frame_budget_ok?(sender, :peer_body, PEER_BODY_BUDGET))
+          return relay_refused(sender, from_account, type, "a body past the kit's (#{body.bytesize}B, at most #{max}B, 4 then 1 per 10 s)")
+        end
+      end
+      return unless peer_body_ok?(type, body, from_account)
+
+      hold_escrow(env, body, from_account) if type == :trade_lock
+      @peers.close(from_account, to, :battle) if type == :battle_end
+      @reactor.send_frame(target, Wire.encode_split(relayed_envelope(env, from_account), body))
+    end
+
+    def relay_handshake(sender, target, env, from_account, kind, trade_id)
+      type  = env[:type]
+      to    = env[:to]
+      frame = Wire.encode_split(relayed_envelope(env, from_account))   # a body, if any, stays here
+      return relay_refused(sender, from_account, type, "of #{frame.bytesize}B - an invite is small") if frame.bytesize > HANDSHAKE_FRAME_MAX
+
+      case type
+      when :challenge, :trade_invite
+        # (an answer or a cancel is one per invite: always passed on)
+        if target.outbuf.bytesize > HANDSHAKE_OUTBUF_MAX
+          return relay_refused(sender, from_account, type, "to #{to}, whose output is #{target.outbuf.bytesize >> 10} KiB behind")
+        end
+        return relay_refused(sender, from_account, type, "past its invites (5, then 1 per 5 s)") unless @invite_limiter.allow?(from_account)
+
+        @peers.invite(from_account, to, kind, trade_id: trade_id)
+      when :challenge_accept, :trade_accept, :challenge_decline, :trade_decline
+        unless @peers.answer(from_account, to, kind, accept: type.to_s.end_with?("_accept"), trade_id: trade_id)
+          return relay_refused(sender, from_account, type, "with no invite of #{to} to answer")
+        end
+      when :trade_cancel
+        unless @peers.session?(from_account, to, :trade, trade_id: trade_id) ||
+               @peers.invited?(from_account, to, :trade, trade_id: trade_id) || @peers.invited?(to, from_account, :trade, trade_id: trade_id)
+          return relay_refused(sender, from_account, type, "with no trade with #{to} to end")
+        end
+        # a trade this side committed is the server's to finish: its partner, committing
+        # too, would drop the trade and miss its result
+        return relay_refused(sender, from_account, type, "after its own commit") if @pending_trades[trade_id]&.dig(:account) == from_account
+
+        @peers.close(from_account, to, :trade, trade_id: trade_id)
+      end
+      @reactor.send_frame(target, frame)
+    end
+
+    # A relay refused: said once per 10 s per connection and type (the frames are the
+    # sender's).
+    def relay_refused(sender, from_account, type, why)
+      now  = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      said = (sender.data[:relay_said] ||= {})
+      key  = KNOWN_TYPES.include?(type) ? type : :other
+      return if said[key] && now - said[key] < OVER_SAID
+
+      said[key] = now
+      @log.call("server: account #{from_account} #{bounded(type)} #{why} -> drop")
+    end
+
+    # An account's sessions end - its last connection closed, or a new one replaced it
+    # (the client drops its trade and its battle at a relogin): its partners are told - a
+    # battle's ends (decision 5, the draw an abandoned battle takes), a trade's is
+    # cancelled. Its invites stay to their TTL (a client keeps a challenge across a
+    # relogin). Told once: the sessions go with the first call.
+    def peers_gone(account_id)
+      waited = @pending_trades.select { |_, p| p[:partner] == account_id }.keys   # told "partner_left" instead
+      @peers.drop_account(account_id).each do |partner, kind, trade_id|
+        conn = @online[partner]
+        next unless conn
+
+        if kind == :battle
+          reply(conn, type: :battle_end, from: account_id, to: partner, decision: 5)
+        elsif !waited.include?(trade_id)
+          reply(conn, type: :trade_cancel, from: account_id, to: partner, trade_id: trade_id)
+        end
+      end
     end
 
     # The receiver Marshal-loads a relayed body, so one naming a class outside the
@@ -4234,6 +4492,9 @@ module PEMK
         # leave would hide the new session from its peers
         (pzone = previous.data[:zone]) && zone_leave(previous, pzone, account_id)
         @reactor.finish(previous)
+        # its battles and trades end now too (the relogin dropped them): an old socket that
+        # never drains would close after this bind, and its partners would never hear
+        peers_gone(account_id) if @config.relay_guard
       end
       conn.data[:account_id] = account_id
       conn.data[:presence_v2] = @config.presence_dedup && Array(conn.data[:caps]).include?("presence_v2")
@@ -4275,8 +4536,12 @@ module PEMK
       aid = conn.data[:account_id]
       @online.delete(aid) if aid && @online[aid].equal?(conn)
       if aid
+        if !@config.relay_guard
+          clear_peer_session(aid)   # a dropped account's peer session dies with it
+        elsif !@online.key?(aid)
+          peers_gone(aid)   # the account is gone (a replaced socket: told at the bind)
+        end
         cancel_pending_trades(aid, conn)
-        clear_peer_session(aid)   # a dropped account's peer session dies with it
         @flag_state&.forget(aid) unless @online.key?(aid)   # step 5 mirrors of a gone account
         # a forgotten account's own rows go again after its last queued work (a save
         # pushed just before it quit) - whether the ban sweep let it go or it left first
