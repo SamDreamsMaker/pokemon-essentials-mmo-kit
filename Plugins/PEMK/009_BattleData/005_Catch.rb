@@ -74,6 +74,7 @@ module PEMK
       {
         :species      => pkmn.species.to_s,
         :level        => pkmn.level,
+        :pid          => pkmn.personalID,   # the mint it was built from (a stash may hold two alike)
         :ball         => ball.to_s,
         :hp_current   => battler.hp,
         :status       => battler.status.to_s,

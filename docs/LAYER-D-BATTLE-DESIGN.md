@@ -53,7 +53,14 @@
 > .table_roll` lets a plugin mark its own). Catches are asked for minted foes only. What
 > stays the game's - events, roamers, radar chains - opens no D4 window and no Pay Day
 > proof, as event battles always did. Proven on the engine's own code (the old plugin turns
-> the roamer into the minted Pokémon there); autotest 096.
+> the roamer into the minted Pokémon there); autotest 096. Then: the client names the game's
+> encounter version (`$PokemonGlobal.encounter_version`, moved on by story events) and the
+> server rolls that version's tables, version 0's where the map has none for it (the
+> engine's own fallback; none at all on a map with no version 0) - it always rolled version
+> 0. Like the encounter type, the version is the client's word: only the map's exported
+> tables are read, and the MINT and report lines say which (`v1`). A catch names its foe's
+> personal id (the shadow report too), so a stash holding two alike (a fled Pidgey, then
+> another) judges and stamps the right roll.
 >
 > **Progress (2026-07-22): D3 part 2 shipped (persisted rolls + mint provenance).**
 > Every D2 `on` mint is persisted (`encounter_rolls`, migration 009 — additive), the
