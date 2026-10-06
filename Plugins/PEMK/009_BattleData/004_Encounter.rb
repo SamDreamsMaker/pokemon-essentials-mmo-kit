@@ -10,6 +10,10 @@
 # the game, neither minted nor reported. A plugin that starts a battle from a table roll
 # of its own says so with PEMK::Encounter.table_roll(roll, encounter_type).
 #
+# With a mode other than off, :on_wild_species_chosen handlers get a copy of the roll (a
+# PEMK::Encounter::Probe, an Array) whose values are copied back after them: a handler
+# that keeps the array to write it later, or tests its class or identity, sees the copy.
+#
 # Modes (adopted from the login snapshot):
 #   off    — local roll, no traffic (nothing changes).
 #   shadow — local roll UNCHANGED, but the client fire-and-forget REPORTS the table's
@@ -35,6 +39,7 @@ module PEMK
     @granted = []    # personal ids of wild Pokémon built from a grant (newest last)
     @seams  = {}     # name => [reader, the method PEMK installed]
     @seams_said = false
+    @stray_said = false
 
     # A copy of a roll that notes a write: the handlers of :on_wild_species_chosen get it.
     class Probe < Array
@@ -152,6 +157,17 @@ module PEMK
     def take_entry(species, level)
       i = @frame&.index { |s, l, _| s == species && l == level }
       i && @frame.delete_at(i)
+    end
+
+    # A wild Pokémon generated outside a wild battle's start while an encounter type is set
+    # (an overworld spawn plugin's own, say): the game's - said once.
+    def note_stray
+      return if @stray_said || @mode == :off || !@frame.nil?
+      return unless ($game_temp && $game_temp.encounter_type rescue nil)
+
+      @stray_said = true
+      PEMK.log("encounter: a wild Pokemon was generated outside a wild battle's start (a plugin's own " \
+               "encounter?) - the game's, neither minted nor reported; PEMK::Encounter.table_roll marks a table roll")
     end
 
     # --- the seams ---------------------------------------------------------------
@@ -351,6 +367,7 @@ if defined?(pbGenerateWildPokemon) && !defined?(pemk_orig_pbGenerateWildPokemon)
   alias pemk_orig_pbGenerateWildPokemon pbGenerateWildPokemon
   def pbGenerateWildPokemon(species, level, isRoamer = false)
     entry = isRoamer ? nil : (PEMK::Encounter.take_entry(species, level) rescue nil)
+    (PEMK::Encounter.note_stray rescue nil) unless entry || isRoamer
     # ON: the server owns the table's encounter — build from its mint (client = observer).
     if entry && (PEMK::Encounter.enforcing? rescue false) && !(PEMK::Encounter.scaling_level_map? rescue false)
       mon = (PEMK::Encounter.request_and_build(entry[2]) rescue nil)

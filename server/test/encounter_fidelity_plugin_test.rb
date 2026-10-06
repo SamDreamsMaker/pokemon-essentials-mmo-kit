@@ -159,6 +159,7 @@ class EncounterFidelityPluginTest < Minitest::Test
       pbBattleOnStepTaken(false)
       out[:type] = $game_temp.encounter_type
       WildBattle.start(:KECLEON, 30)
+      out[:stray] = $log.grep(/outside a wild battle's start/).size
     when "bounded"
       $allow = false
       20.times { pbBattleOnStepTaken(false) }
@@ -176,6 +177,28 @@ class EncounterFidelityPluginTest < Minitest::Test
     when "off"
       PEMK::Encounter.adopt_mode("off")
       pbBattleOnStepTaken(false)
+    when "sweet_scent"                              # pbEncounter, two rolls of the table
+      $double = true
+      pbEncounter(:Land, false)
+    when "radar_break"                              # a chain broken by a roll that already differs: no write
+      table([50, :PIDGEY, 3, 3], [50, :RATTATA, 3, 3])
+      $game_temp.encounter_type = :Land
+      $game_temp.poke_radar_data = [:PIDGEY, 3, 5, [[5, 5, 0, 0]]]
+      pbBattleOnStepTaken(false)
+    when "stray"                                    # a plugin's own encounter, outside a battle's start
+      stray = -> { $log.grep(/outside a wild battle's start/).size }
+      PEMK::Encounter.adopt_mode("off")
+      $game_temp.encounter_type = :Land
+      pbGenerateWildPokemon(:PIDGEY, 3)
+      out[:off] = stray.call
+      PEMK::Encounter.adopt_mode("on")
+      $game_temp.encounter_type = nil
+      pbGenerateWildPokemon(:PIDGEY, 3)             # no encounter under way
+      out[:untyped] = stray.call
+      $game_temp.encounter_type = :Land
+      pbGenerateWildPokemon(:PIDGEY, 3)
+      pbGenerateWildPokemon(:PIDGEY, 3)
+      out[:stray] = stray.call
     when "direct_write"                             # changed outside any handler, before the battle
       roll = $PokemonEncounters.choose_wild_pokemon(:Land)
       roll[0] = :MEW
@@ -250,6 +273,7 @@ class EncounterFidelityPluginTest < Minitest::Test
     assert_equal :Land, r[:type], "the repelled roll left its type"
     assert_empty r[:mints]
     assert_equal [[[:KECLEON, 30, false]]], r[:battles]
+    assert_equal 0, r[:stray], "an event's battle is a battle's start"
   end
 
   def test_the_rolls_kept_are_bounded_and_none_when_off
@@ -269,6 +293,18 @@ class EncounterFidelityPluginTest < Minitest::Test
     assert_empty r[:mints]
     assert_empty r[:reports]
     assert_equal [[[:PIDGEY, 3, false]]], r[:battles]
+  end
+
+  def test_sweet_scent_and_a_broken_chain_are_the_tables
+    assert_equal [[31, "Land"], [31, "Land"]], run_case("sweet_scent")[:mints]
+    r = run_case("radar_break")
+    assert_equal [[31, "Land"]], r[:mints], "the roll the chain broke on was left as rolled"
+  end
+
+  def test_a_generation_outside_a_battle_is_said_once
+    r = run_case("stray")
+    assert_empty r[:mints]
+    assert_equal [0, 0, 1], r.values_at(:off, :untyped, :stray), "said once, with a mode and an encounter under way"
   end
 
   def test_a_roll_changed_outside_a_handler_or_used_twice

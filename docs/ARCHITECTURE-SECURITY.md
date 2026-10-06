@@ -755,8 +755,10 @@ be the server's own mints for the account (D2 on), fresh, and never claimed for 
 before; a trainer battle's names its prize claim, which must have been judged payable. The
 bound is 5 x the level of the strongest party Pokemon that could use it (Pay Day,
 Metronome, or a copying move when a foe knows Pay Day) x the uses its PP and the foes allow,
-doubled per multiplier fact. Without mints a wild battle's Pay Day is only bounded, and the
-log says `unminted`. Autotest 078 lets a Meowth scatter coins on Route 1.
+doubled per multiplier fact. With D2 off a wild battle's Pay Day is only bounded, and the
+log says `unminted`; with D2 on, a battle the game keeps for itself - an event's, a roaming
+Pokémon's, a Poké Radar chain's - has no mint, and its Pay Day is `unproven` (refused under
+`PEMK_MONEY_AUTHORITY=on`). Autotest 078 lets a Meowth scatter coins on Route 1.
 
 A mint is handed out on request, so it does not prove a fought battle: a wild claim pays at
 most one use per second since its mint, and Pay Day is capped per account and day
