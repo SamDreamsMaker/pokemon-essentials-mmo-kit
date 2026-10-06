@@ -59,6 +59,10 @@ module PEMK
       @partners        = nil   # frozen Array of [type, name, version] the game registers as partners
       @badge_sources   = nil   # badge => frozen Array of sources (badge authority B0); nil: not exported
       @badge_unknown   = []    # the badge sets the export could not read
+      @obstacles    = {}    # [map,x,y] => { event:, move: } a Cut tree, a Rock Smash rock, a Strength boulder
+      @walls        = {}    # [map,x,y] => event id: a headbutt tree (never falls)
+      @falls        = {}    # map_id => frozen rows, 'f' on a waterfall a player climbs
+      @field_gates  = nil   # what Cut, Rock Smash, Strength, Waterfall need; nil: not exported
       @gifts        = {}    # [map,event_id] => frozen gift/prize object (step 6 payout gate)
       @shops        = {}    # [map,event_id] => frozen mart / bp_shop object (item authority)
       @loaded       = false
@@ -111,6 +115,25 @@ module PEMK
 
       c = water_char(map_id, x, y)
       c && (c == "w" || c == "d")
+    end
+
+    # --- field gates (what a field move opens) -----------------------------------
+    # The badges and moves Cut, Rock Smash, Strength and Waterfall need, as the export read
+    # them; nil: an export from before them (nothing is judged).
+    attr_reader :field_gates
+
+    # The obstacle standing on (map, x, y) at the map's start: { event:, move: } | nil.
+    def obstacle_at(map_id, x, y) = @obstacles[[map_id, x, y]]
+
+    # A headbutt tree on (map, x, y): a wall the passability grid does not hold.
+    def wall_at?(map_id, x, y) = @walls.key?([map_id, x, y])
+
+    # A waterfall a player climbs only with Waterfall (not its crest).
+    def fall?(map_id, x, y)
+      grid = @falls[map_id]
+      return false unless grid && y >= 0 && y < grid.length
+
+      grid[y][x] == "f"
     end
 
     # Where Dive goes down, and where a diver comes up on the map above ('x': deep water
@@ -524,6 +547,7 @@ module PEMK
       @partners = load_partners(doc["partners"])
       @badge_sources, @badge_unknown = load_badge_sources(doc["badge_sources"])
       @field_keys = load_field_keys(doc["field_keys"])
+      @field_gates = load_field_gates(doc["field_gates"])
       @connections = freeze_connections(doc["connections"])
       @home  = coord_array(doc["home"], 4) || coord_array(doc["home"], 3)
       @start = coord_array(doc["start"], 3)
@@ -551,6 +575,7 @@ module PEMK
       @heal[map_id] = h if h
       @encounters[map_id] = m["encounters"] if m["encounters"].is_a?(Hash)
       load_trainers(map_id, m["trainers"])
+      load_gates(map_id, m["obstacles"], m["walls"], m["falls"], width, height)
 
       @maps[map_id] = { name: m["name"], width: width, height: height,
                         count: (m["objects"].is_a?(Array) ? m["objects"].size : 0) }.freeze
@@ -607,6 +632,34 @@ module PEMK
       end
 
       @water[map_id] = grid.map(&:freeze).freeze
+    end
+
+    GATE_MOVES = %w[CUT ROCKSMASH STRENGTH].freeze
+
+    # Field gates feed detection only: a malformed entry is left out, never a boot error.
+    def load_gates(map_id, obstacles, walls, falls, width, height)
+      Array(obstacles).each do |o|
+        next unless o.is_a?(Hash) && o["x"].is_a?(Integer) && o["y"].is_a?(Integer) && GATE_MOVES.include?(o["move"])
+
+        @obstacles[[map_id, o["x"], o["y"]]] = { event: o["event"], move: o["move"] }.freeze
+      end
+      Array(walls).each do |w|
+        @walls[[map_id, w["x"], w["y"]]] = w["event"] if w.is_a?(Hash) && w["x"].is_a?(Integer) && w["y"].is_a?(Integer)
+      end
+      return unless falls.is_a?(Array) && falls.length == height &&
+                    falls.all? { |r| r.is_a?(String) && r.length == width && r.match?(/\A[.f]*\z/) }
+
+      @falls[map_id] = falls.map(&:freeze).freeze
+    end
+
+    def load_field_gates(doc)
+      return nil unless doc.is_a?(Hash) && doc["badges"].is_a?(Hash)
+
+      badges = %w[cut rocksmash strength waterfall].to_h { |k| [k.to_sym, doc["badges"][k]] }
+      return nil unless badges.values.all? { |b| b.is_a?(Integer) }
+
+      moves = %w[cut rocksmash strength waterfall].to_h { |k| [k.to_sym, tristate(doc.dig("moves", k))] }
+      { badges: badges.freeze, moves: moves.freeze }.freeze
     end
 
     def water_char(map_id, x, y)
@@ -762,6 +815,9 @@ module PEMK
       @trainer_places.freeze
       @gifts.freeze
       @shops.freeze
+      @obstacles.freeze
+      @walls.freeze
+      @falls.freeze
     end
   end
 end

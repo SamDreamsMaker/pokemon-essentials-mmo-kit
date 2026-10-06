@@ -67,6 +67,8 @@ module PEMK
         passability = map_passability(map)
         ledges      = map_ledges(map)
         water       = map_water(map)
+        obstacles, walls = (map_gates(map) rescue [[], []])
+        falls       = map_falls(map)
         dive        = dive_map_of(map_id)
         surface     = surface_map_of(map_id)
         heal        = map_heal(map_id)
@@ -74,7 +76,7 @@ module PEMK
 
         # Emit a map only if it carries at least one useful fact.
         next if objects.empty? && warps.empty? && passability.nil? && heal.nil? && enc.nil? && ledges.empty? &&
-                trainers.empty? && water.nil? && dive.nil? && surface.nil?
+                trainers.empty? && water.nil? && dive.nil? && surface.nil? && obstacles.empty? && walls.empty? && falls.nil?
 
         entry = { :name => map_name(mapinfos, map_id), :width => map.width, :height => map.height,
                   :objects => objects }
@@ -87,6 +89,9 @@ module PEMK
         entry[:heal]        = heal        if heal
         entry[:encounters]  = enc         if enc
         entry[:trainers]    = trainers    unless trainers.empty?
+        entry[:obstacles]   = obstacles   unless obstacles.empty?
+        entry[:walls]       = walls       unless walls.empty?
+        entry[:falls]       = falls       if falls
         maps[map_id.to_s] = entry
 
         counts[:objects]    += objects.size
@@ -123,6 +128,8 @@ module PEMK
       doc[:badge_sources] = badges if badges
       keys = (field_keys(all_events) rescue nil)        # mode keys: what Surf and Dive need
       doc[:field_keys] = keys if keys
+      gates = (field_gates rescue nil)                  # what Cut, Rock Smash, Strength, Waterfall need
+      doc[:field_gates] = gates if gates
 
       File.open(File.expand_path(OUT_PATH), "w") { |f| f.write(pretty(doc, 0) + "\n") }
       counts.merge(:maps => maps.size, :connections => conns.size)
@@ -1473,6 +1480,129 @@ module PEMK
       false
     rescue
       false
+    end
+
+    # === field gates - what Cut, Rock Smash, Strength and Waterfall open ==================
+
+    # The obstacles the engine knows by their event's name (FieldMoves.rb's handlers).
+    GATE_NAMES   = [[/cuttree/i, "CUT"], [/smashrock/i, "ROCKSMASH"], [/strengthboulder/i, "STRENGTH"]].freeze
+    GATE_SCRIPT  = /\A\s*(pbSmashThisEvent|pbSmashEvent\(\s*get_self\s*\)|pbRockSmashRandomEncounter|pbPushThisBoulder|pbHeadbutt)\s*\z/.freeze
+    GATE_BRANCH  = /\A\s*(pbCut|pbRockSmash|pbStrength)\s*\z/.freeze
+    GATE_CODES   = [0, 101, 401, 108, 408, 111, 411, 412, 115, 209, 509, 355, 655].freeze
+
+    # -> [obstacles, walls] of a map. An obstacle - a Cut tree, a Rock Smash rock, a
+    # Strength boulder - is listed only when it is nothing but its gate: every page shows
+    # it, blocks and stands still, and runs only the gate (the shake, the branch on the
+    # move, the smash or the push); and nothing else on the map moves or places it. A game
+    # that removes one for good (a page for a switch: the boulder fallen down a hole) is
+    # not listed. Walls: headbutt trees, which never fall.
+    def map_gates(map)
+      moved = moved_event_ids(map)
+      obstacles = []
+      walls = []
+      map.events.each_value do |ev|
+        name = ev.name.to_s
+        move = GATE_NAMES.find { |re, _| name =~ re }&.last
+        next unless move || name =~ /headbutt/i
+        next if moved.include?(ev.id) || !ev.pages.all? { |pg| gate_page?(pg) }
+
+        if move
+          obstacles << { :event => ev.id, :x => ev.x, :y => ev.y, :move => move }
+        else
+          walls << { :event => ev.id, :x => ev.x, :y => ev.y }
+        end
+      end
+      [obstacles, walls]
+    end
+
+    def gate_page?(pg)
+      g = pg.graphic
+      return false unless g && (g.character_name.to_s != "" || g.tile_id.to_i > 0)
+      return false if pg.through || pg.move_type.to_i != 0
+
+      Array(pg.list).all? do |cmd|
+        next false unless GATE_CODES.include?(cmd.code)
+
+        case cmd.code
+        when 111 then cmd.parameters[0] == 12 && cmd.parameters[1].to_s.match?(GATE_BRANCH)
+        when 355, 655 then cmd.parameters[0].to_s.match?(GATE_SCRIPT)
+        when 209 then cmd.parameters[0] == 0   # its own move route (the shake), nobody else's
+        else true
+        end
+      end
+    end
+
+    # The event ids something on the map moves or places: a move route (209) or a location
+    # set (202) naming another event, or a script reaching an event by its id.
+    def moved_event_ids(map)
+      ids = []
+      map.events.each_value do |ev|
+        ev.pages.each do |pg|
+          Array(pg.list).each do |cmd|
+            case cmd.code
+            when 209, 202 then ids << cmd.parameters[0] if cmd.parameters[0].to_i > 0
+            when 355, 655
+              cmd.parameters[0].to_s.scan(/(?:events\[|get_character\(|get_event\()\s*(\d+)/) { |(n)| ids << n.to_i }
+            end
+          end
+        end
+      end
+      ids.uniq
+    end
+
+    # -> rows with 'f' where the tile is a waterfall a player climbs with Waterfall (its
+    # crest, which a surfer enters freely, is not one) | nil when the map has none.
+    def map_falls(map)
+      return nil unless $data_tilesets
+
+      tileset = $data_tilesets[map.tileset_id]
+      return nil unless tileset && tileset.respond_to?(:terrain_tags)
+
+      terrain_tags = tileset.terrain_tags
+      data = map.data
+      any  = false
+      rows = Array.new(map.height) do |y|
+        row = +""
+        map.width.times do |x|
+          c = fall_tile?(data, x, y, terrain_tags) ? "f" : "."
+          any ||= c == "f"
+          row << c
+        end
+        row
+      end
+      any ? rows : nil
+    rescue
+      nil
+    end
+
+    # Game_Map#terrain_tag off a bridge: the top tile with a tag decides.
+    def fall_tile?(data, x, y, terrain_tags)
+      [2, 1, 0].each do |z|
+        tid = data[x, y, z]
+        next if tid.nil? || tid == 0
+
+        tt = terrain_of(terrain_tags, tid)
+        next unless tt
+        next if tt.id_number == 0 || tt.ignore_passability || tt.bridge
+
+        return tt.waterfall ? true : false
+      end
+      false
+    rescue
+      false
+    end
+
+    # The badges Cut, Rock Smash, Strength and Waterfall need (the game's Settings), and per
+    # move whether its function still asks for a Pokemon knowing it (nil: a script redefines
+    # it - its rule is unknown). nil when the Settings say nothing.
+    def field_gates
+      badges = { :cut => (Settings::BADGE_FOR_CUT rescue nil), :rocksmash => (Settings::BADGE_FOR_ROCKSMASH rescue nil),
+                 :strength => (Settings::BADGE_FOR_STRENGTH rescue nil), :waterfall => (Settings::BADGE_FOR_WATERFALL rescue nil) }
+      return nil unless badges.values.all? { |b| b.is_a?(Integer) }
+
+      { :badges => badges,
+        :moves => { :cut => move_required?(%w[pbCut]), :rocksmash => move_required?(%w[pbRockSmash]),
+                    :strength => move_required?(%w[pbStrength]), :waterfall => move_required?(%w[pbWaterfall]) } }
     end
 
     # The map Dive takes a player down to from this one (its metadata's DiveMap) | nil.

@@ -84,3 +84,30 @@ unless defined?(pemk_orig_pbStartSurfing)
     pemk_orig_pbSurfacing
   end
 end
+
+# Field gates (the `field_report` cap): the way a Cut tree, a Rock Smash rock, a Strength
+# boulder or a waterfall opens, from the event or from the party menu alike - the report
+# first, so the server knows the move that opened it before the player steps through.
+unless defined?(pemk_orig_pbSmashEvent)
+  alias pemk_orig_pbSmashEvent pbSmashEvent
+  def pbSmashEvent(event)
+    PEMK::SwimReport.before_swim
+    pemk_orig_pbSmashEvent(event)
+  end
+
+  alias pemk_orig_pbAscendWaterfall pbAscendWaterfall
+  def pbAscendWaterfall
+    PEMK::SwimReport.before_swim
+    pemk_orig_pbAscendWaterfall
+  end
+end
+
+class Interpreter
+  unless method_defined?(:pemk_orig_pbPushThisEvent)
+    alias pemk_orig_pbPushThisEvent pbPushThisEvent
+    def pbPushThisEvent(strength = false)
+      PEMK::SwimReport.before_swim
+      pemk_orig_pbPushThisEvent(strength)
+    end
+  end
+end

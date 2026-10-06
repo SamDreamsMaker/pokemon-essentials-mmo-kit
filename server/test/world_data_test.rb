@@ -355,6 +355,34 @@ class WorldDataTest < Minitest::Test
     assert_equal [], load(gym_sample).badge_ignorable, "an export before the badges"
   end
 
+  # Field gates: the obstacles, the headbutt walls, the falls a player climbs, and what
+  # each move needs. They feed detection: a malformed entry is left out, never an error.
+  def test_field_gates
+    doc = sample
+    assert_nil load(doc).field_gates, "an export before the gates"
+    m = doc["maps"]["7"]
+    m["obstacles"] = [{ "event" => 3, "x" => 1, "y" => 0, "move" => "CUT" }, { "x" => "bad" }, { "x" => 2, "y" => 0, "move" => "FLY" }]
+    m["walls"] = [{ "event" => 4, "x" => 2, "y" => 1 }]
+    m["falls"] = Array.new(m["height"]) { |y| y.zero? ? "f" + ("." * (m["width"] - 1)) : "." * m["width"] }
+    doc["field_gates"] = { "badges" => { "cut" => 1, "rocksmash" => 2, "strength" => 3, "waterfall" => 6 },
+                           "moves" => { "cut" => true, "rocksmash" => false, "strength" => nil, "waterfall" => "yes" } }
+    w = load(doc)
+    assert_equal({ event: 3, move: "CUT" }, w.obstacle_at(7, 1, 0))
+    assert_nil w.obstacle_at(7, 2, 0), "a move the gates do not know"
+    assert w.wall_at?(7, 2, 1)
+    refute w.wall_at?(7, 1, 1)
+    assert w.fall?(7, 0, 0)
+    refute w.fall?(7, 1, 0)
+    refute w.fall?(7, 0, 99), "outside the grid"
+    assert_equal({ badges: { cut: 1, rocksmash: 2, strength: 3, waterfall: 6 },
+                   moves: { cut: true, rocksmash: false, strength: nil, waterfall: nil } }, w.field_gates)
+    m["falls"] = ["ff"]   # not the map's size
+    doc["field_gates"]["badges"]["cut"] = "1"
+    w = load(doc)
+    refute w.fall?(7, 0, 0), "malformed falls: none"
+    assert_nil w.field_gates, "malformed badges: as if absent"
+  end
+
   # Mode keys: what Surf and Dive need, and what starts a swim by itself.
   def test_field_keys
     doc = sample

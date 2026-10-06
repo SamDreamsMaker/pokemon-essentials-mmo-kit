@@ -315,6 +315,22 @@ teleport), and a hop, a warp pad, a map change or a violation leaves it as it is
 client's own `:speed` is never used. Nothing is corrected or flagged yet: the lines come
 first.
 
+**Field gates** (2026-10-06, detection only): a Cut tree, a Rock Smash rock and a Strength
+boulder are events standing on walkable tiles, a headbutt tree too, and a waterfall is a
+surfable tile - the passability grid sees none of them. The export lists the obstacles
+the engine knows by name when they are nothing but their gate (every page shows the
+obstacle, blocks and runs only the gate, and nothing else on the map moves it: a game
+that removes one for good is left out), the headbutt trees as walls, and the waterfalls
+a player climbs (not their crests). The server judges the straight line each frame covers
+- a forced climb or a hop is one frame - and logs `fieldaudit:` once a tile: a headbutt
+tree crossed; an obstacle crossed with no key (its badge, and for a client that reports
+its party before a gate opens - `field_report` - a Pokemon knowing the move while the
+player's loaded maps stood: the engine keeps an obstacle down until a transfer to another
+map, through connection walks, a save and a load); a waterfall climbed with no key (its
+badge and, in the party reported, Waterfall). The first maps an account is seen on after
+a server start are not judged (what stands there is unknown). Nothing is refused or
+flagged: the lines come first.
+
 **Water.** The passability grid counts every water tile as a wall. The world export
 also marks, per map, where a surfer may be (`water` rows: `w`, the engine's rule for
 a surfer, waterfalls included), where Dive also goes down or comes up (`d`), and deep

@@ -29,6 +29,11 @@ class SwimReportPluginTest < Minitest::Test
     def pbStartSurfing; $log << :surfing; end
     def pbDive; $log << :diving; :dived; end
     def pbSurfacing; $log << :surfacing; end
+    def pbSmashEvent(event); $log << [:smash, event]; end
+    def pbAscendWaterfall; $log << :climbing; end
+    class Interpreter
+      def pbPushThisEvent(strength = false); $log << [:push, strength]; end
+    end
     load ARGV[0]
 
     mine  = Pokemon.new
@@ -43,13 +48,17 @@ class SwimReportPluginTest < Minitest::Test
     raise "pbDive's result lost" unless pbDive == :dived
     pbStartSurfing
     pbSurfacing
+    pbSmashEvent(:tree)                          # a field gate opens: the report first
+    pbAscendWaterfall
+    Interpreter.new.pbPushThisEvent(true)
     print $log.inspect
   RUBY
 
   def test_moves_mark_and_a_swim_flushes_first
     out = IO.popen([RbConfig.ruby, "-W0", "-e", RUNNER, PLUGIN], err: %i[child out], &:read)
     assert $?.success?, "runner crashed:\n#{out}"
-    assert_equal [:mark, :mark, :mark, :mark, :flush_party, :diving, :flush_party, :surfing, :flush_party, :surfacing],
+    assert_equal [:mark, :mark, :mark, :mark, :flush_party, :diving, :flush_party, :surfing, :flush_party, :surfacing,
+                  :flush_party, [:smash, :tree], :flush_party, :climbing, :flush_party, [:push, true]],
                  eval(out) # rubocop:disable Security/Eval
   end
 

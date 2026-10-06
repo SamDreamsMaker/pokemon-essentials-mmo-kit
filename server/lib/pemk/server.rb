@@ -168,6 +168,7 @@ module PEMK
       @peer_sessions  = {}                              # account_id => partner id (mutual); reactor-thread only
       @peers          = PeerSessions.new                # the relay guard's invites and sessions; reactor-thread only
       @invite_limiter = RateLimiter.new(max: 5, per: 25) # invites per ACCOUNT (a reconnect refills nothing)
+      @field_epochs   = {}                              # account_id => what its loaded maps have seen (field gates); reactor-thread only
       @trade_bodies   = {}                              # sender => its last locked escrow; reactor-thread only
       @conn_buckets   = {}                              # conn => [tokens, last_refill]; reactor-thread only
       @reactor  = Reactor.new(
@@ -1375,6 +1376,8 @@ module PEMK
       awake = team.select { |m| m.is_a?(Hash) }.first(@config.monster_caps[:party_max] || 6)
                   .reject { |m| (m["egg"] || m[:egg]) == true }
       conn.data[:swim_moves] = awake.flat_map { |m| (mv = m["moves"] || m[:moves]).is_a?(Array) ? mv.map(&:to_s) : [] }.uniq.first(64)
+      # field gates: what the party has known while the loaded maps stood
+      (epoch = @field_epochs[conn.data[:account_id]]) && epoch[:moves].merge(conn.data[:swim_moves])
     end
 
     # Audit item 5: lock each owned mon's identity traits on first sight and flag a
@@ -3453,6 +3456,7 @@ module PEMK
       @limiter.prune(now: now)
       @invite_limiter.prune(now: now)
       @peers.prune
+      @field_epochs.delete_if { |_, e| now - e[:at] > FIELD_EPOCH_TTL }
     end
 
     PROOF_SWEEP_SEC = 5
@@ -3889,12 +3893,14 @@ module PEMK
       # frame: no zone change and no fan-out of the rejected position, so peers keep
       # seeing the offender at its last accepted tile and it never joins the illegal
       # map's zone. In :off/:shadow correct_to is never set, so the frame flows on.
+      prev = conn.data[:last_pos]
       @pos_audit.check(account_id, env, conn.data)
       if (tgt = conn.data.delete(:correct_to))
         conn.data.delete(:sync_at) if tgt[0] != map   # a snap-back to another map clears the client's remotes: its next ask is honoured
         reply(conn, type: :pos_correct, map: tgt[0], x: tgt[1], y: tgt[2])
         return
       end
+      field_audit(conn, account_id, prev, env)
 
       # :map_id is the last map this connection reported (money claims, gifts and the
       # reconnect fallback read it); :zone the map whose presence zone it is in - none
@@ -4187,6 +4193,101 @@ module PEMK
         end
       end
       "#{what.join(', ')} (the party a client reports before a swim; older clients: the badge)"
+    end
+
+    # Field gates (detection only): a Cut tree, a Rock Smash rock or a Strength boulder
+    # standing in the way, a headbutt tree, a waterfall climbed - judged on the straight
+    # line a frame covers (a forced climb, a hop, is one frame). Logged once a tile per
+    # epoch; nothing refused, nothing flagged.
+    #
+    # An epoch is what the player's loaded maps have seen: the engine keeps an obstacle
+    # removed while its map stays loaded - through connection walks, same-map transfers, a
+    # save and a load - and stands it again after a transfer to another map. So per
+    # account, across reconnects: a transfer starts one (the party's moves then, and every
+    # report after), a connection walk keeps it. One the server never saw start (its own
+    # restart, an account's first frames) is not judged.
+    FIELD_MOVE = { "CUT" => :cut, "ROCKSMASH" => :rocksmash, "STRENGTH" => :strength }.freeze
+    FIELD_EPOCH_TTL = 3600.0
+
+    def field_audit(conn, account_id, prev, env)
+      gates = @world.field_gates
+      map = env[:map]; x = env[:x]; y = env[:y]
+      return unless gates && prev && @config.client_debug != :allow && x.is_a?(Integer) && y.is_a?(Integer)
+
+      epoch = field_epoch(conn, account_id, prev[0], map)
+      return unless prev[0] == map && epoch[:seen]
+
+      px, py = prev[1], prev[2]
+      return if (x == px && y == py) || (x != px && y != py)   # a turn, a repeat; a diagonal: frames lost
+      return if field_exempt?(map, px, py, x, y)
+
+      line = straight_line(px, py, x, y)
+      line.each do |tx, ty|
+        if @world.wall_at?(map, tx, ty)
+          field_said(epoch, account_id, map, tx, ty, "crossed a headbutt tree")
+        elsif (o = @world.obstacle_at(map, tx, ty)) && (why = gate_missing(conn, epoch, FIELD_MOVE[o[:move]], o[:move], epoch[:moves]))
+          field_said(epoch, account_id, map, tx, ty, "crossed a #{o[:move].downcase} gate (event #{o[:event]}) with no key (#{why})")
+        end
+      end
+      return unless y < py && line.any? { |tx, ty| @world.fall?(map, tx, ty) }
+
+      why = gate_missing(conn, epoch, :waterfall, "WATERFALL", Array(conn.data[:swim_moves]))
+      field_said(epoch, account_id, map, x, y, "climbed a waterfall with no key (#{why})") if why
+    end
+
+    # The account's epoch, moved on by this frame's map.
+    def field_epoch(conn, account_id, from_map, map)
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      e = @field_epochs[account_id]
+      if from_map != map && !@world.connected?(from_map, map)   # a transfer: the maps stand anew
+        e = @field_epochs[account_id] = { maps: Set[map], moves: Set.new(Array(conn.data[:swim_moves])), seen: true, said: Set.new }
+      elsif e.nil?   # the first map this server sees the account on: what stands there is unknown
+        e = @field_epochs[account_id] = { maps: Set[map], moves: Set.new, seen: false, said: Set.new }
+      elsif from_map != map
+        e[:maps] << map
+      end
+      e[:at] = now
+      e
+    end
+
+    # A ledge hop, or the arrival of a same-map warp or a respawn: the engine's own move.
+    def field_exempt?(map, px, py, x, y)
+      return true if @world.warp_dest?(map, map, x, y, reach: PositionAudit::ARRIVAL_REACH) ||
+                     @world.spawn_tile?(map, x, y, reach: PositionAudit::ARRIVAL_REACH)
+
+      (x - px).abs + (y - py).abs == 2 && @world.ledge?(map, (px + x) / 2, (py + y) / 2)
+    end
+
+    # The tiles from (px, py) to (x, y), the start left out.
+    def straight_line(px, py, x, y)
+      sx = x <=> px
+      sy = y <=> py
+      n = [(x - px).abs, (y - py).abs].max
+      (1..n).map { |i| [px + (sx * i), py + (sy * i)] }
+    end
+
+    # What a gate's key lacks: its badge (the mode keys' badge read, when there is one)
+    # and, for a client that reports its party (field_report) where the game still asks
+    # for a Pokemon, the move in +moves+. -> the text, or nil when nothing lacks.
+    def gate_missing(conn, _epoch, sym, move, moves)
+      gates = @world.field_gates
+      out = []
+      need = gates[:badges][sym]
+      held = conn.data.dig(:mode_keys, :surf, :held)
+      if @mode_keys && held && need >= 0
+        ok = @mode_keys[:count_badges] ? badge_count(held) >= need : held[need] == 1
+        out << "#{@mode_keys[:count_badges] ? "#{need} badges" : "badge #{need}"} needed" unless ok
+      end
+      if gates[:moves][sym] == true && conn.data[:field_report] && !moves.include?(move)
+        out << "no Pokemon knowing #{move}"
+      end
+      out.empty? ? nil : out.join("; ")
+    end
+
+    def field_said(epoch, account_id, map, x, y, what)
+      return unless epoch[:said].add?([map, x, y])
+
+      @log.call("fieldaudit: account #{account_id} #{what} at #{map}(#{x},#{y})")
     end
 
     # Presence zones (reactor thread). A client without presence_v2 is also in its
@@ -4499,6 +4600,7 @@ module PEMK
       conn.data[:account_id] = account_id
       conn.data[:presence_v2] = @config.presence_dedup && Array(conn.data[:caps]).include?("presence_v2")
       conn.data[:swim_report] = Array(conn.data[:caps]).include?("swim_report")   # mode keys: it reports its party before a swim
+      conn.data[:field_report] = Array(conn.data[:caps]).include?("field_report") # ... and before a field gate opens
       @online[account_id] = conn
       @log.call("server: authed #{conn.addr} as account #{account_id}")
       return if @config.client_debug == :allow || Array(conn.data[:caps]).include?("debug_lock")
