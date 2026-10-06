@@ -34,10 +34,7 @@ Autotest.scenario "an event's battle stays the game's after a repelled encounter
   s.check("an encounter the Repel turned away left its type set") { type == "Land" }
 
   # The Kecleon has no graphic: it is met where it stands, with USE.
-  a.walk_to!(45, 45, timeout: 60)
-  a.face!("up")
-  a.press!("UP")
-  a.wait_until!("idle within 5", timeout: 15)
+  a.walk_to!(45, 44, timeout: 60)
   s.check("the player stands on the Kecleon's tile") { a.state.dig("player", "x") == 45 && a.state.dig("player", "y") == 44 }
   a.interact!
   a.converse

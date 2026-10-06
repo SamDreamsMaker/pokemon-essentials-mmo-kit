@@ -191,8 +191,11 @@ module PEMK
         return Autopilot.respond(id, "ok" => false, "error" => "walk_to X Y") unless tx && ty
         return Autopilot.respond(id, "ok" => false, "error" => "not on a map") unless on_map?
 
-        # A door or an NPC stands on its tile: nobody walks onto it, you bump into it.
-        blocker = $game_map.events.values.find { |e| e.x == tx && e.y == ty && !e.through }
+        # A door or an NPC stands on its tile: nobody walks onto it, you bump into it. One
+        # with no graphic (an invisible trigger) is walked onto, as the engine lets a player.
+        blocker = $game_map.events.values.find do |e|
+          e.x == tx && e.y == ty && !e.through && !(e.character_name.to_s.empty? && e.tile_id.to_i <= 0)
+        end
         if blocker && at != [tx, ty]
           return Autopilot.respond(id, "ok" => false, "status" => "no_path",
                                        "detail" => "event #{blocker.id} (#{blocker.name}) stands there: " \
