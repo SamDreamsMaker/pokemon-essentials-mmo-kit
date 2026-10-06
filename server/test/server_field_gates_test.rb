@@ -110,7 +110,17 @@ class ServerFieldGatesTest < Minitest::Test
   def connect(email, caps: CAPS)
     s = TCPSocket.new("127.0.0.1", @port)
     send_env(s, { type: :login, email: email, password: "password1", caps: caps })
-    assert_equal :login_ok, recv_env(s)[:type]
+    ok = recv_env(s)
+    assert_equal :login_ok, ok[:type]
+    @token = ok[:token]
+    s
+  end
+
+  # A reconnect that resumes its session: the client kept its maps.
+  def resume(token, caps: CAPS)
+    s = TCPSocket.new("127.0.0.1", @port)
+    send_env(s, { type: :auth, token: token, resume: true, caps: caps })
+    assert_equal :auth_ok, recv_env(s)[:type]
     s
   end
 
@@ -270,29 +280,44 @@ class ServerFieldGatesTest < Minitest::Test
     s.close
   end
 
-  # A reconnect goes on with the epoch where it stood (judged), and starts an unknown one
-  # elsewhere (not judged).
-  def test_a_reconnect_keeps_the_epoch_only_on_its_maps
+  # A resume goes on with the epoch where it stood (judged: the badge at once, the move once
+  # this connection reported its party); a login (a save loaded) or a resume elsewhere
+  # starts an unknown one (not judged).
+  def test_a_resume_keeps_the_epoch_only_on_its_maps
     start_server
     s, id = login("again@t.co")
+    token = @token
     team(s, %w[TACKLE])
     arrive(s)
     settle(s)
     s.close
-    t = connect("again@t.co")
+    t = resume(token)
     pos(t, 31, 4, 2)
     pos(t, 31, 5, 2)
     settle(t)
-    assert_equal 1, said(id, "crossed a cut gate").size, "the same maps: the epoch goes on"
+    assert_equal ["fieldaudit: account #{id} crossed a cut gate (event 1) with no key (badge 1 needed) at 31(5,2)"],
+                 said(id, "crossed"), "the same maps: the epoch goes on; no party reported here yet"
+    team(t, %w[TACKLE])
+    pos(t, 31, 10, 1)
+    pos(t, 31, 10, 2)
+    pos(t, 31, 11, 2)
+    settle(t)
+    assert_equal "fieldaudit: account #{id} crossed a rocksmash gate (event 3) with no key (badge 2 needed; no Pokemon knowing ROCKSMASH) at 31(11,2)",
+                 said(id, "crossed").last
     t.close
-    u = connect("again@t.co")
-    pos(u, 33, 7, 3)      # first seen elsewhere: what stands there is unknown
-    pos(u, 31, 7, 11)     # a connection walk: still unknown
+    u = connect("again@t.co")   # a login: the save it loads may be older than the epoch
     pos(u, 31, 7, 2)
     pos(u, 31, 8, 2)
     settle(u)
-    assert_empty said(id, "crossed a headbutt"), "an epoch this server never saw start"
+    v = resume(@token)
     u.close
+    pos(v, 33, 7, 3)            # a resume first seen elsewhere: unknown too
+    pos(v, 31, 7, 11)           # a connection walk: still unknown
+    pos(v, 31, 7, 2)
+    pos(v, 31, 8, 2)
+    settle(v)
+    assert_empty said(id, "crossed a headbutt"), "epochs this server never saw start"
+    v.close
   end
 
   def test_a_headbutt_tree_is_a_wall
@@ -321,15 +346,15 @@ class ServerFieldGatesTest < Minitest::Test
     assert_equal ["fieldaudit: account #{id} climbed a waterfall with no key (no Pokemon knowing WATERFALL) at 31(3,3)"],
                  said(id, "climbed")
     pos(s, 31, 3, 7, :surf)   # down: free
-    pos(s, 31, 2, 7)
-    pos(s, 31, 2, 8)
-    pos(s, 31, 2, 8)
-    pos(s, 31, 16, 7, :surf)  # (a gap: not judged)
+    pos(s, 31, 3, 9, :surf)   # down from right under it: free too
+    pos(s, 31, 3, 7, :surf)
+    pos(s, 31, 4, 3, :surf)   # askew from under it: frames lost
+    pos(s, 31, 16, 7, :surf)
     pos(s, 31, 16, 3, :surf)  # a same-map warp lands here
-    pos(s, 31, 3, 8)
-    pos(s, 31, 3, 2)          # on foot, over a bridge
-    pos(s, 31, 2, 7, :surf)
-    pos(s, 31, 4, 3, :surf)   # askew: frames lost, no line to walk
+    pos(s, 31, 3, 7)
+    pos(s, 31, 3, 2)          # on foot from right under it: over a bridge
+    pos(s, 31, 3, 9, :surf)
+    pos(s, 31, 3, 1, :surf)   # up from further below: a gap, not where a climb starts
     settle(s)
     assert_equal 1, said(id, "climbed").size
     s.close
@@ -354,6 +379,8 @@ class ServerFieldGatesTest < Minitest::Test
     pos(s, 31, 3, 7, :surf)
     pos(s, 31, -1, 7, :surf)
     pos(s, 31, -1, 3, :surf)
+    pos(s, 31, 3, 99, :surf)    # from off the map up past the fall
+    pos(s, 31, 3, 3, :surf)
     settle(s)
     assert_empty said(id, "climbed")
     s.close
@@ -364,6 +391,7 @@ class ServerFieldGatesTest < Minitest::Test
   def test_what_is_not_judged
     start_server
     s, id = login("old@t.co", badges: 0b10, caps: %w[presence_v2])
+    team(s, %w[TACKLE])   # an older client reports its party too, just not before a gate
     arrive(s)
     pos(s, 31, 4, 2)
     pos(s, 31, 5, 2)
@@ -380,6 +408,7 @@ class ServerFieldGatesTest < Minitest::Test
     [{ "PEMK_WORLD" => NO_GATES.path }, { "PEMK_CLIENT_DEBUG" => "allow" }].each_with_index do |env, i|
       start_server(env)
       t, tid = login("none#{i}@t.co")
+      team(t, %w[TACKLE])
       arrive(t)
       pos(t, 31, 4, 2)
       pos(t, 31, 5, 2)
@@ -411,6 +440,15 @@ class ServerFieldGatesTest < Minitest::Test
     assert_equal ["fieldaudit: account #{id} crossed a strength gate (event 4) with no key (3 badges needed) at 31(14,2)"],
                  said(id, "crossed")
     s.close
+    z, zid = login("nobadge@t.co")
+    team(z, %w[TACKLE])
+    arrive(z)
+    pos(z, 31, 4, 2)
+    pos(z, 31, 5, 2)
+    settle(z)
+    assert_equal ["fieldaudit: account #{zid} crossed a cut gate (event 1) with no key (1 badge needed; no Pokemon knowing CUT) at 31(5,2)"],
+                 said(zid, "crossed")
+    z.close
     @server.stop
     @seen = nil
     @logs.clear
@@ -441,9 +479,8 @@ class ServerFieldGatesTest < Minitest::Test
     settle(s)
     assert_equal 10, said(id, "crossed a headbutt").size
     on_reactor { @server.instance_variable_get(:@field_epochs)[id][:rate][:at] -= 61 }
-    pos(s, 32, 1, 1)
     pos(s, 31, 7, 2)
-    pos(s, 31, 8, 2)
+    pos(s, 31, 8, 2)   # the tile held back, in the same epoch: told now
     settle(s)
     assert_equal "fieldaudit: account #{id} crossed a headbutt tree at 31(8,2) (2 more held back before it)", said(id, "crossed").last
     s.close

@@ -319,21 +319,23 @@ first.
 boulder are events standing on walkable tiles, a headbutt tree too, and a waterfall is a
 surfable tile - the passability grid sees none of them. The export lists the obstacles
 the engine knows by name when they are nothing but their gate (a page that asks for no
-switch, so one always applies; every page shows a character, blocks, stands still and
-runs only the gate; nothing else on the map moves it: a game that removes one for good is
-left out), the headbutt trees as walls, and the waterfalls a player climbs (not their
-crests). The server logs `fieldaudit:`, once a tile per epoch and ten lines a minute an
-account at most: a step onto a headbutt tree; a step onto an obstacle with no key (its
-badge, and for a client that reports its party before a gate opens - `field_report` - a
-Pokemon knowing the move while the player's loaded maps stood: the engine keeps an
-obstacle down until it reloads its map - a transfer to another, or a connection walk far
-enough to drop it - through same-map transfers and a save and a load); a waterfall
-climbed with no key (one frame up over it on the water; its badge and, in the party
-reported, Waterfall). A frame longer than a step is not judged against a gate (a
-cutscene walks the player with no frame), nor a connection's first one (it starts from
-the last tile saved), nor the maps an account is first seen on after a server start
-(what stands there is unknown); a game that redefines a move's function has that gate
-skipped. Nothing is refused or flagged: the lines come first.
+switch, variable or self switch, so one always applies; every page shows a character,
+blocks, stands still and runs only the gate; nothing else on the map moves it: a game
+that removes one for good is left out), the headbutt trees as walls, and the waterfalls a
+player climbs (not their crests). The server logs `fieldaudit:`, once a tile per epoch and
+ten lines a minute an account at most: a step onto a headbutt tree; a step onto an
+obstacle with no key - its badge, and for a client that reports its party before a gate
+opens (`field_report`) and has reported it on this connection, a Pokemon knowing the move
+while the player's maps stood (the engine keeps an obstacle down until it reloads its
+map: a transfer to another, or a connection walk far enough to drop it); a waterfall
+climbed with no key (one frame up on the water from right under the fall; its badge and,
+in the party reported, Waterfall). Not judged: a frame longer than a step against a gate
+(a cutscene sends few frames, a stall drops some), a connection's first frame (it starts
+from the last tile saved), the maps after a login (the save it loads may be older than
+what the server saw) or after a resume elsewhere, the maps an account is first seen on
+after a server start, and a gate whose move function a game redefines. A cutscene that
+walks the player through a standing obstacle may still be told (its heartbeat frames are
+steps). Nothing is refused or flagged: the lines come first.
 
 **Water.** The passability grid counts every water tile as a wall. The world export
 also marks, per map, where a surfer may be (`water` rows: `w`, the engine's rule for

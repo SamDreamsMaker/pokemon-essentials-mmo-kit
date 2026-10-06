@@ -62,6 +62,18 @@ module PEMK
     rescue StandardError => e
       PEMK.log("swim: flush error #{e.class}: #{e.message}")
     end
+
+    # The party menu's use of a field move +sym+: the report first. (The original is held
+    # here, not in a top-level local: every plugin is evaluated in the same binding.)
+    def report_before_use(sym)
+      original = HiddenMoveHandlers::UseMove[sym]
+      return unless original
+
+      HiddenMoveHandlers::UseMove.add(sym, proc { |move, pokemon|
+        before_swim
+        original.call(move, pokemon)
+      })
+    end
   end
 end
 
@@ -121,11 +133,5 @@ unless defined?(pemk_orig_pbStrength)
     pemk_orig_pbStrength
   end
 
-  use_strength = HiddenMoveHandlers::UseMove[:STRENGTH]
-  if use_strength
-    HiddenMoveHandlers::UseMove.add(:STRENGTH, proc { |move, pokemon|
-      PEMK::SwimReport.before_swim
-      use_strength.call(move, pokemon)
-    })
-  end
+  PEMK::SwimReport.report_before_use(:STRENGTH)
 end

@@ -12,6 +12,8 @@ Autotest.scenario "a step onto a Cut tree with no key is told",
   caps = %w[money_claims trainer_proof save_ack badge_hold badge_alone debug_lock presence_v2 swim_report field_report]
 
   rogue = s.rogue(:r, caps: caps)
+  rogue.send_env({ type: :team_check, seq: 1, team: [{ "species" => "RATTATA", "level" => 30, "moves" => ["TACKLE"] }] })
+  rogue.wait_for(:team_ack)
   rogue.send_env({ type: :pos, map: 1, x: 9, y: 7, dir: 2, mode: :walk })              # elsewhere first
   rogue.send_env({ type: :pos, map: ROUTE3_097, x: 16, y: 14, dir: 6, mode: :walk })
   rogue.send_env({ type: :pos, map: ROUTE3_097, x: 17, y: 14, dir: 6, mode: :walk })   # onto the tree
@@ -19,7 +21,7 @@ Autotest.scenario "a step onto a Cut tree with no key is told",
   rogue.send_env({ type: :pos, map: ROUTE3_097, x: 22, y: 20, dir: 6, mode: :walk })   # onto the headbutt tree
   s.check("the Cut tree is told") do
     s.wait_for("the cut line", seconds: 10) do
-      s.server.grep(/fieldaudit: account #{rogue.account_id} crossed a cut gate \(event \d+\) with no key \(badge 1 needed; no Pokemon knowing CUT\) at 31\(17,14\)/).any?
+      s.server.grep(/fieldaudit: account #{rogue.account_id} crossed a cut gate \(event \d+\) with no key \((badge 1|1 badge) needed; no Pokemon knowing CUT\) at 31\(17,14\)/).any?
     end
   end
   s.check("the headbutt tree too") { s.server.grep(/fieldaudit: account #{rogue.account_id} crossed a headbutt tree at 31\(22,20\)/).any? }
