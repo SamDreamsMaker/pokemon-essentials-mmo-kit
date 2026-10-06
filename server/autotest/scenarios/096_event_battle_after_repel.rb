@@ -37,7 +37,7 @@ Autotest.scenario "an event's battle stays the game's after a repelled encounter
   a.walk_to!(45, 44, timeout: 60)
   s.check("the player stands on the Kecleon's tile") { a.state.dig("player", "x") == 45 && a.state.dig("player", "y") == 44 }
   a.interact!
-  a.converse
+  a.converse("Yes")                 # "Something unseeable is in the way. Want to use the Silph Scope?"
   foe = Array(a.state.dig("battle", "battlers")).find { |b| b["side"] == "foe" }
   s.check("the battle is the event's: a Kecleon at 30 (#{foe&.values_at('species', 'level').inspect})") do
     foe && foe["species"] == "KECLEON" && foe["level"] == 30
