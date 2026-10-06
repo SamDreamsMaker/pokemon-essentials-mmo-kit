@@ -360,6 +360,7 @@ class WorldDataTest < Minitest::Test
   def test_field_gates
     doc = sample
     assert_nil load(doc).field_gates, "an export before the gates"
+    assert_match(/connections, no field gates \(schema/, load(doc).summary)
     m = doc["maps"]["7"]
     m["obstacles"] = [{ "event" => 3, "x" => 1, "y" => 0, "move" => "CUT" }, { "x" => "bad" }, { "x" => 2, "y" => 0, "move" => "FLY" }]
     m["walls"] = [{ "event" => 4, "x" => 2, "y" => 1 }]
@@ -382,6 +383,7 @@ class WorldDataTest < Minitest::Test
     refute w.fall?(7, -1, 1), "a negative x is off the map, not the row's end"
     assert_equal({ badges: { cut: 1, rocksmash: 2, strength: 3, waterfall: 6 },
                    moves: { cut: true, rocksmash: false, strength: nil, waterfall: nil } }, w.field_gates)
+    assert_match(/field gates \(1 obstacles, 1 headbutt trees, 1 maps with falls\)/, w.summary)
     m["falls"] = ["ff"]   # not the map's size
     doc["field_gates"]["badges"]["cut"] = "1"
     w = load(doc)

@@ -501,7 +501,9 @@ module PEMK
       "#{@maps.size} maps, #{@by_tile.size} objects, #{@passable.size} passgrids, " \
         "#{@ledges.values.sum(&:size)} ledges, #{@water.size} water grids, #{@dive_maps.size} dive maps, " \
         "#{@warps_by_map.values.sum(&:size)} warps, " \
-        "#{@connections.size} connections (schema v#{SCHEMA_VERSION})"
+        "#{@connections.size} connections, #{@field_gates ? "field gates (#{@obstacles.size} obstacles, " \
+                                                             "#{@walls.size} headbutt trees, #{@falls.size} maps with falls)" : 'no field gates'} " \
+        "(schema v#{SCHEMA_VERSION})"
     end
 
     private
